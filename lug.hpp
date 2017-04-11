@@ -1,4 +1,4 @@
-// lug - Embedded DSL for PE grammar parsers
+// lug - Embedded DSL for PE grammar parsers in C++
 // Copyright (c) 2017 Jesse W. Towner
 
 #ifndef LUG_HPP
@@ -12,7 +12,6 @@
 #include <memory>
 #include <numeric>
 #include <regex>
-#include <stack>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -88,8 +87,40 @@ struct syntax_match
 	std::string to_string() const { return std::string{first, last}; }
 };
 
-typedef std::stack<std::any> attribute_stack;
-typedef std::function<void(const syntax_match&, attribute_stack&)> syntax_action;
+class semantic_environment;
+typedef std::function<void(semantic_environment&)> semantic_action;
+typedef std::function<void(semantic_environment&, const syntax_match&)> syntax_action;
+
+class semantic_environment
+{
+public:
+	void accept()
+	{
+		while (!actions_.empty()) {
+			semantic_action a{std::move(actions_.front())};
+			actions_.pop_front();
+			a(*this);
+		}
+	}
+
+	void clear()
+	{
+		actions_.clear();
+		attributes_.clear();
+	}
+
+	size_t action_count() const noexcept { return actions_.size(); }
+	void drop_actions_after(size_t n) { actions_.resize(n); }
+	void push_action(semantic_action a) { actions_.push_back(std::move(a)); }
+
+	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(::std::in_place_type<T>, ::std::forward<T>(x)); }
+	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(::std::in_place_type<T>, ::std::forward<Args>(args)...); }
+	template <class T> T pop_attribute() { T r{std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+
+private:
+	std::deque<semantic_action> actions_;
+	std::vector<std::any> attributes_;
+};
 
 class parser;
 typedef std::function<void(parser&)> error_handler;
@@ -179,10 +210,8 @@ public:
 				handler(*this);
 			result = false;
 		}
-		if (result) {
-			for (const auto& m : matches_)
-				(m.first)(m.second, attributes_);
-		}
+		if (result)
+			semantics_.accept();
 		return result;
 	}
 
@@ -218,9 +247,9 @@ public:
 		}
 	}
 
-	void push_match(state& s, const syntax_action& a)
+	void push_syntax_match(state& s, syntax_action a)
 	{
-		matches_.push_back(std::make_pair(a, syntax_match{std::get<0>(s), begin_, std::get<2>(s), position_}));
+		semantics_.push_action([a = std::move(a), m = syntax_match{std::get<0>(s), begin_, std::get<2>(s), position_}](semantic_environment& e) { a(e, m); });
 	}
 
 	void enter(const grammar_rule& r)
@@ -241,13 +270,13 @@ public:
 	{
 		std::pair<bool, bool> readjust;
 		std::tie(begin_, end_, position_, rule_depth_, std::ignore, readjust) = state;
-		matches_.resize(std::get<4>(state));
+		semantics_.drop_actions_after(std::get<4>(state));
 		readjust_iterators(readjust);
 	}
 
 	state save() const noexcept
 	{
-		return {begin_, end_, position_, rule_depth_, matches_.size(), should_readjust_iterators()};
+		return {begin_, end_, position_, rule_depth_, semantics_.action_count(), should_readjust_iterators()};
 	}
 
 	bool empty() const noexcept { return begin_ >= end_; }
@@ -261,6 +290,7 @@ public:
 	const syntax_position& position() const noexcept { return position_; }
 	const syntax_position& max_position() const noexcept { return max_position_; }
 	size_t rule_depth() const noexcept { return rule_depth_; }
+	semantic_environment& semantics() noexcept { return semantics_; }
 
 private:
 	std::pair<bool, bool> should_readjust_iterators() const noexcept
@@ -300,7 +330,7 @@ private:
 		position_ = {1, 1};
 		max_position_ = {1, 1};
 		rule_depth_ = 0;
-		matches_.clear();
+		semantics_.clear();
 	}
 
 private:
@@ -317,8 +347,7 @@ private:
 	bool reading_;
 	syntax_buffer buffer_;
 	std::vector<std::function<bool(std::string&)>> sources_;
-	std::vector<std::pair<syntax_action, syntax_match>> matches_;
-	attribute_stack attributes_;
+	semantic_environment semantics_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
@@ -480,10 +509,10 @@ private:
 	parse_handler handler_;
 };
 
-class action_rule : public unary_rule
+class semantic_action_rule : public unary_rule
 {
 public:
-	explicit action_rule(grammar_rule* r, syntax_action action)
+	explicit semantic_action_rule(grammar_rule* r, semantic_action action)
 		: unary_rule{r}, action_{std::move(action)} {}
 
 protected:
@@ -491,7 +520,29 @@ protected:
 	{
 		auto state = p.save();
 		if (rule()->apply(p)) {
-			p.push_match(state, action_);
+			p.semantics().push_action(action_);
+			return true;
+		}
+		p.restore(state);
+		return false;
+	}
+
+private:
+	semantic_action action_;
+};
+
+class syntax_action_rule : public unary_rule
+{
+public:
+	explicit syntax_action_rule(grammar_rule* r, syntax_action action)
+		: unary_rule{r}, action_{std::move(action)} {}
+
+protected:
+	bool eval(parser& p) override
+	{
+		auto state = p.save();
+		if (rule()->apply(p)) {
+			p.push_syntax_match(state, action_);
 			return true;
 		}
 		p.restore(state);
@@ -617,7 +668,7 @@ namespace language
 
 using lug::grammar;
 typedef const lug::syntax_match& match;
-typedef lug::attribute_stack& attributes;
+typedef lug::semantic_environment& semantics;
 
 namespace detail
 {
@@ -740,7 +791,8 @@ inline rule operator+(rule r) { return rule{detail::environment::make<sequence_r
 inline rule operator~(rule r) { return rule{detail::environment::make<choice_rule>(r.get(), char_rule::empty())}; }
 inline rule operator&(rule r) { return rule{detail::environment::make<not_rule>(detail::environment::make<not_rule>(r.get()))}; }
 inline rule operator!(rule r) { return rule{detail::environment::make<not_rule>(r.get())}; }
-inline rule operator<(rule r, syntax_action action) { return rule{detail::environment::make<action_rule>(r.get(), std::move(action))}; }
+inline rule operator<(rule r, semantic_action a) { return rule{detail::environment::make<semantic_action_rule>(r.get(), std::move(a))}; }
+inline rule operator<(rule r, syntax_action a) { return rule{detail::environment::make<syntax_action_rule>(r.get(), std::move(a))}; }
 inline detail::expr<sequence_rule> operator>(rule r1, rule r2) { return detail::expr<sequence_rule>{r1.get(), r2.get()}; }
 inline detail::expr<sequence_rule>& operator>(detail::expr<sequence_rule>& r1, rule r2) { return r1.append(r2.get()); }
 inline detail::expr<choice_rule> operator|(rule r1, rule r2) { return detail::expr<choice_rule>{r1.get(), r2.get()}; }
@@ -748,52 +800,41 @@ inline detail::expr<choice_rule>& operator|(detail::expr<choice_rule>& r1, rule 
 
 inline detail::expr<sequence_rule> operator>=(rule r1, rule r2)
 {
-	return r1 < [](match m, attributes s) { s.emplace(m.to_string()); } > r2;
+	return r1 < [](semantics s, match m) { s.push_attribute(m.to_string()); } > r2;
 }
 
 template <class Action>
 inline auto operator<=(rule r, Action a) -> decltype(a(::std::declval<std::string>()),
 	typename std::enable_if<std::is_same<typename std::result_of<Action(std::string)>::type, void>::value, rule>::type())
 {
-	return r < [a](match m, attributes s) {
-		std::string l{std::any_cast<std::string>(s.top())};
-		s.pop();
-		a(l);
-	};
+	return r < [a = std::move(a)](semantics s) { a(s.pop_attribute<std::string>()); };
 }
 
 template <class Action>
 inline auto operator<=(rule r, Action a) -> decltype(a(::std::declval<std::string>()),
 	typename std::enable_if<!std::is_same<typename std::result_of<Action(std::string)>::type, void>::value, rule>::type())
 {
-	return r < [a](match m, attributes s) {
-		std::string l{std::any_cast<std::string>(s.top())};
-		s.pop();
-		s.push(std::make_any<typename std::result_of<Action(std::string)>::type>(a(l)));
-	};
+	return r < [a = std::move(a)](semantics s) { s.push_attribute(a(s.pop_attribute<std::string>())); };
 }
 
 template <class Attribute>
 inline rule operator%(Attribute& l, rule r)
 {
-	return r < [&l](match, attributes s) {
-		l = std::any_cast<Attribute>(s.top());
-		s.pop();
-	};
+	return r < [&l](semantics s) { l = s.pop_attribute<Attribute>(); };
 }
 
 template <class Action>
 inline auto operator<(rule r, Action a) -> decltype(a(),
 	typename std::enable_if<std::is_same<typename std::result_of<Action()>::type, void>::value, rule>::type())
 {
-	return r < [a](match, attributes s) { a(); };
+	return r < [a = std::move(a)](semantics s) { a(); };
 }
 
 template <class Action>
 inline auto operator<(rule r, Action a) -> decltype(a(),
 	typename std::enable_if<!std::is_same<typename std::result_of<Action()>::type, void>::value, rule>::type())
 {
-	return r < [a](match, attributes s) { s.push(std::make_any<typename std::result_of<Action()>::type>(a())); };
+	return r < [a = std::move(a)](semantics s) { s.push_attribute(a()); };
 }
 
 } // namespace language
