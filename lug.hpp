@@ -39,7 +39,7 @@ constexpr bool is_lead(char c) noexcept
 template <class InputIt>
 constexpr std::size_t count_runes(InputIt first, InputIt last)
 {
-	return std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c) ? 1 : 0; });
+	return std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c); });
 }
 
 template <class InputIt>
@@ -124,8 +124,8 @@ union instruction
 		const prefix pf = code[pc++].pf;
 		imm = pf.imm;
 		off = (pf.ctrl & control::off) == control::off ? code[pc++].off : 0;
-		str = std::string_view{code[pc].str, str_size_octets(pf.ctrl)};
-		pc += static_cast<std::ptrdiff_t>(str_length(pf.ctrl));
+		str = std::string_view{code[pc].str, static_cast<std::size_t>(str_size_octets(pf.ctrl))};
+		pc += str_length(pf.ctrl);
 		return pf.op;
 	}
 };
@@ -182,7 +182,7 @@ struct program
 namespace expr
 {
 
-// NOTE: remove this after std::is_invocable becomes available in MSVC++ 2017
+// NOTE: remove this after std::is_invocable becomes available in both libc++ and MSVC++ 2017
 template <typename AlwaysVoid, typename, typename...> struct is_invocable_impl : std::false_type {};
 template <typename F, typename...Args> struct is_invocable_impl<decltype(void(::std::invoke(::std::declval<F>(), ::std::declval<Args>()...))), F, Args...> : std::true_type {};
 template <class F, class... ArgTypes> struct is_invocable : is_invocable_impl<void, F, ArgTypes...> {};
@@ -190,11 +190,10 @@ template <class F, class... ArgTypes> constexpr bool is_invocable_v = is_invocab
 
 class evaluator;
 class rule_evaluator;
-struct expression {};
-template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
+template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<vm::program, E>;
 template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
 template <class E> constexpr bool is_terminal_v = std::is_convertible_v<E, term>;
-template <class E> constexpr bool is_proper_expression_v = std::is_base_of_v<expression, std::remove_reference_t<E>> || is_invocable_v<E, evaluator&>;
+template <class E> constexpr bool is_proper_expression_v = is_invocable_v<E, evaluator&>;
 template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_terminal_v<E> || std::is_same_v<char, E>;
 
 } // namespace expr
@@ -357,35 +356,35 @@ class rule_evaluator : public program_evaluator
 	virtual void do_add_dependency(const rule* r) { rule_.dependencies_.insert(r); }
 	virtual void do_add_reference(const vm::program* p, std::ptrdiff_t off) { rule_.references_.push_back(std::make_pair(p, off)); }
 public:
-	explicit rule_evaluator(rule& r) : program_evaluator{rule_.program_}, rule_{r} {}
+	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
 };
 
 template <class E> std::ptrdiff_t program_length(const E& e) { return program_length_evaluator{}.evaluate(e).length(); }
 
-struct any_expression : expression
+struct any_expression
 {
 	void operator()(evaluator& v) const { v.encode(vm::opcode::match_any); }
 };
 
-struct char_expression : expression
+struct char_expression
 {
 	char c;
 	void operator()(evaluator& v) const { v.encode(vm::opcode::match, std::string_view{&c, 1}); }
 };
 
-struct empty_expression : expression
+struct empty_expression
 {
 	void operator()(evaluator& v) const { v.encode(vm::opcode::match); }
 };
 
 template <class Target>
-struct call_expression : expression
+struct call_expression
 {
 	const Target& target;
 	void operator()(evaluator& v) const { v.call(target); }
 };
 
-class term_expression : public expression
+class term_expression
 {
 public:
 	term_expression(const term& t) { compile_term(t.str()); }
@@ -465,7 +464,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
 		ev.encode(vm::opcode::choice, 3 + program_length(x)).evaluate(x).encode(vm::opcode::commit, 1).encode(vm::opcode::fail);
-	}
+	};
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -473,35 +472,35 @@ inline auto operator*(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
 		const std::ptrdiff_t xlen = program_length(x);
 		ev.encode(vm::opcode::choice, 2 + xlen).evaluate(x).encode(vm::opcode::commit, -(xlen + 4));
-	}
+	};
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.choice(program_length(x1)).evaluate(x1).commit(program_length(x2)).evaluate(x2);
-	}
+		ev.encode(vm::opcode::choice, program_length(x1)).evaluate(x1).encode(vm::opcode::commit, program_length(x2)).evaluate(x2);
+	};
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2> && !(is_terminal_v<E1> && is_terminal_v<E2>)>>
 inline auto operator>(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
 		ev.evaluate(x1).evaluate(x2);
-	}
+	};
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(E&& e, semantic_action a) {
 	return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 		ev.evaluate(x).encode(vm::opcode::action, a);
-	}
+	};
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(E&& e, syntax_action a) {
 	return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 		ev.encode(vm::opcode::begin_capture).evaluate(x).encode(vm::opcode::end_capture, a);
-	}
+	};
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
@@ -532,14 +531,14 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 
 } // namespace expr
 
-template <class E, class> inline rule::rule(const E& e) { expr::evaluate{*this, e); }
+template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
 inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
 
 inline grammar start(const rule& start_rule)
 {
-	program p;
-	std::unordered_map<const program*, std::size_t> addresses;
-	std::vector<std::pair<const program*, std::size_t>> references;
+	vm::program p;
+	std::unordered_map<const vm::program*, std::ptrdiff_t> addresses;
+	std::vector<std::pair<const vm::program*, std::ptrdiff_t>> references;
 	std::unordered_set<const rule*> visited;
 	std::stack<const rule*> unprocessed;
 	unprocessed.push(&start_rule);
@@ -549,16 +548,16 @@ inline grammar start(const rule& start_rule)
 		if (visited.count(r) != 0)
 			continue;
 		visited.insert(r);
-		auto addr = addresses.emplace(&r->program_, p.instructions.size());
+		auto addr = addresses.emplace(&r->program_, static_cast<std::ptrdiff_t>(p.instructions.size()));
 		if (addr.second) {
 			p.concatenate(r->program_);
-			p.instructions.emplace_back(opcode::ret, 0, 0);
+			p.instructions.emplace_back(vm::opcode::ret, 0, 0);
 		}
 		for (auto ref : r->references_) {
 			references.emplace_back(ref.first, ref.second + addr.first->second);
-			if (addresses.emplace(ref.first, p.instructions.size()).second) {
+			if (addresses.emplace(ref.first, static_cast<std::ptrdiff_t>(p.instructions.size())).second) {
 				p.concatenate(*ref.first);
-				p.instructions.emplace_back(opcode::ret, 0, 0);
+				p.instructions.emplace_back(vm::opcode::ret, 0, 0);
 			}
 		}
 		for (auto dep : r->dependencies_)
@@ -566,7 +565,7 @@ inline grammar start(const rule& start_rule)
 	}
 	for (auto ref : references) {
 		instruction& instr = p.instructions[ref.second];
-		std::ptrdiff_t reladdr = instr.off + static_cast<std::ptrdiff_t>(addresses[ref.first]) - static_cast<std::ptrdiff_t>(ref.second);
+		std::ptrdiff_t reladdr = instr.off + addresses[ref.first] - ref.second;
 		if (reladdr < std::numeric_limits<int>::lowest() || std::numeric_limits<int>::max() < reladdr)
 			throw grammar_error("program offset exceeds addressable range");
 		instr.off = static_cast<int>(reladdr);
