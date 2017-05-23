@@ -9,17 +9,24 @@
 #include <functional>
 #include <deque>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <numeric>
-#include <regex>
+#include <stack>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace lug
 {
+
+class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
+class grammar_error : public lug_error { using lug_error::lug_error; };
+class parser_error : public lug_error { using lug_error::lug_error; };
+class program_error : public lug_error { using lug_error::lug_error; };
 
 namespace utf8
 {
@@ -30,72 +37,219 @@ constexpr bool is_lead(char c) noexcept
 }
 
 template <class InputIt>
-constexpr size_t length(InputIt first, InputIt last)
+constexpr std::size_t count_runes(InputIt first, InputIt last)
 {
-	return std::accumulate(first, last, size_t{0}, [&](size_t l, char c) { return l + is_lead(c) ? 1 : 0; });
+	return std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c) ? 1 : 0; });
 }
 
 template <class InputIt>
-constexpr InputIt next(InputIt first, InputIt last)
+constexpr InputIt next_rune(InputIt first, InputIt last)
 {
 	return first != last ? std::find_if(std::next(first), last, is_lead) : last;
 }
 
-} // namespace utf8
-
-class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
-class grammar_error : public lug_error { using lug_error::lug_error; };
-class parser_error : public lug_error { using lug_error::lug_error; };
-
-namespace detail
+template <class InputIt>
+constexpr std::size_t size_of_first_rune(InputIt first, InputIt last)
 {
-
-template <class Error, class Condition>
-inline void assert_throw(const Condition& cond, const char* msg)
-{
-	if (!cond)
-		throw Error(msg);
+	return static_cast<std::size_t>(std::distance(first, next_rune(first, last)));
 }
+
+template <class Input>
+inline std::size_t size_of_first_rune(Input input, std::size_t pos, std::size_t len)
+{
+	auto first = std::next(std::cbegin(input), static_cast<std::ptrdiff_t>(pos));
+	auto last = std::next(first, static_cast<std::ptrdiff_t>(len));
+	return size_of_first_rune(first, last);
+}
+
+} // namespace utf8
 
 template <class Error>
 struct reentrancy_sentinel
 {
 	bool& value;
-	explicit reentrancy_sentinel(bool& x, const char* msg) : value{x} { assert_throw<Error>(!value, msg); value = true; }
-	reentrancy_sentinel(const reentrancy_sentinel&) = delete;
-	reentrancy_sentinel& operator=(const reentrancy_sentinel&) = delete;
+	reentrancy_sentinel(bool& x, const char* msg) : value{x} { if (value) throw Error{msg}; value = true; }
 	~reentrancy_sentinel() { value = false; }
 };
 
-} // namespace detail
+struct syntax_position { std::size_t column, line; };
+struct syntax_range { std::size_t index, length; };
+struct syntax_view { std::string_view match; syntax_position start, end; };
 
-typedef std::deque<char> syntax_buffer;
-typedef syntax_buffer::const_iterator syntax_iterator;
-
-struct syntax_position
-{
-	size_t column;
-	size_t line;
-};
-
-struct syntax_match
-{
-	syntax_iterator first;
-	syntax_iterator last;
-	syntax_position start;
-	syntax_position end;
-	std::string to_string() const { return std::string{first, last}; }
-};
+class parser;
+typedef std::function<void(parser&)> parser_error_handler;
+typedef std::function<bool(parser&)> parser_predicate;
 
 class semantic_environment;
 typedef std::function<void(semantic_environment&)> semantic_action;
-typedef std::function<void(semantic_environment&, const syntax_match&)> syntax_action;
+typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
+
+class term;
+class rule;
+class grammar;
+
+namespace vm
+{
+
+enum class immediate : unsigned short { zero = 0 };
+
+enum class opcode : unsigned char
+{
+	match, match_any, match_class, match_range,
+	choice, commit, jump, call,
+	ret, fail, accept, newline,
+	predicate, action, begin_capture, end_capture
+};
+
+union instruction
+{
+	enum class control : unsigned char { normal = 0, off = 0x80, str = 0x7F };
+	friend control operator&(control x, control y) { return static_cast<control>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
+	static std::ptrdiff_t str_size_octets(control ctrl) { return static_cast<std::ptrdiff_t>(ctrl & control::str); }
+	static std::ptrdiff_t str_length(control ctrl) { return str_size_octets(ctrl) / 4; }
+	static std::ptrdiff_t off_length(control ctrl) { return static_cast<std::ptrdiff_t>(static_cast<unsigned char>(ctrl) >> 7); }
+	static std::ptrdiff_t aux_length(control ctrl) { return off_length(ctrl) + str_length(ctrl); }
+	static std::ptrdiff_t length(control ctrl) { return 1 + aux_length(ctrl); }
+
+	struct prefix { opcode op; control ctrl; unsigned short imm; } pf;
+	int off;
+	char str[4];
+
+	instruction(opcode op, control ctrl, immediate imm) : pf{op, ctrl, static_cast<unsigned short>(imm)} {}
+	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_error{"offset exceeds allowable range"}; }
+	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), &str[0]), &str[4], char{0}); }
+
+	static opcode decode(const instruction* code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str)
+	{
+		const prefix pf = code[pc++].pf;
+		imm = pf.imm;
+		off = (pf.ctrl & control::off) == control::off ? code[pc++].off : 0;
+		str = std::string_view{code[pc].str, str_size_octets(pf.ctrl)};
+		pc += static_cast<std::ptrdiff_t>(str_length(pf.ctrl));
+		return pf.op;
+	}
+};
+
+static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
+static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
+
+struct program
+{
+	std::vector<instruction> instructions;
+	std::vector<parser_error_handler> error_handlers;
+	std::vector<parser_predicate> predicates;
+	std::vector<semantic_action> semantic_actions;
+	std::vector<syntax_action> syntax_actions;
+
+	void concatenate(const program& src) {
+		instructions.reserve(instructions.size() + src.instructions.size());
+		for (auto i = src.instructions.begin(), j = i, e = src.instructions.end(); i != e; i = j) {
+			instruction instr = *i;
+			std::size_t immoffset;
+			switch (instr.pf.op) {
+				case opcode::predicate: immoffset = predicates.size(); break;
+				case opcode::action: immoffset = semantic_actions.size(); break;
+				case opcode::end_capture: immoffset = syntax_actions.size(); break;
+				default: immoffset = 0; break;
+			}
+			if (immoffset != 0) {
+				std::size_t imm = instr.pf.imm + immoffset;
+				if (immoffset <= imm || imm > (std::numeric_limits<unsigned short>::max)())
+					throw program_error("immediate value exceeds 16-bit limit");
+				instr.pf.imm = static_cast<unsigned short>(imm);
+			}
+			j = std::next(++i, instruction::aux_length(instr.pf.ctrl));
+			instructions.push_back(instr);
+			instructions.insert(instructions.end(), i, j);
+		}
+		error_handlers.insert(error_handlers.end(), src.error_handlers.begin(), src.error_handlers.end());
+		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
+		semantic_actions.insert(semantic_actions.end(), src.semantic_actions.begin(), src.semantic_actions.end());
+		syntax_actions.insert(syntax_actions.end(), src.syntax_actions.begin(), src.syntax_actions.end());
+	}
+
+	void swap(program& p) {
+		instructions.swap(p.instructions);
+		error_handlers.swap(p.error_handlers);
+		predicates.swap(p.predicates);
+		semantic_actions.swap(p.semantic_actions);
+		syntax_actions.swap(p.syntax_actions);
+	}
+};
+
+} // namespace vm
+
+namespace expr
+{
+
+// NOTE: remove this after std::is_invocable becomes available in MSVC++ 2017
+template <typename AlwaysVoid, typename, typename...> struct is_invocable_impl : std::false_type {};
+template <typename F, typename...Args> struct is_invocable_impl<decltype(void(::std::invoke(::std::declval<F>(), ::std::declval<Args>()...))), F, Args...> : std::true_type {};
+template <class F, class... ArgTypes> struct is_invocable : is_invocable_impl<void, F, ArgTypes...> {};
+template <class F, class... ArgTypes> constexpr bool is_invocable_v = is_invocable<F, ArgTypes...>::value;
+
+class evaluator;
+class rule_evaluator;
+struct expression {};
+template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
+template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
+template <class E> constexpr bool is_terminal_v = std::is_convertible_v<E, term>;
+template <class E> constexpr bool is_proper_expression_v = std::is_base_of_v<expression, std::remove_reference_t<E>> || is_invocable_v<E, evaluator&>;
+template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_terminal_v<E> || std::is_same_v<char, E>;
+
+} // namespace expr
+
+class term
+{
+public:
+	term() noexcept = default;
+	term(const char* s) : str_{s} {}
+	term(const char* s, std::size_t n) : str_{s, n} {}
+	term(std::string s) : str_{std::move(s)} {}
+	term(std::string_view s) : str_{s} {}
+	void swap(term& t) { str_.swap(t.str_); }
+	const std::string& str() const noexcept { return str_; }
+private:
+	std::string str_;
+};
+
+class rule
+{
+	friend class expr::evaluator;
+	friend class expr::rule_evaluator;
+	friend grammar start(const rule&);
+public:
+	rule() = default;
+	template <class E, class = std::enable_if_t<expr::is_expression_v<E>>> rule(const E& e);
+	rule(const rule& r);
+	rule(rule&& r) = default;
+	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
+	rule& operator=(rule&& r) = default;
+	void swap(rule& r) { program_.swap(r.program_); references_.swap(r.references_); dependencies_.swap(r.dependencies_); }
+private:
+	vm::program program_;
+	std::vector<std::pair<const vm::program*, std::ptrdiff_t>> references_;
+	std::unordered_set<const rule*> dependencies_;
+};
+
+class grammar
+{
+	friend grammar start(const rule&);
+public:
+	grammar() = default;
+	void swap(grammar& g) { program_.swap(g.program_); }
+	const vm::program& program() const noexcept { return program_; };
+private:
+	grammar(vm::program p) : program_{std::move(p)} {}
+	vm::program program_;
+};
 
 class semantic_environment
 {
 public:
-	void accept()
+	void accept(std::string_view c)
 	{
+		capture_ = c;
 		while (!actions_.empty()) {
 			semantic_action a{std::move(actions_.front())};
 			actions_.pop_front();
@@ -107,263 +261,585 @@ public:
 	{
 		actions_.clear();
 		attributes_.clear();
+		capture_ = std::string_view{};
 	}
 
-	size_t action_count() const noexcept { return actions_.size(); }
-	void drop_actions_after(size_t n) { actions_.resize(n); }
+	std::size_t action_count() const noexcept { return actions_.size(); }
 	void push_action(semantic_action a) { actions_.push_back(std::move(a)); }
+	void pop_action() { actions_.pop_back(); }
+	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
+	void skip_action() { actions_.pop_front(); }
 
-	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(::std::in_place_type<T>, ::std::forward<T>(x)); }
-	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(::std::in_place_type<T>, ::std::forward<Args>(args)...); }
-	template <class T> T pop_attribute() { T r{std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+	template <class T> void push_attribute(void) {}
+	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
+	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
+	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+
+	const std::string_view& capture() const { return capture_; }
 
 private:
 	std::deque<semantic_action> actions_;
 	std::vector<std::any> attributes_;
+	std::string_view capture_;
 };
 
-class parser;
-typedef std::function<void(parser&)> error_handler;
-typedef std::function<bool(parser&)> parse_handler;
-
-class grammar_rule : public std::enable_shared_from_this<grammar_rule>
+namespace expr
 {
+
+class evaluator
+{
+	virtual std::ptrdiff_t do_length() const noexcept = 0;
+	virtual void do_append(vm::instruction instr) = 0;
+	virtual void do_add_dependency(const rule*) {}
+	virtual void do_add_reference(const vm::program*, std::ptrdiff_t) {}
+
 public:
-	grammar_rule(const grammar_rule&) = delete;
-	grammar_rule& operator=(const grammar_rule&) = delete;
-	virtual ~grammar_rule() {}
-	virtual bool is_terminal() const { return false; }
-	bool apply(parser& p);
-protected:
-	grammar_rule() = default;
-	virtual bool eval(parser& p) = 0;
+	evaluator() = default;
+	virtual ~evaluator() {}
+
+	evaluator& append(vm::instruction instr)
+	{
+		do_append(instr);
+		return *this;
+	}
+
+	template <class InputIt>
+	evaluator& append(InputIt first, InputIt last)
+	{
+		for ( ; first != last; ++first)
+			do_append(*first);
+		return *this;
+	}
+
+	evaluator& encode(vm::opcode op, vm::immediate imm = vm::immediate::zero)
+	{
+		return append(vm::instruction{op, vm::instruction::control::normal, imm});
+	}
+
+	evaluator& encode(vm::opcode op, std::ptrdiff_t off, vm::immediate imm = vm::immediate::zero)
+	{
+		return append(vm::instruction{op, vm::instruction::control::off, imm}).append(vm::instruction{off});
+	}
+
+	template <class E>
+	auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>
+	{
+		make_expression(e)(*this);
+		return *this;
+	}
+
+	std::ptrdiff_t length() const noexcept { return do_length(); }
+	evaluator& call(const vm::program& p) { do_add_reference(&p, length() + 1); return encode(vm::opcode::call, -1); }
+	evaluator& call(const rule& r) { do_add_dependency(&r); return call(r.program_); }
+	evaluator& call(const grammar& g) { return call(g.program()); }
+	//evaluator& match(char c) { return emplace(opcode::match, 1, 0).emplace(std::string_view{&c, 1}); }
 };
 
-typedef std::unordered_set<std::shared_ptr<grammar_rule>> grammar_rule_set;
+class program_length_evaluator : public evaluator
+{
+	std::ptrdiff_t length_ = 0;
+	std::ptrdiff_t do_length() const noexcept override { return length_; }
+	void do_append(vm::instruction instr) override { if (length_++ >= (std::numeric_limits<std::ptrdiff_t>::max)()) throw grammar_error{"program length exceeds limits"}; }
+};
 
-void visit_depth_first(grammar_rule* start, const std::function<void(grammar_rule&)>& visitor);
+class program_evaluator : public evaluator
+{
+	vm::program& program_;
+	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
+	void do_append(vm::instruction instr) override { program_.instructions.push_back(instr); }
+public:
+	explicit program_evaluator(vm::program& p) : program_{p} {}
+};
 
-class grammar
+class rule_evaluator : public program_evaluator
+{
+	rule& rule_;
+	virtual void do_add_dependency(const rule* r) { rule_.dependencies_.insert(r); }
+	virtual void do_add_reference(const vm::program* p, std::ptrdiff_t off) { rule_.references_.push_back(std::make_pair(p, off)); }
+public:
+	explicit rule_evaluator(rule& r) : program_evaluator{rule_.program_}, rule_{r} {}
+};
+
+template <class E> std::ptrdiff_t program_length(const E& e) { return program_length_evaluator{}.evaluate(e).length(); }
+
+struct any_expression : expression
+{
+	void operator()(evaluator& v) const { v.encode(vm::opcode::match_any); }
+};
+
+struct char_expression : expression
+{
+	char c;
+	void operator()(evaluator& v) const { v.encode(vm::opcode::match, std::string_view{&c, 1}); }
+};
+
+struct empty_expression : expression
+{
+	void operator()(evaluator& v) const { v.encode(vm::opcode::match); }
+};
+
+template <class Target>
+struct call_expression : expression
+{
+	const Target& target;
+	void operator()(evaluator& v) const { v.call(target); }
+};
+
+class term_expression : public expression
 {
 public:
-	grammar() : start_{nullptr} {}
-	explicit grammar(std::shared_ptr<grammar_rule_set>& rs, grammar_rule* start) : rules_(std::move(rs)), start_{start} {}
-	grammar_rule* start_rule() const { return start_; }
-	void start_rule(grammar_rule* start) { start_ = start; }
-	const std::shared_ptr<grammar_rule_set>& rule_set() const { return rules_; }
-	void rule_set(std::shared_ptr<grammar_rule_set> rs) { rules_ = std::move(rs); }
-	const lug::error_handler& error_handler() const { return error_handler_; }
-	void error_handler(lug::error_handler handler) { error_handler_ = std::move(handler); }
-	void visit_depth_first(const std::function<void(grammar_rule&)>& visitor) { return lug::visit_depth_first(start_, visitor); }
+	term_expression(const term& t) { compile_term(t.str()); }
+	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
+
 private:
-	std::shared_ptr<grammar_rule_set> rules_;
-	grammar_rule* start_;
-	lug::error_handler error_handler_;
+	void compile_term(const std::string& s)
+	{
+		// TODO: replace this all with a pre-compiled program once parser engine is working
+		if (s.empty()) {
+			instructions_.emplace_back(vm::opcode::match, 0, 0);
+			return;
+		}
+		std::string::size_type i = 0, j = 0, k = 0;
+		for (;;) {
+			k = s.find_first_of(".[", j);
+			compile_sequence_match(std::string_view{s}.substr(i, k < std::string::npos ? k - i : k));
+			if (k == std::string::npos)
+				break;
+			if (s[k] == '.') {
+				instructions_.emplace_back(vm::opcode::match_any, 0, 0);
+			} else {
+				i = (j = k)++;
+				j += j < s.size() && s[j] == '^';
+				j += j < s.size() && s[j] == ']';
+				k = s.find_first_of(']', j);
+				if (k == std::string::npos) throw grammar_error{"expected closing bracket ']'"};
+				// bracket from i+1 k-1
+			}
+			i = j = k + 1;
+		}
+	}
+
+	void compile_sequence_match(std::string_view sequence)
+	{
+		while (sequence.size() >= 128) {
+			std::string_view subsequence = sequence.substr(0, 128);
+			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
+				subsequence.remove_suffix(1);
+			subsequence.remove_suffix(!subsequence.empty());
+			compile_subsequence_match(subsequence);
+			sequence.remove_prefix(subsequence.size());
+		}
+		if (!sequence.empty())
+			compile_subsequence_match(sequence);
+	}
+
+	void compile_subsequence_match(std::string_view subsequence)
+	{
+		if (static_cast<std::size_t>(vm::instruction::control::str) <= subsequence.size())
+			throw grammar_error{"subsequence exceeds allowed number of UTF8 octets"};
+		instructions_.emplace_back(vm::opcode::match, static_cast<unsigned char>(subsequence.size()),
+			static_cast<unsigned short>(utf8::count_runes(subsequence.cbegin(), subsequence.cend())));
+		while (!subsequence.empty()) {
+			instructions_.emplace_back(subsequence);
+			subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
+		}
+	}
+
+	std::vector<vm::instruction> instructions_;
 };
 
-class tracer
-{
-public:
-	virtual ~tracer() {}
-	virtual void enter(const parser& p, const grammar_rule& r) = 0;
-	virtual void leave(const parser& p, const grammar_rule& r, bool success) = 0;
-};
+template <class T> inline auto make_expression(const T& t) -> std::enable_if_t<is_proper_expression_v<T>, const T&> { return t; }
+template <class T> inline auto make_expression(const T& t) -> std::enable_if_t<is_callable_v<T>, call_expression<T>> { return call_expression<T>{t}; }
+template <class T> inline auto make_expression(const T& t) -> std::enable_if_t<std::is_same_v<char, T>, char_expression> { return char_expression{t}; }
+template <class T> inline auto make_expression(T&& t) -> std::enable_if_t<is_terminal_v<T>, term_expression> { return term_expression{::std::forward<T>(t)}; }
+template <class T> struct make_expression_result { using type = decltype(make_expression(::std::declval<T>())); };
+template <class T> using make_expression_result_t = typename make_expression_result<T>::type;
 
-struct parser_options
+namespace operators
 {
-	lug::tracer* tracer = nullptr;
-};
+
+using semantics = lug::semantic_environment&;
+using syntax = const lug::syntax_view&;
+
+template <class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator!(E&& e) {
+	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
+		ev.encode(vm::opcode::choice, 3 + program_length(x)).evaluate(x).encode(vm::opcode::commit, 1).encode(vm::opcode::fail);
+	}
+}
+
+template <class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator*(E&& e) {
+	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
+		const std::ptrdiff_t xlen = program_length(x);
+		ev.encode(vm::opcode::choice, 2 + xlen).evaluate(x).encode(vm::opcode::commit, -(xlen + 4));
+	}
+}
+
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
+inline auto operator|(E1&& e1, E2&& e2) {
+	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
+		ev.choice(program_length(x1)).evaluate(x1).commit(program_length(x2)).evaluate(x2);
+	}
+}
+
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2> && !(is_terminal_v<E1> && is_terminal_v<E2>)>>
+inline auto operator>(E1&& e1, E2&& e2) {
+	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
+		ev.evaluate(x1).evaluate(x2);
+	}
+}
+
+template <class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator<(E&& e, semantic_action a) {
+	return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+		ev.evaluate(x).encode(vm::opcode::action, a);
+	}
+}
+
+template <class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator<(E&& e, syntax_action a) {
+	return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+		ev.encode(vm::opcode::begin_capture).evaluate(x).encode(vm::opcode::end_capture, a);
+	}
+}
+
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
+inline auto operator>=(E1&& e1, E2&& e2) {
+	return ::std::forward<E1>(e1) < [](semantics s, syntax x) { s.push_attribute(x.match); } > ::std::forward<E2>(e2);
+}
+
+template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator<=(E&& e, A a) -> decltype(a(::std::declval<std::string_view>()), ::std::forward<E>(e) < ::std::declval<semantic_action>()) {
+	return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { s.push_attribute(a(s.pop_attribute<std::string_view>())); };
+}
+
+template <class E, class A, class = std::enable_if_t<is_expression_v<E> && !std::is_same_v<A, semantic_action> && !std::is_same_v<A, syntax_action>>>
+inline auto operator<(E&& e, A a) -> decltype(a(), ::std::forward<E>(e) < ::std::declval<semantic_action>()) {
+	return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { s.push_attribute(a()); };
+}
+
+template <class T, class E, class = std::enable_if_t<std::is_move_assignable_v<T> && is_expression_v<E>>>
+inline auto operator%(T& x, E&& e) {
+	return ::std::forward<E>(e) < [&x](semantics s) { x = s.pop_attribute<T>(); };
+}
+
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_expression{}; }
+
+} // namespace operators
+
+} // namespace expr
+
+template <class E, class> inline rule::rule(const E& e) { expr::evaluate{*this, e); }
+inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
+
+inline grammar start(const rule& start_rule)
+{
+	program p;
+	std::unordered_map<const program*, std::size_t> addresses;
+	std::vector<std::pair<const program*, std::size_t>> references;
+	std::unordered_set<const rule*> visited;
+	std::stack<const rule*> unprocessed;
+	unprocessed.push(&start_rule);
+	while (!unprocessed.empty()) {
+		const rule* r = unprocessed.top();
+		unprocessed.pop();
+		if (visited.count(r) != 0)
+			continue;
+		visited.insert(r);
+		auto addr = addresses.emplace(&r->program_, p.instructions.size());
+		if (addr.second) {
+			p.concatenate(r->program_);
+			p.instructions.emplace_back(opcode::ret, 0, 0);
+		}
+		for (auto ref : r->references_) {
+			references.emplace_back(ref.first, ref.second + addr.first->second);
+			if (addresses.emplace(ref.first, p.instructions.size()).second) {
+				p.concatenate(*ref.first);
+				p.instructions.emplace_back(opcode::ret, 0, 0);
+			}
+		}
+		for (auto dep : r->dependencies_)
+			unprocessed.push(dep);
+	}
+	for (auto ref : references) {
+		instruction& instr = p.instructions[ref.second];
+		std::ptrdiff_t reladdr = instr.off + static_cast<std::ptrdiff_t>(addresses[ref.first]) - static_cast<std::ptrdiff_t>(ref.second);
+		if (reladdr < std::numeric_limits<int>::lowest() || std::numeric_limits<int>::max() < reladdr)
+			throw grammar_error("program offset exceeds addressable range");
+		instr.off = static_cast<int>(reladdr);
+	}
+	return grammar(std::move(p));
+}
 
 class parser
 {
 public:
-	typedef std::tuple<syntax_iterator, syntax_iterator, syntax_position, size_t, size_t, std::pair<bool, bool>> state;
+	struct options {};
 
-	parser(const grammar& g, const parser_options& o)
-		: grammar_{g}, options_(o), parsing_{false}, reading_{false} { reset(); }
-
-	template <class InputIt>
-	parser& enqueue(InputIt first, InputIt last)
+	parser(const grammar& g, const options& o)
+		: grammar_{g}, options_(o), parsing_{false}, reading_{false}
 	{
-		const auto readjust = should_readjust_iterators();
-		buffer_.insert(buffer_.end(), first, last);
-		readjust_iterators(readjust);
-		return *this;
-	}
-
-	template <class InputFunc>
-	parser& source(InputFunc&& func)
-	{
-		detail::assert_throw<parser_error>(!reading_, "new input source cannot be specified while reading from input sources");
-		sources_.emplace_back(::std::forward<InputFunc>(func));
-		return *this;
+		reset();
 	}
 
 	bool parse()
 	{
-		detail::reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
-		bool result = true;
-		reset();
-		if (!grammar_.start_rule()->apply(*this)) {
-			const auto& handler = grammar_.error_handler();
-			if (handler)
-				handler(*this);
-			result = false;
+		reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
+
+		const program& prog = grammar_.program();
+		const instruction* const instr = prog.instructions.data();
+		std::size_t ir, nr, cr, lr, ac, fc = 0;
+		std::ptrdiff_t pc;
+		unsigned short imm;
+		int off;
+		std::string_view str;
+
+		load_registers(ir, nr, cr, lr, ac, pc);
+
+		while (nr > 0 || read_more(ir, nr)) {
+			switch (instruction::decode(instr, pc, imm, off, str)) {
+				case opcode::match:
+					if (str.size() > 0) {
+						if (!available(str.size(), ir, nr))
+							goto failure;
+						if (input_.compare(ir, str.size(), str) != 0)
+							goto failure;
+						advance(str.size(), imm, ir, nr, cr);
+					}
+					break;
+				case opcode::match_any:
+					if (!available(1, ir, nr))
+						goto failure;
+					advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
+					break;
+				case opcode::match_class:
+					// TODO
+					break;
+				case opcode::match_range:
+					// TODO
+					break;
+				case opcode::choice:
+					stack_frames_.push_back(stack_frame_type::backtrack);
+					//backtrack_stack_.push_back(std::make_tuple(program_state{ac,pc+off}, {{ir+(imm&255),nr},{cr+(imm>>8),lr},ir+nr == input_.size()}));
+					break;
+				case opcode::commit:
+					switch (stack_frames_.back()) {
+						case stack_frame_type::backtrack: backtrack_stack_.pop_back(); break;
+						//default: error; break;
+					}
+					stack_frames_.pop_back();
+					pc += off;
+					break;
+				case opcode::call:
+					stack_frames_.push_back(stack_frame_type::call);
+					call_stack_.push_back(program_state{ac,pc});
+					pc += off;
+					break;
+				case opcode::jump:
+					pc += off;
+					break;
+				case opcode::ret:
+					switch (stack_frames_.back()) {
+						case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
+						//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
+						//default: error; break;
+					}
+					stack_frames_.pop_back();
+					break;
+				case opcode::fail:
+					fc = imm;
+					goto failure;
+				case opcode::accept:
+					// TODO
+					break;
+				case opcode::newline:
+					cr = 1;
+					lr += 1;
+					break;
+				case opcode::predicate:
+					save_registers(ir, nr, cr, lr, ac, pc);
+					if (!prog.predicates[imm](*this))
+						goto failure;
+					load_registers(ir, nr, cr, lr, ac, pc);
+					break;
+				case opcode::action:
+					semantics_.push_action(prog.semantic_actions[imm]);
+					ac = semantics_.action_count();
+					break;
+				case opcode::begin_capture:
+					// push input state
+					break;
+				case opcode::end_capture:
+					// pop input state
+					//semantics_.push_action([a = prog.syntax_actions[imm], x](const semantic_environment& s) { a(s, x); });
+					ac = semantics_.action_count();
+					break;
+				default:
+					// invalid opcode
+					break;
+			}
+			continue;
+		failure:
+			save_registers(ir, nr, cr, lr, ac, pc);
+			for (++fc; fc > 0; --fc) {
+				if (stack_frames_.empty())
+					return false;
+				stack_frame_type type = stack_frames_.back();
+				stack_frames_.pop_back();
+				switch (type) {
+					case stack_frame_type::backtrack: {
+						const auto& frame = backtrack_stack_.back();
+						program_state_ = std::get<0>(frame);
+						input_state_ = std::get<1>(frame);
+						backtrack_stack_.pop_back();
+					} break;
+					case stack_frame_type::call: {
+						program_state_ = call_stack_.back();
+						call_stack_.pop_back();
+						++fc;
+					} break;
+					case stack_frame_type::call_left: {
+						const auto& frame = call_left_stack_.back();
+						program_state_ = std::get<0>(frame);
+						input_state_ = std::get<3>(frame);
+						call_left_stack_.pop_back();
+					} break;
+					default: break;
+				}
+			}
+			load_registers(ir, nr, cr, lr, ac, pc);
 		}
-		if (result)
-			semantics_.accept();
-		return result;
+
+		save_registers(ir, nr, cr, lr, ac, pc);
+		semantics_.accept(input_);
+		return true;
 	}
 
-	void advance(syntax_iterator next, size_t columns)
+	template <class InputFunc>
+	parser& push_source(InputFunc&& func)
 	{
-		detail::assert_throw<parser_error>(begin_ <= next && next <= end_, "invalid iterator");
-		begin_ = next;
-		position_.column += columns;
-		if (position_.line == max_position_.line && position_.column > max_position_.column) {
-			max_column_ = begin_;
-			max_position_.column = position_.column;
-		}
+		if (!reading_)
+			throw parser_error("new input source cannot be specified while reading from input sources");
+		sources_.emplace_back(::std::forward<InputFunc>(func));
+		return *this;
 	}
 
-	bool available(size_t n)
+	template <class InputIt>
+	parser& enqueue(InputIt first, InputIt last)
 	{
-		do {
-			if (n <= static_cast<size_t>(std::distance(begin_, end_)))
-				return true;
-			if (end_ < buffer_.end())
-				return false;
-		} while (read_more());
-		return false;
+		buffer_.insert(buffer_.end(), first, last);
+		if (input_state_.eof)
+			input_state_.range.length = buffer_.size() - input_state_.range.index;
+		return *this;
 	}
 
-	void newline()
+	void save_registers(std::size_t ir, std::size_t nr, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc)
 	{
-		position_.column = 1;
-		position_.line++;
-		if (position_.line > max_position_.line) {
-			max_line_ = begin_;
-			max_position_ = position_;
-		}
+		input_state_ = {{ir, nr}, {cr, lr}, ir + nr == input_.size()};
+		program_state_ = {ac, pc};
 	}
 
+	void load_registers(std::size_t& ir, std::size_t& nr, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc)
+	{
+		ir = input_state_.range.index;
+		nr = input_state_.eof ? input_.size() - ir : input_state_.range.length;
+		cr = input_state_.position.column;
+		lr = input_state_.position.line;
+		ac = program_state_.action_counter;
+		pc = program_state_.program_counter;
+		semantics_.pop_actions_after(ac);
+	}
+
+	/*
 	void push_syntax_match(state& s, syntax_action a)
 	{
 		semantics_.push_action([a = std::move(a), m = syntax_match{std::get<0>(s), begin_, std::get<2>(s), position_}](semantic_environment& e) { a(e, m); });
-	}
+	}*/
 
-	void enter(const grammar_rule& r)
-	{
-		++rule_depth_;
-		if (options_.tracer)
-			options_.tracer->enter(*this, r);
-	}
-
-	void leave(const grammar_rule& r, bool success)
-	{
-		if (options_.tracer)
-			options_.tracer->leave(*this, r, success);
-		--rule_depth_;
-	}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
-
-	void restore(state& state)
-	{
-		std::pair<bool, bool> readjust;
-		std::tie(begin_, end_, position_, rule_depth_, std::ignore, readjust) = state;
-		semantics_.drop_actions_after(std::get<4>(state));
-		readjust_iterators(readjust);
-	}
-
-	state save() const noexcept
-	{
-		return {begin_, end_, position_, rule_depth_, semantics_.action_count(), should_readjust_iterators()};
-	}
-
-	bool empty() const noexcept { return begin_ >= end_; }
-	bool global_empty() const noexcept { return buffer_.empty(); }
-	syntax_iterator begin() const noexcept { return begin_; }
-	syntax_iterator end() const noexcept { return end_; }
-	syntax_iterator global_begin() const noexcept { return buffer_.begin(); }
-	syntax_iterator global_end() const noexcept { return buffer_.end(); }
-	syntax_iterator max_line() const noexcept { return max_line_; }
-	syntax_iterator max_column() const noexcept { return max_column_; }
-	const syntax_position& position() const noexcept { return position_; }
-	const syntax_position& max_position() const noexcept { return max_position_; }
-	size_t rule_depth() const noexcept { return rule_depth_; }
-	semantic_environment& semantics() noexcept { return semantics_; }
+	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.range.index, input_state_.range.length}; }
+	const syntax_position& input_position() const noexcept { return input_state_.position; }
+	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
+	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{column, line}); }
 
 private:
-	std::pair<bool, bool> should_readjust_iterators() const noexcept
+	enum class stack_frame_type : unsigned char { backtrack, call, call_left };
+	struct syntax_state { syntax_range range; syntax_position position; bool eof; };
+	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
+
+	void advance(std::size_t n, std::size_t c, std::size_t& ir, std::size_t& nr, std::size_t& cr)
 	{
-		return std::make_pair(buffer_.empty(), end_ == buffer_.end());
+		ir += n; nr -= n; cr += c;
 	}
 
-	void readjust_iterators(const std::pair<bool, bool>& readjust) noexcept
+	bool available(std::size_t n, std::size_t ir, std::size_t& nr)
 	{
-		if (readjust.first)
-			begin_ = buffer_.begin();
-		if (readjust.second)
-			end_ = buffer_.end();
+		do {
+			if (n <= nr)
+				return true;
+			if (ir + nr < input_.size())
+				return false;
+		} while (read_more(ir, nr));
+		return false;
 	}
 
-	bool read_more()
+	bool read_more(std::size_t ir, std::size_t& nr)
 	{
-		detail::reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
-		const auto readjust = should_readjust_iterators();
+		reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
+		input_state_.range = {ir, nr};
+		input_state_.eof = ir + nr == input_.size();
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
 			bool more = sources_.back()(text);
-			buffer_.insert(buffer_.end(), text.begin(), text.end());
+			input_.insert(input_.end(), text.begin(), text.end());
 			if (!more)
 				sources_.pop_back();
 		}
-		readjust_iterators(readjust);
+		if (input_state_.eof)
+			nr = input_state_.range.length = input_.size() - ir;
 		return !text.empty();
 	}
 
 	void reset()
 	{
-		begin_ = buffer_.begin();
-		end_ = buffer_.end();
-		max_line_ = begin_;
-		max_column_ = begin_;
-		position_ = {1, 1};
-		max_position_ = {1, 1};
-		rule_depth_ = 0;
+		input_state_ = {0, input_.size(), {1, 1}, true};
+		program_state_ = {0, 0};
+		parsing_ = false;
+		reading_ = false;
 		semantics_.clear();
 	}
 
-private:
 	const lug::grammar& grammar_;
-	parser_options options_;
-	syntax_iterator begin_;
-	syntax_iterator end_;
-	syntax_iterator max_line_;
-	syntax_iterator max_column_;
-	syntax_position position_;
-	syntax_position max_position_;
-	size_t rule_depth_;
+	options options_;
+	std::string input_;
+	syntax_state input_state_;
+	program_state program_state_;
 	bool parsing_;
 	bool reading_;
-	syntax_buffer buffer_;
 	std::vector<std::function<bool(std::string&)>> sources_;
+	std::vector<stack_frame_type> stack_frames_;
+	std::vector<std::tuple<program_state, syntax_state>> backtrack_stack_;
+	std::vector<program_state> call_stack_;
+	std::vector<std::tuple<program_state, program_state, syntax_state, syntax_state, unsigned short>> call_left_stack_;
 	semantic_environment semantics_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
-inline bool parse(InputIt first, InputIt last, const grammar& g, const parser_options& options = parser_options{})
+inline bool parse(InputIt first, InputIt last, const grammar& g, const parser::options& options = parser::options{})
 {
 	return parser{g, options}.enqueue(first, last).parse();
 }
 
-inline bool parse(const std::string& t, const grammar& g, const parser_options& options = parser_options{})
+inline bool parse(const std::string& t, const grammar& g, const parser::options& options = parser::options{})
 {
 	return parse(t.cbegin(), t.cend(), g, options);
 }
 
-inline bool parse(std::istream& s, const grammar& g, const parser_options& options = parser_options{})
+inline bool parse(std::istream& s, const grammar& g, const parser::options& options = parser::options{})
 {
-	return parser{g, options}.source([&s](std::string& t) {
+	return parser{g, options}.push_source([&s](std::string& t) {
 		if (std::getline(s, t)) {
 			t.push_back('\n');
 			return true;
@@ -372,472 +848,22 @@ inline bool parse(std::istream& s, const grammar& g, const parser_options& optio
 	}).parse();
 }
 
-inline bool parse(const grammar& g, const parser_options& options = parser_options{})
+inline bool parse(const grammar& g, const parser::options& options = parser::options{})
 {
 	return parse(std::cin, g, options);
 }
 
-inline bool grammar_rule::apply(parser& p)
-{
-	p.enter(*this);
-	bool success = eval(p);
-	p.leave(*this, success);
-	return success;
-}
-
-class terminal_rule : public grammar_rule
-{
-public:
-	bool is_terminal() const override { return true; }
-};
-
-class unary_rule : public grammar_rule
-{
-public:
-	unary_rule() = default;
-	explicit unary_rule(grammar_rule* r) : rule_{r} {}
-	grammar_rule* rule() const { return rule_; }
-	void rule(grammar_rule* r) { rule_ = r; }
-
-protected:
-	bool eval(parser& c) override { return rule_->apply(c); }
-
-private:
-	grammar_rule* rule_;
-};
-
-class multi_rule : public grammar_rule
-{
-public:
-	multi_rule() = default;
-	template <class... Args> explicit multi_rule(Args&&... args) : rules_{std::forward<Args>(args)...} {}
-	void append_rule(grammar_rule* r) { rules_.push_back(r); }
-	size_t rule_count() const { return rules_.size(); }
-	grammar_rule* rule_at(size_t i) const { return rules_.at(i); }
-
-private:
-	std::vector<grammar_rule*> rules_;
-};
-
-class any_rule : public terminal_rule
-{
-public:
-	static any_rule* shared() { static any_rule a; return &a; }
-
-protected:
-	bool eval(parser& p) override
-	{
-		if (!p.available(1))
-			return false;
-		p.advance(utf8::next(p.begin(), p.end()), 1);
-		return true;
-	}
-};
-
-class char_rule : public terminal_rule
-{
-public:
-	static char_rule* empty() { static char_rule e; return &e; }
-
-public:
-	char_rule() : columns_{0} {}
-	explicit char_rule(std::string s) : value_{std::move(s)}, columns_{utf8::length(value_.cbegin(), value_.cend())} {}
-	const std::string& value() const { return value_; }
-
-protected:
-	bool eval(parser& p) override
-	{
-		if (value_.empty())
-			return true;
-		if (!p.available(value_.size()))
-			return false;
-		const auto result = std::mismatch(value_.cbegin(), value_.cend(), p.begin(), p.end());
-		if (result.first != value_.cend())
-			return false;
-		p.advance(result.second, columns_);
-		return true;
-	}
-
-private:
-	std::string value_;
-	size_t columns_;
-};
-
-class bracket_rule : public terminal_rule
-{
-public:
-	explicit bracket_rule(std::string s)
-		: regex_{"[" + s + "]", std::regex_constants::basic | std::regex_constants::optimize}
-		, value_{std::move(s)} {}
-	const std::regex& regex() const { return regex_; }
-	const std::string& value() const { return value_; }
-
-protected:
-	bool eval(parser& p) override
-	{
-		if (!p.available(1))
-			return false;
-		const auto next = utf8::next(p.begin(), p.end());
-		if (!std::regex_match(p.begin(), next, regex_))
-			return false;
-		p.advance(next, 1);
-		return true;
-	}
-
-private:
-	std::regex regex_;
-	std::string value_;
-};
-
-class lambda_rule : public terminal_rule
-{
-public:
-	explicit lambda_rule(parse_handler handler) : handler_{std::move(handler)} {}
-	const parse_handler& handler() const { return handler_; }
-
-protected:
-	bool eval(parser& c) override
-	{
-		auto state = c.save();
-		if (handler_ && handler_(c))
-			return true;
-		c.restore(state);
-		return false;
-	}
-
-private:
-	parse_handler handler_;
-};
-
-class semantic_action_rule : public unary_rule
-{
-public:
-	explicit semantic_action_rule(grammar_rule* r, semantic_action action)
-		: unary_rule{r}, action_{std::move(action)} {}
-
-protected:
-	bool eval(parser& p) override
-	{
-		auto state = p.save();
-		if (rule()->apply(p)) {
-			p.semantics().push_action(action_);
-			return true;
-		}
-		p.restore(state);
-		return false;
-	}
-
-private:
-	semantic_action action_;
-};
-
-class syntax_action_rule : public unary_rule
-{
-public:
-	explicit syntax_action_rule(grammar_rule* r, syntax_action action)
-		: unary_rule{r}, action_{std::move(action)} {}
-
-protected:
-	bool eval(parser& p) override
-	{
-		auto state = p.save();
-		if (rule()->apply(p)) {
-			p.push_syntax_match(state, action_);
-			return true;
-		}
-		p.restore(state);
-		return false;
-	}
-
-private:
-	syntax_action action_;
-};
-
-class not_rule : public unary_rule
-{
-public:
-	using unary_rule::unary_rule;
-
-protected:
-	bool eval(parser& p) override
-	{
-		auto state = p.save();
-		bool success = !rule()->apply(p);
-		p.restore(state);
-		return success;
-	}
-};
-
-class zero_or_more_rule : public unary_rule
-{
-public:
-	using unary_rule::unary_rule;
-
-protected:
-	bool eval(parser& p) override
-	{
-		for (;;) {
-			auto state = p.save();
-			if (!rule()->apply(p)) {
-				p.restore(state);
-				break;
-			}
-		}
-		return true;
-	}
-};
-
-class choice_rule : public multi_rule
-{
-public:
-	using multi_rule::multi_rule;
-
-protected:
-	bool eval(parser& p) override
-	{
-		auto state = p.save();
-		for (size_t i = 0, n = rule_count(); i < n; ++i) {
-			if (rule_at(i)->apply(p))
-				return true;
-			p.restore(state);
-		}
-		return false;
-	}
-};
-
-class sequence_rule : public multi_rule
-{
-public:
-	using multi_rule::multi_rule;
-
-protected:
-	bool eval(parser& p) override
-	{
-		auto state = p.save();
-		for (size_t i = 0, n = rule_count(); i < n; ++i) {
-			if (!rule_at(i)->apply(p)) {
-				p.restore(state);
-				return false;
-			}
-		}
-		return true;
-	}
-};
-
-inline void visit_depth_first(grammar_rule* start, const std::function<void(grammar_rule&)>& visitor)
-{
-	std::vector<std::pair<multi_rule*, size_t>> multi_stack;
-	std::unordered_set<grammar_rule*> visited;
-	grammar_rule* r = start;
-
-	while (r || !multi_stack.empty())
-	{
-		multi_rule* mr = nullptr;
-		size_t i = 0;
-
-		if (r && !visited.count(r)) {
-			visited.insert(r);
-			visitor(*r);
-			unary_rule* ur = dynamic_cast<unary_rule*>(r);
-			if (ur) {
-				r = ur->rule();
-				continue;
-			}
-			mr = dynamic_cast<multi_rule*>(r);
-		}
-
-		for (;;) {
-			if (mr && i < mr->rule_count()) {
-				multi_stack.emplace_back(mr, i + 1);
-				r = mr->rule_at(i);
-				break;
-			}
-			if (multi_stack.empty()) {
-				r = nullptr;
-				break;
-			}
-			mr = multi_stack.back().first;
-			i = multi_stack.back().second;
-			multi_stack.pop_back();
-		}
-	}
-}
-
-namespace language
+namespace lang
 {
 
 using lug::grammar;
-typedef const lug::syntax_match& match;
-typedef lug::semantic_environment& semantics;
+using lug::rule;
+using lug::term;
+using namespace expr::operators;
+inline term operator""_ts(const char* s, std::size_t n) { return term{s, n}; }
+inline term operator>(const term& a, const term& b) { return a.str() + b.str(); }
 
-namespace detail
-{
-
-class environment
-{
-public:
-	template <class T, class... Args>
-	static auto make(Args&&... args) -> decltype(std::is_base_of<grammar_rule, T>::value, ::std::declval<T*>())
-	{
-		return static_cast<T*>(local().local_rules_.insert(::std::make_shared<T>(::std::forward<Args>(args)...)).first->get());
-	}
-
-	static grammar make_grammar(grammar_rule* start)
-	{
-		auto rules = std::make_shared<grammar_rule_set>();
-		local().start_rules_.emplace_back(start, rules);
-		return grammar{std::move(rules), start};
-	}
-
-	static void retain() { local().active_count_++; }
-	static void release() { local().release_ownership(); }
-
-private:
-	static environment& local()
-	{
-		static thread_local environment e;
-		return e;
-	}
-
-	void release_ownership()
-	{
-		if (--active_count_ <= 0) {
-			for (const auto& s : start_rules_)
-				visit_depth_first(s.first, [&](grammar_rule& r) { s.second->insert(r.shared_from_this()); });
-			start_rules_.clear();
-			start_rules_.shrink_to_fit();
-			local_rules_.clear();
-			active_count_ = 0;
-		}
-	}
-
-	size_t active_count_ = 0;
-	grammar_rule_set local_rules_;
-	std::vector<std::pair<grammar_rule*, std::shared_ptr<grammar_rule_set>>> start_rules_;
-};
-
-class rule_activity_token
-{
-public:
-	rule_activity_token() { environment::retain(); }
-	rule_activity_token(rule_activity_token&) { environment::retain(); }
-	rule_activity_token(rule_activity_token&&) { environment::retain(); }
-	rule_activity_token& operator=(rule_activity_token&) = default;
-	rule_activity_token& operator=(rule_activity_token&&) = default;
-	//~rule_activity_token() { environment::release(); }
-};
-
-template <class E>
-class expr : private rule_activity_token
-{
-public:
-	template <class... Args> explicit expr(Args&&... args) : rp_{detail::environment::make<E>(std::forward<Args>(args)...)} {}
-	operator grammar() const { return detail::environment::make_grammar(rp_); }
-	E* rule() const noexcept { return rp_; }
-	expr& append(grammar_rule* rp) { rp_->append_rule(rp); return *this; }
-private:
-	E* rp_;
-};
-
-struct any_rule_tag {};
-struct empty_rule_tag {};
-
-} // namespace detail
-
-class rule : private detail::rule_activity_token
-{
-public:
-	rule() : rp_{nullptr} {}
-	rule(const rule& r) : rp_{r.get()} {}
-	rule(parse_handler f) : rp_{detail::environment::make<lambda_rule>(std::move(f))} {}
-	rule(detail::any_rule_tag) : rp_{any_rule::shared()} {}
-	rule(detail::empty_rule_tag) : rp_{char_rule::empty()} {}
-	explicit rule(grammar_rule* rp) : rp_{rp} {}
-	template <class E> rule(detail::expr<E> e) : rp_{static_cast<grammar_rule*>(e.rule())} {}
-	rule& operator=(const rule& r) { return set(r.get()); }
-	operator grammar() const { return detail::environment::make_grammar(get()); }
-
-	grammar_rule* get() const
-	{
-		if (!rp_)
-			rp_ = detail::environment::make<unary_rule>();
-		return rp_;
-	}
-
-	rule& set(grammar_rule* r)
-	{
-		unary_rule* urp = dynamic_cast<unary_rule*>(rp_);
-		lug::detail::assert_throw<grammar_error>(urp || !rp_, "cannot re-assign bound rule");
-		if (urp) {
-			lug::detail::assert_throw<grammar_error>(!urp->rule(), "cannot re-assign bound and referenced rule");
-			urp->rule(r);
-		} else {
-			rp_ = r;
-		}
-		return *this;
-	}
-
-private:
-	mutable grammar_rule* rp_;
-};
-
-constexpr detail::any_rule_tag _any;
-constexpr detail::empty_rule_tag _empty;
-
-inline rule operator""_literal(const char* s, size_t n) { return rule{detail::environment::make<char_rule>(std::string(s, n))}; }
-inline rule operator""_bracket(const char* s, size_t n) { return rule{detail::environment::make<bracket_rule>(std::string(s, n))}; }
-inline rule operator*(rule r) { return rule{detail::environment::make<zero_or_more_rule>(r.get())}; }
-inline rule operator+(rule r) { return rule{detail::environment::make<sequence_rule>(r.get(), detail::environment::make<zero_or_more_rule>(r.get()))}; }
-inline rule operator~(rule r) { return rule{detail::environment::make<choice_rule>(r.get(), char_rule::empty())}; }
-inline rule operator&(rule r) { return rule{detail::environment::make<not_rule>(detail::environment::make<not_rule>(r.get()))}; }
-inline rule operator!(rule r) { return rule{detail::environment::make<not_rule>(r.get())}; }
-inline rule operator<(rule r, semantic_action a) { return rule{detail::environment::make<semantic_action_rule>(r.get(), std::move(a))}; }
-inline rule operator<(rule r, syntax_action a) { return rule{detail::environment::make<syntax_action_rule>(r.get(), std::move(a))}; }
-inline detail::expr<sequence_rule> operator>(rule r1, rule r2) { return detail::expr<sequence_rule>{r1.get(), r2.get()}; }
-inline detail::expr<sequence_rule>& operator>(detail::expr<sequence_rule>& r1, rule r2) { return r1.append(r2.get()); }
-inline detail::expr<choice_rule> operator|(rule r1, rule r2) { return detail::expr<choice_rule>{r1.get(), r2.get()}; }
-inline detail::expr<choice_rule>& operator|(detail::expr<choice_rule>& r1, rule r2) { return r1.append(r2.get()); }
-
-inline detail::expr<sequence_rule> operator>=(rule r1, rule r2)
-{
-	return r1 < [](semantics s, match m) { s.push_attribute(m.to_string()); } > r2;
-}
-
-template <class Action>
-inline auto operator<=(rule r, Action a) -> decltype(a(::std::declval<std::string>()),
-	typename std::enable_if<std::is_same<typename std::result_of<Action(std::string)>::type, void>::value, rule>::type())
-{
-	return r < [a = std::move(a)](semantics s) { a(s.pop_attribute<std::string>()); };
-}
-
-template <class Action>
-inline auto operator<=(rule r, Action a) -> decltype(a(::std::declval<std::string>()),
-	typename std::enable_if<!std::is_same<typename std::result_of<Action(std::string)>::type, void>::value, rule>::type())
-{
-	return r < [a = std::move(a)](semantics s) { s.push_attribute(a(s.pop_attribute<std::string>())); };
-}
-
-template <class Attribute>
-inline rule operator%(Attribute& l, rule r)
-{
-	return r < [&l](semantics s) { l = s.pop_attribute<Attribute>(); };
-}
-
-template <class Action>
-inline auto operator<(rule r, Action a) -> decltype(a(),
-	typename std::enable_if<std::is_same<typename std::result_of<Action()>::type, void>::value, rule>::type())
-{
-	return r < [a = std::move(a)](semantics s) { a(); };
-}
-
-template <class Action>
-inline auto operator<(rule r, Action a) -> decltype(a(),
-	typename std::enable_if<!std::is_same<typename std::result_of<Action()>::type, void>::value, rule>::type())
-{
-	return r < [a = std::move(a)](semantics s) { s.push_attribute(a()); };
-}
-
-} // namespace language
+} // namespace lang
 
 } // namespace lug
 

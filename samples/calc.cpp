@@ -5,7 +5,7 @@
 
 namespace calc
 {
-	using namespace lug::language;
+	using namespace lug::lang;
 
 	extern rule Expr;
 
@@ -13,19 +13,19 @@ namespace calc
 	long long e, l, n, r, s;
 	int i;
 
-	rule SPACE  = *" \t"_bracket;
-	rule EOL    = "\n"_literal | "\r\n"_literal | "\r"_literal | ";"_literal;
+	rule SPACE  = *" \t"_ts;
+	rule EOL    = "\n"_ts | "\r\n" | "\r" | ";";
 
-	rule NUMBER = +"0-9"_bracket >= SPACE <= [](std::string t) { return std::stoll(t); };
-	rule ID     = "a-z"_bracket >= SPACE <= [](std::string t) -> int { return t[0] - 'a'; };
+	rule NUMBER = +"[0-9]"_ts >= SPACE <= [](std::string_view t) { return std::stoll(std::string{t}); };
+	rule ID     = "[a-z]"_ts >= SPACE <= [](std::string_view t) -> int { return t[0] - 'a'; };
 
-	rule ASSIGN = "="_literal > SPACE;
-	rule PLUS   = "+"_literal > SPACE;
-	rule MINUS  = "-"_literal > SPACE;
-	rule TIMES  = "*"_literal > SPACE;
-	rule DIVIDE = "/"_literal > SPACE;
-	rule OPEN   = "("_literal > SPACE;
-	rule CLOSE  = ")"_literal > SPACE;
+	rule ASSIGN = "=" > SPACE;
+	rule PLUS   = "+" > SPACE;
+	rule MINUS  = "-" > SPACE;
+	rule TIMES  = "*" > SPACE;
+	rule DIVIDE = "/" > SPACE;
+	rule OPEN   = "(" > SPACE;
+	rule CLOSE  = ")" > SPACE;
 
 	rule Value =
 		n%NUMBER                < [&]() { return n; }
@@ -50,9 +50,9 @@ namespace calc
 
 	rule Stmt =
 		SPACE > e%Expr > EOL    < [&]() { std::cout << e << std::endl; }
-		| *(!EOL > _any) > EOL  < []() { std::cerr << "syntax error" << std::endl; };
+		| *(!EOL > ".") > EOL   < []() { std::cerr << "syntax error" << std::endl; };
 
-	grammar Grammar = Stmt;
+	grammar Grammar = start(Stmt);
 }
 
 int main()
