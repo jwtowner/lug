@@ -1,7 +1,16 @@
 # lug - Embedded DSL for PE grammar parsers in C++
 # See LICENSE file for copyright and license details
 
-include config.mk
+# distribution version
+VERSION = 1.0a
+
+# file paths
+PREFIX = /usr/local
+
+# toolchain
+CXX = clang++
+CXXFLAGS = -std=c++1z -stdlib=libc++ -pedantic -Wall -Os -I.
+LDFLAGS = -s
 
 SRC = samples/calc.cpp
 OBJ = ${SRC:.cpp=.o}
@@ -12,7 +21,7 @@ all: options calc
 	@echo CXX $<
 	@${CXX} -c ${CXXFLAGS} $<
 
-${OBJ}: config.mk
+${OBJ}: lug.hpp
 
 calc: ${OBJ}
 	@echo CXX -o $@

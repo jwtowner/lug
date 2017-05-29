@@ -28,28 +28,28 @@ namespace calc
 	rule CLOSE  = ")" > SPACE;
 
 	rule Value =
-		n%NUMBER                < [&]() { return n; }
-		| i%ID > !ASSIGN        < [&]() { return variables[i]; }
-		| OPEN > e%Expr > CLOSE < [&]() { return e; };
+		n%NUMBER                < []() { return n; }
+		| i%ID > !ASSIGN        < []() { return variables[i]; }
+		| OPEN > e%Expr > CLOSE < []() { return e; };
 
 	rule Product =
 		l%Value > *(
-			TIMES > r%Value     < [&]() { l *= r; }
-			| DIVIDE > r%Value  < [&]() { l /= r; }
-		)                       < [&]() { return l; };
+			TIMES > r%Value     < []() { l *= r; }
+			| DIVIDE > r%Value  < []() { l /= r; }
+		)                       < []() { return l; };
 
 	rule Sum =
 		l%Product > *(
-			PLUS > r%Product    < [&]() { l += r; }
-			| MINUS > r%Product < [&]() { l -= r; }
-		)                       < [&]() { return l; };
+			PLUS > r%Product    < []() { l += r; }
+			| MINUS > r%Product < []() { l -= r; }
+		)                       < []() { return l; };
 
 	rule Expr =
-		i%ID > ASSIGN > s%Sum   < [&]() { return variables[i] = s; }
-		| s%Sum                 < [&]() { return s; };
+		i%ID > ASSIGN > s%Sum   < []() { return variables[i] = s; }
+		| s%Sum                 < []() { return s; };
 
 	rule Stmt =
-		SPACE > e%Expr > EOL    < [&]() { std::cout << e << std::endl; }
+		SPACE > e%Expr > EOL    < []() { std::cout << e << std::endl; }
 		| *(!EOL > ".") > EOL   < []() { std::cerr << "syntax error" << std::endl; };
 
 	grammar Grammar = start(Stmt);
