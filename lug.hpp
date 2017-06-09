@@ -84,7 +84,6 @@ class semantic_environment;
 typedef std::function<void(semantic_environment&)> semantic_action;
 typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
 
-class term;
 class rule;
 class grammar;
 
@@ -213,25 +212,11 @@ class evaluator;
 class rule_evaluator;
 template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
 template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
-template <class E> constexpr bool is_terminal_v = std::is_convertible_v<E, term>;
+template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> constexpr bool is_proper_expression_v = is_invocable_v<E, evaluator&>;
-template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_terminal_v<E> || std::is_same_v<char, E>;
+template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
 
 } // namespace expr
-
-class term
-{
-public:
-	term() noexcept = default;
-	term(const char* s) : str_{s} {}
-	term(const char* s, std::size_t n) : str_{s, n} {}
-	term(std::string s) : str_{std::move(s)} {}
-	term(std::string_view s) : str_{s} {}
-	void swap(term& t) { str_.swap(t.str_); }
-	const std::string& str() const noexcept { return str_; }
-private:
-	std::string str_;
-};
 
 class rule
 {
@@ -417,14 +402,14 @@ struct call_expression
 	void operator()(evaluator& v) const { v.call(target); }
 };
 
-class term_expression
+class string_expression
 {
 public:
-	term_expression(const term& t) { compile_term(t.str()); }
+	string_expression(const std::string& s) { compile(s); }
 	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
 
 private:
-	void compile_term(const std::string& s) {
+	void compile(const std::string& s) {
 		// TODO: replace this all with a pre-compiled program once parser engine is working
 		if (s.empty()) {
 			instructions_.emplace_back(opcode::match, operands::none, immediate::zero);
@@ -485,8 +470,8 @@ inline auto make_expression(const T& t) {
 		return call_expression<T>{t};
 	else if constexpr (std::is_same_v<char, T>)
 		return char_expression{t};
-	else if constexpr (is_terminal_v<T>)
-		return term_expression{t};
+	else if constexpr (is_string_expression_v<T>)
+		return string_expression{t};
 	else
 		return t;
 }
@@ -528,7 +513,7 @@ inline auto operator|(E1&& e1, E2&& e2) {
 	};
 }
 
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2> && !(is_terminal_v<E1> && is_terminal_v<E2>)>>
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator>(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
 		ev.evaluate(x1).evaluate(x2);
@@ -895,10 +880,8 @@ namespace lang
 
 using lug::grammar;
 using lug::rule;
-using lug::term;
 using namespace expr::operators;
-inline term operator""_ts(const char* s, std::size_t n) { return term{s, n}; }
-inline term operator>(const term& a, const term& b) { return a.str() + b.str(); }
+using namespace std::literals::string_literals;
 
 } // namespace lang
 

@@ -13,11 +13,11 @@ namespace calc
 	long long e, l, n, r, s;
 	int i;
 
-	rule SPACE  = *" \t"_ts;
-	rule EOL    = "\n"_ts | "\r\n" | "\r" | ";";
+	rule SPACE  = *" \t"s;
+	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
 
-	rule NUMBER = +"[0-9]"_ts >= SPACE <= [](std::string_view t) { return std::stoll(std::string{t}); };
-	rule ID     = "[a-z]"_ts >= SPACE <= [](std::string_view t) -> int { return t[0] - 'a'; };
+	rule NUMBER = +"[0-9]"s >= SPACE <= [](std::string_view t) { return std::stoll(std::string{t}); };
+	rule ID     = "[a-z]"s >= SPACE <= [](std::string_view t) -> int { return t[0] - 'a'; };
 
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
