@@ -9,51 +9,55 @@ PREFIX = /usr/local
 
 # toolchain
 CXX = clang++
-CXXFLAGS = -std=c++1z -stdlib=libc++ -pedantic -Wall -Os -I.
-LDFLAGS = -s
+CXXSTD = -std=c++1z -stdlib=libc++ -pedantic
+CXXFLAGS = $(CXXSTD) -Wall -Os -I.
+LDFLAGS = $(CXXSTD) -s
 
-SRC = samples/calc.cpp
-OBJ = ${SRC:.cpp=.o}
+SAMPLES = calc
+SAMPLES_BIN = $(SAMPLES:%=samples/%)
+SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
-all: options calc
+all: options samples
 
 .cpp.o:
 	@echo CXX $<
-	@${CXX} -c ${CXXFLAGS} $<
+	@$(CXX) -c $(CXXFLAGS) -o $@ $<
 
-${OBJ}: lug.hpp
+$(SAMPLES_OBJ): lug.hpp
 
-calc: ${OBJ}
+$(SAMPLES_BIN): $(SAMPLES_OBJ)
 	@echo CXX -o $@
-	@${CXX} -o $@ ${OBJ} ${LDFLAGS}
+	@$(CXX) -o $@ $@.o $(LDFLAGS)
+
+samples: $(SAMPLES_BIN)
 
 options:
 	@echo lug build options:
-	@echo "CXXLAGS   = ${CXXFLAGS}"
-	@echo "LDFLAGS   = ${LDFLAGS}"
-	@echo "CXX       = ${CXX}"
+	@echo "CXX       = $(CXX)"
+	@echo "CXXLAGS   = $(CXXFLAGS)"
+	@echo "LDFLAGS   = $(LDFLAGS)"
 
 clean:
 	@echo cleaning
-	@rm -f calc ${OBJ} lug-${VERSION}.tar.gz
+	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) lug-$(VERSION).tar.gz
 
 dist: clean
 	@echo creating dist tarball
-	@mkdir -p lug-${VERSION}
-	@cp -R LICENSE Makefile README config.mk ${SRC} lug-${VERSION}
-	@tar -cf lug-${VERSION}.tar lug-${VERSION}
-	@gzip lug-${VERSION}.tar
-	@rm -rf lug-${VERSION}
+	@mkdir -p lug-$(VERSION)
+	@cp -R README.md LICENSE.md Makefile lug.hpp lug.sln msvs/ $(SAMPLES_SRC) lug-$(VERSION)
+	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
+	@gzip lug-$(VERSION).tar
+	@rm -rf lug-$(VERSION)
 
 install: all
-	@echo installing header files to ${DESTDIR}${PREFIX}/lug
-	@mkdir -p ${DESTDIR}${PREFIX}/include/lug
-	@cp -f lug.hpp ${DESTDIR}${PREFIX}/include/lug
-	@chmod 644 ${DESTDIR}${PREFIX}/include/lug/lug.hpp
+	@echo installing header files to $(DESTDIR)$(PREFIX)/lug
+	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f lug.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
 
 uninstall:
-	@echo removing header files from ${DESTDIR}${PREFIX}/lug
-	@rm -f ${DESTDIR}${PREFIX}/include/lug/lug.hpp
-	@rm -f ${DESTDIR}${PREFIX}/include/lug
+	@echo removing header files from $(DESTDIR)$(PREFIX)/lug
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all options clean dist install uninstall
+.PHONY: all options samples clean dist install uninstall
