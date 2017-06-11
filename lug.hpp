@@ -5,6 +5,7 @@
 #define LUG_HPP
 
 #include <any>
+#include <array>
 #include <algorithm>
 #include <functional>
 #include <deque>
@@ -115,11 +116,11 @@ union instruction
 
 	struct prefix { opcode op; operands aux; unsigned short val; } pf;
 	int off;
-	char str[4];
+	std::array<char, 4> str;
 
 	instruction(opcode op, operands aux, immediate imm) : pf{op, aux, static_cast<unsigned short>(imm)} {}
 	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_error{"offset exceeds allowable range"}; }
-	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), &str[0]), &str[4], char{0}); }
+	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
 	static opcode decode(const instruction* code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
 		const prefix pf = code[pc++].pf;
@@ -129,7 +130,7 @@ union instruction
 		else
 			off = 0;
 		if ((pf.aux & operands::str) == operands::str) {
-			str = std::string_view{code[pc].str, (imm & 0xFF) + 1};
+			str = std::string_view{code[pc].str.data(), (imm & 0xFF) + 1};
 			pc += ((imm & 0xFF) + 4) >> 2;
 			imm = (imm >> 8) + 1;
 		} else {
@@ -198,22 +199,12 @@ struct program
 namespace expr
 {
 
-// NOTE: remove after std::is_invocable becomes available in both libc++ and MSVC++ 2017
-template <typename AlwaysVoid, typename, typename...> struct is_invocable_impl : std::false_type {};
-template <typename F, typename...Args> struct is_invocable_impl<decltype(void(::std::invoke(::std::declval<F>(), ::std::declval<Args>()...))), F, Args...> : std::true_type {};
-template <typename AlwaysVoid, typename, typename...> struct invoke_result_impl {};
-template <typename F, typename...Args> struct invoke_result_impl<decltype(void(::std::invoke(::std::declval<F>(), ::std::declval<Args>()...))), F, Args...> { using type = decltype(::std::invoke(::std::declval<F>(), ::std::declval<Args>()...)); };
-template <class F, class... ArgTypes> struct is_invocable : is_invocable_impl<void, F, ArgTypes...> {};
-template <class F, class... ArgTypes> constexpr bool is_invocable_v = is_invocable<F, ArgTypes...>::value;
-template <class F, class... ArgTypes> struct invoke_result : invoke_result_impl<void, F, ArgTypes...> {};
-template <class F, class... ArgTypes> using invoke_result_t = typename invoke_result<F, ArgTypes...>::type;
-
 class evaluator;
 class rule_evaluator;
 template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
 template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
+template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, evaluator&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_proper_expression_v = is_invocable_v<E, evaluator&>;
 template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
 
 } // namespace expr
@@ -522,20 +513,19 @@ inline auto operator>(E1&& e1, E2&& e2) {
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(E&& e, A a) {
-	return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
-		if constexpr (is_invocable_v<A, semantics, syntax>) {
-			ev.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a});
-		} else if constexpr (is_invocable_v<A, semantics>) {
-			ev.evaluate(x).encode(opcode::action, semantic_action{a});
-		} else if constexpr (is_invocable_v<A>) {
-			ev.evaluate(x).encode(opcode::action, [a](semantics s) {
-				if constexpr (std::is_same_v<void, invoke_result_t<A>>)
-					a();
-				else
-					s.push_attribute(a());
-			});
-		}
-	};
+	if constexpr (std::is_invocable_v<A, semantics, syntax>) {
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+			ev.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
+	} else if constexpr (std::is_invocable_v<A, semantics>) {
+		return[x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+			ev.evaluate(x).encode(opcode::action, semantic_action{a}); };
+	} else if constexpr (std::is_invocable_r_v<void, A>) {
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+			ev.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
+	} else if constexpr (std::is_invocable_v<A>) {
+		return[x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+			ev.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
+	}
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
@@ -543,10 +533,10 @@ inline auto operator>=(E1&& e1, E2&& e2) {
 	return ::std::forward<E1>(e1) < [](semantics s, syntax x) { s.push_attribute(x.match); } > ::std::forward<E2>(e2);
 }
 
-template <class E, class A, class = std::enable_if_t<is_expression_v<E> && is_invocable_v<A, std::string_view>>>
+template <class E, class A, class = std::enable_if_t<is_expression_v<E> && std::is_invocable_v<A, std::string_view>>>
 inline auto operator<=(E&& e, A a) {
 	return ::std::forward<E>(e) < [a = std::move(a)](semantics s) {
-		if constexpr (std::is_same_v<void, invoke_result_t<A, std::string_view>>)
+		if constexpr (std::is_invocable_r_v<void, A, std::string_view>)
 			a(s.pop_attribute<std::string_view>());
 		else
 			s.push_attribute(a(s.pop_attribute<std::string_view>()));
