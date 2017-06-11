@@ -628,7 +628,13 @@ public:
 					// TODO
 				} break;
 				case opcode::match_range: {
-					// TODO
+					std::string_view first = str.substr(0, imm), last = str.substr(imm);
+					if (!available((std::min)(first.size(), last.size()), ir, nr))
+						goto failure;
+					std::size_t sz = utf8::size_of_first_rune(input_, ir, nr);
+					if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
+						goto failure;
+					advance(sz, 1, ir, nr, cr);
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
