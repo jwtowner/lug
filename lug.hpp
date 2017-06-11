@@ -140,12 +140,12 @@ union instruction
 	}
 
 	static std::ptrdiff_t length(prefix p) noexcept {
-		std::ptrdiff_t l = 1;
+		std::ptrdiff_t len = 1;
 		if ((p.aux & operands::off) == operands::off)
-			l++;
+			len++;
 		if ((p.aux & operands::str) == operands::str)
-			l += static_cast<std::ptrdiff_t>(((p.val & 0xFF) >> 2) + 1);
-		return l;
+			len += static_cast<std::ptrdiff_t>(((p.val & 0xFF) >> 2) + 1);
+		return len;
 	}
 };
 
@@ -164,18 +164,18 @@ struct program
 		instructions.reserve(instructions.size() + src.instructions.size());
 		for (auto i = src.instructions.begin(), j = i, e = src.instructions.end(); i != e; i = j) {
 			instruction instr = *i;
-			std::size_t immoffset;
+			std::size_t valoffset;
 			switch (instr.pf.op) {
-				case opcode::predicate: immoffset = predicates.size(); break;
-				case opcode::action: immoffset = semantic_actions.size(); break;
-				case opcode::end_capture: immoffset = syntax_actions.size(); break;
-				default: immoffset = 0; break;
+				case opcode::predicate: valoffset = predicates.size(); break;
+				case opcode::action: valoffset = semantic_actions.size(); break;
+				case opcode::end_capture: valoffset = syntax_actions.size(); break;
+				default: valoffset = 0; break;
 			}
-			if (immoffset != 0) {
-				std::size_t imm = instr.pf.val + immoffset;
-				if (immoffset <= imm || imm > (std::numeric_limits<unsigned short>::max)())
+			if (valoffset != 0) {
+				std::size_t val = instr.pf.val + valoffset;
+				if (val < valoffset || val > (std::numeric_limits<unsigned short>::max)())
 					throw program_error("immediate value exceeds 16-bit limit");
-				instr.pf.val = static_cast<unsigned short>(imm);
+				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
 			instructions.push_back(instr);
@@ -348,10 +348,10 @@ class program_evaluator : public evaluator
 	}
 
 	template <class Item>
-	immediate add_item(std::vector<Item> items, Item&& item) {
+	immediate add_item(std::vector<Item>& items, Item&& item) {
 		if (items.size() >= (std::numeric_limits<unsigned short>::max)())
 			throw grammar_error{"number of objects exceeds internal limit"};
-		items.push_back(std::forward<Item>(item));
+		items.push_back(::std::forward<Item>(item));
 		return static_cast<immediate>(items.size() - 1);
 	}
 
@@ -742,7 +742,7 @@ public:
 
 	template <class InputFunc>
 	parser& push_source(InputFunc&& func) {
-		if (!reading_)
+		if (reading_)
 			throw parser_error("new input source cannot be specified while reading from input sources");
 		sources_.emplace_back(::std::forward<InputFunc>(func));
 		return *this;
@@ -770,12 +770,6 @@ public:
 		pc = program_state_.program_counter;
 		semantics_.pop_actions_after(ac);
 	}
-
-	/*
-	void push_syntax_match(state& s, syntax_action a)
-	{
-		semantics_.push_action([a = std::move(a), m = syntax_match{std::get<0>(s), begin_, std::get<2>(s), position_}](semantic_environment& e) { a(e, m); });
-	}*/
 
 	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.range.index, input_state_.range.length}; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
