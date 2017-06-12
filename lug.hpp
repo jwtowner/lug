@@ -123,7 +123,7 @@ union instruction
 	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_error{"offset exceeds allowable range"}; }
 	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
-	static opcode decode(const instruction* code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
+	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
 		const prefix pf = code[pc++].pf;
 		imm = pf.val;
 		if ((pf.aux & operands::off) == operands::off)
@@ -503,7 +503,7 @@ using syntax = const lug::syntax_view&;
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		ev.encode(opcode::choice, 3 + program_length(x)).evaluate(x).encode(opcode::commit, 1).encode(opcode::fail);
+		ev.encode(opcode::choice, 3 + program_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail);
 	};
 }
 
@@ -578,6 +578,8 @@ template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*
 inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
 
 inline grammar start(const rule& start_rule) {
+	const instruction rule_final_accept{opcode::accept, operands::none, immediate{0x1337}};
+	const instruction rule_return{opcode::ret, operands::none, immediate::zero};
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> references;
 	std::stack<const rule*> unprocessed;
@@ -593,13 +595,13 @@ inline grammar start(const rule& start_rule) {
 		auto addr = addresses.emplace(&r->program_, static_cast<std::ptrdiff_t>(p.instructions.size()));
 		if (addr.second) {
 			p.concatenate(r->program_);
-			p.instructions.emplace_back(opcode::ret, operands::none, immediate::zero);
+			p.instructions.push_back(r == &start_rule ? rule_final_accept : rule_return);
 		}
 		for (auto ref : r->references_) {
 			references.emplace_back(ref.first, ref.second + addr.first->second);
 			if (addresses.emplace(ref.first, static_cast<std::ptrdiff_t>(p.instructions.size())).second) {
 				p.concatenate(*ref.first);
-				p.instructions.emplace_back(opcode::ret, operands::none, immediate::zero);
+				p.instructions.push_back(rule_return);
 			}
 		}
 		for (auto dep : r->dependencies_)
@@ -626,122 +628,133 @@ public:
 	bool parse() {
 		reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
 		const program& prog = grammar_.program();
-		const instruction* const instr = prog.instructions.data();
 		std::size_t imm, ir, nr, cr, lr, ac, fc = 0;
 		std::ptrdiff_t off, pc;
 		std::string_view str;
+		bool result = false;
+		bool done = false;
 
+		semantics_.clear();
 		program_state_ = {0, 0};
 		load_registers(ir, nr, cr, lr, ac, pc);
 
-		while (nr > 0 || read_more(ir, nr)) {
-			switch (instruction::decode(instr, pc, imm, off, str)) {
-			case opcode::match: {
-				if (str.size() > 0) {
-					if (!available(str.size(), ir, nr))
+		while (!done) {
+			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
+				case opcode::match: {
+					if (str.size() > 0) {
+						if (!available(str.size(), ir, nr))
+							goto failure;
+						if (input_.compare(ir, str.size(), str) != 0)
+							goto failure;
+						advance(str.size(), imm, ir, nr, cr);
+					}
+				} break;
+				case opcode::match_any: {
+					if (!available(1, ir, nr))
 						goto failure;
-					if (input_.compare(ir, str.size(), str) != 0)
+					advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
+				} break;
+				case opcode::match_class: {
+					// TODO
+				} break;
+				case opcode::match_range: {
+					std::string_view first = str.substr(0, imm), last = str.substr(imm);
+					if (!available((std::min)(first.size(), last.size()), ir, nr))
 						goto failure;
-					advance(str.size(), imm, ir, nr, cr);
-				}
-			} break;
-			case opcode::match_any: {
-				if (!available(1, ir, nr))
-					goto failure;
-				advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
-			} break;
-			case opcode::match_class: {
-				// TODO
-			} break;
-			case opcode::match_range: {
-				std::string_view first = str.substr(0, imm), last = str.substr(imm);
-				if (!available((std::min)(first.size(), last.size()), ir, nr))
-					goto failure;
-				auto sz = utf8::size_of_first_rune(input_, ir, nr);
-				if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
-					goto failure;
-				advance(sz, 1, ir, nr, cr);
-			} break;
-			case opcode::choice: {
-				stack_frames_.push_back(stack_frame_type::backtrack);
-				backtrack_stack_.emplace_back(program_state{ac,pc + off}, syntax_state{{ir - (imm & 255),nr},{cr - (imm >> 8),lr},ir + nr == input_.size()});
-			} break;
-			case opcode::commit: {
-				if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
-					goto failure;
-				backtrack_stack_.pop_back();
-				stack_frames_.pop_back();
-				pc += off;
-			} break;
-			case opcode::call: {
-				stack_frames_.push_back(stack_frame_type::call);
-				call_stack_.push_back({ac, pc});
-				pc += off;
-			} break;
-			case opcode::jump: {
-				pc += off;
-			} break;
-			case opcode::ret: {
-				if (stack_frames_.empty())
-					goto failure;
-				switch (stack_frames_.back()) {
-				case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
-					//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
-				default: goto failure;
-				}
-				stack_frames_.pop_back();
-			} break;
-			case opcode::fail: {
-				fc = imm;
-			} goto failure;
-			case opcode::accept: {
-				// TODO
-			} break;
-			case opcode::newline: {
-				cr = 1;
-				lr += 1;
-			} break;
-			case opcode::predicate: {
-				save_registers(ir, nr, cr, lr, ac, pc);
-				if (!prog.predicates[imm](*this))
-					goto failure;
-				load_registers(ir, nr, cr, lr, ac, pc);
-			} break;
-			case opcode::action: {
-				semantics_.push_action(prog.semantic_actions[imm]);
-				ac = semantics_.action_count();
-			} break;
-			case opcode::begin_capture: {
-				stack_frames_.push_back(stack_frame_type::capture);
-				capture_stack_.emplace_back(syntax_range{ir, nr}, syntax_position{cr, lr});
-			} break;
-			case opcode::end_capture: {
-				if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
-					goto failure;
-				auto end = syntax_position{cr, lr};
-				auto[range, start] = capture_stack_.back();
-				capture_stack_.pop_back();
-				stack_frames_.pop_back();
-				if (range.index < ir) {
-					range.length = ir - range.index;
-				} else {
-					range.length = range.index - ir;
-					range.index = ir;
-					std::swap(start, end);
-				}
-				semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
-					a(s, {s.capture().substr(range.index, range.length), start, end});
-				});
-				ac = semantics_.action_count();
-			} break;
-			default: throw parser_error{"invalid opcode"};
+					auto sz = utf8::size_of_first_rune(input_, ir, nr);
+					if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
+						goto failure;
+					advance(sz, 1, ir, nr, cr);
+				} break;
+				case opcode::choice: {
+					stack_frames_.push_back(stack_frame_type::backtrack);
+					backtrack_stack_.emplace_back(program_state{ac,pc + off}, syntax_state{{ir - (imm & 255),nr},{cr - (imm >> 8),lr},ir + nr == input_.size()});
+				} break;
+				case opcode::commit: {
+					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
+						goto failure;
+					backtrack_stack_.pop_back();
+					stack_frames_.pop_back();
+					pc += off;
+				} break;
+				case opcode::call: {
+					stack_frames_.push_back(stack_frame_type::call);
+					call_stack_.push_back({ac, pc});
+					pc += off;
+				} break;
+				case opcode::jump: {
+					pc += off;
+				} break;
+				case opcode::ret: {
+					if (stack_frames_.empty())
+						goto failure;
+					switch (stack_frames_.back()) {
+					case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
+						//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
+					default: goto failure;
+					}
+					stack_frames_.pop_back();
+				} break;
+				case opcode::fail: {
+					fc = imm;
+				} goto failure;
+				case opcode::accept: {
+					save_registers(ir, nr, cr, lr, ac, pc);
+					semantics_.accept(input_);
+					if (imm == 0x1337) {
+						result = true;
+						done = true;
+						break;
+					}
+					load_registers(ir, nr, cr, lr, ac, pc);
+				} break;
+				case opcode::newline: {
+					cr = 1;
+					lr += 1;
+				} break;
+				case opcode::predicate: {
+					save_registers(ir, nr, cr, lr, ac, pc);
+					if (!prog.predicates[imm](*this))
+						goto failure;
+					load_registers(ir, nr, cr, lr, ac, pc);
+				} break;
+				case opcode::action: {
+					semantics_.push_action(prog.semantic_actions[imm]);
+					ac = semantics_.action_count();
+				} break;
+				case opcode::begin_capture: {
+					stack_frames_.push_back(stack_frame_type::capture);
+					capture_stack_.emplace_back(syntax_range{ir, nr}, syntax_position{cr, lr});
+				} break;
+				case opcode::end_capture: {
+					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
+						goto failure;
+					auto end = syntax_position{cr, lr};
+					auto[range, start] = capture_stack_.back();
+					capture_stack_.pop_back();
+					stack_frames_.pop_back();
+					if (range.index < ir) {
+						range.length = ir - range.index;
+					} else {
+						range.length = range.index - ir;
+						range.index = ir;
+						std::swap(start, end);
+					}
+					semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
+						a(s, {s.capture().substr(range.index, range.length), start, end});
+					});
+					ac = semantics_.action_count();
+				} break;
+				default: throw parser_error{"invalid opcode"};
 			}
 			continue;
 		failure:
 			save_registers(ir, nr, cr, lr, ac, pc);
 			for (++fc; fc > 0; --fc) {
-				if (stack_frames_.empty())
-					return false;
+				if (stack_frames_.empty()) {
+					done = true;
+					break;
+				}
 				stack_frame_type type = stack_frames_.back();
 				stack_frames_.pop_back();
 				switch (type) {
@@ -772,9 +785,7 @@ public:
 			load_registers(ir, nr, cr, lr, ac, pc);
 		}
 
-		save_registers(ir, nr, cr, lr, ac, pc);
-		semantics_.accept(input_);
-		return true;
+		return result;
 	}
 
 	template <class InputFunc>
@@ -805,10 +816,7 @@ public:
 		lr = input_state_.position.line;
 		ac = program_state_.action_counter;
 		pc = program_state_.program_counter;
-		if (ac == 0 && pc == 0)
-			semantics_.clear();
-		else
-			semantics_.pop_actions_after(ac);
+		semantics_.pop_actions_after(ac);
 	}
 
 	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.range.index, input_state_.range.length}; }

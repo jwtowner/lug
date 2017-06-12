@@ -4,7 +4,7 @@
 # distribution version
 VERSION = 1.0a
 
-# file paths
+# paths
 PREFIX = /usr/local
 
 # toolchain
@@ -13,6 +13,7 @@ CXXSTD = -std=c++17 -stdlib=libc++
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
+# samples
 SAMPLES = calc test
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
