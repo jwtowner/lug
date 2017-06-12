@@ -548,7 +548,7 @@ inline auto operator<(E&& e, A a) {
 	} else if constexpr (std::is_invocable_v<A, semantics>) {
 		return[x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, semantic_action{a}); };
-	} else if constexpr (std::is_invocable_r_v<void, A>) {
+	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
@@ -565,7 +565,7 @@ inline auto operator>=(E1&& e1, E2&& e2) {
 template <class E, class A, class = std::enable_if_t<is_expression_v<E> && std::is_invocable_v<A, std::string_view>>>
 inline auto operator<=(E&& e, A a) {
 	return ::std::forward<E>(e) < [a = std::move(a)](semantics s) {
-		if constexpr (std::is_invocable_r_v<void, A, std::string_view>)
+		if constexpr (std::is_invocable_v<A, std::string_view> && std::is_same_v<void, std::invoke_result_t<A, std::string_view>>)
 			a(s.pop_attribute<std::string_view>());
 		else
 			s.push_attribute(a(s.pop_attribute<std::string_view>()));
