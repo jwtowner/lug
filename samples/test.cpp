@@ -45,7 +45,7 @@ void test_terminal_sequence()
 	using namespace lug::lang;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule Body = C{'a'} > A > C{'b'} > !any_terminal{};
+	rule Body = C{'a'} > A > C{'b'} > !A;
 	grammar Grammar = start(Body);
 	assert(!lug::parse("a", Grammar));
 	assert(lug::parse("a2b", Grammar));
@@ -60,7 +60,7 @@ void test_terminal_choice()
 	using namespace lug::lang;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule Body = ( C{'a'} > A | C{'b'} ) > !any_terminal{};
+	rule Body = (C{'a'} > A | C{'b'}) > !A;
 	grammar Grammar = start(Body);
 	assert(!lug::parse("a", Grammar));
 	assert(lug::parse("a2", Grammar));

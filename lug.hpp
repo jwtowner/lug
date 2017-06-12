@@ -126,10 +126,7 @@ union instruction
 	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
 		const prefix pf = code[pc++].pf;
 		imm = pf.val;
-		if ((pf.aux & operands::off) == operands::off)
-			off = code[pc++].off;
-		else
-			off = 0;
+		off = (pf.aux & operands::off) == operands::off ? code[pc++].off : 0;
 		if ((pf.aux & operands::str) == operands::str) {
 			str = std::string_view{code[pc].str.data(), (imm & 0xFF) + 1};
 			pc += ((imm & 0xFF) + 4) >> 2;
@@ -206,7 +203,7 @@ template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E
 template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, evaluator&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_proper_expression_v<E> || is_callable_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
+template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
 
 } // namespace expr
 
@@ -215,6 +212,9 @@ class rule
 	friend class expr::evaluator;
 	friend class expr::rule_evaluator;
 	friend grammar start(const rule&);
+	lug::program program_;
+	std::vector<std::pair<const lug::program*, std::ptrdiff_t>> references_;
+	std::unordered_set<const rule*> dependencies_;
 public:
 	rule() = default;
 	template <class E, class = std::enable_if_t<expr::is_expression_v<E>>> rule(const E& e);
@@ -223,28 +223,38 @@ public:
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
 	void swap(rule& r) { program_.swap(r.program_); references_.swap(r.references_); dependencies_.swap(r.dependencies_); }
-private:
-	lug::program program_;
-	std::vector<std::pair<const lug::program*, std::ptrdiff_t>> references_;
-	std::unordered_set<const rule*> dependencies_;
 };
 
 class grammar
 {
 	friend grammar start(const rule&);
+	grammar(lug::program p) : program_{std::move(p)} {}
+	lug::program program_;
 public:
 	grammar() = default;
 	void swap(grammar& g) { program_.swap(g.program_); }
 	const lug::program& program() const noexcept { return program_; };
-private:
-	grammar(lug::program p) : program_{std::move(p)} {}
-	lug::program program_;
 };
 
 class semantic_environment
 {
+	std::deque<semantic_action> actions_;
+	std::vector<std::any> attributes_;
+	std::string_view capture_;
+	virtual void on_accept_begin() {}
+	virtual void on_accept_end() {}
+	virtual void on_clear() {}
 public:
 	virtual ~semantic_environment() {}
+	std::size_t action_count() const noexcept { return actions_.size(); }
+	void push_action(semantic_action a) { actions_.push_back(std::move(a)); }
+	void pop_action() { actions_.pop_back(); }
+	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
+	void skip_action() { actions_.pop_front(); }
+	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
+	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
+	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+	const std::string_view& capture() const { return capture_; }
 
 	void accept(std::string_view c) {
 		capture_ = c;
@@ -263,26 +273,6 @@ public:
 		capture_ = std::string_view{};
 		on_clear();
 	}
-
-	std::size_t action_count() const noexcept { return actions_.size(); }
-	void push_action(semantic_action a) { actions_.push_back(std::move(a)); }
-	void pop_action() { actions_.pop_back(); }
-	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
-	void skip_action() { actions_.pop_front(); }
-
-	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
-	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
-	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
-
-	const std::string_view& capture() const { return capture_; }
-
-private:
-	virtual void on_accept_begin() {}
-	virtual void on_accept_end() {}
-	virtual void on_clear() {}
-	std::deque<semantic_action> actions_;
-	std::vector<std::any> attributes_;
-	std::string_view capture_;
 };
 
 namespace expr
@@ -299,21 +289,7 @@ class evaluator
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 
-	void subsequence_match(std::string_view subsequence) {
-		if (subsequence.size() > instruction::maxstrlen)
-			throw grammar_error{"subsequence exceeds allowed number of UTF8 octets"};
-		if (!subsequence.empty()) {
-			std::size_t runes = utf8::count_runes(subsequence.cbegin(), subsequence.cend());
-			do_append(instruction{opcode::match, operands::str, static_cast<immediate>(((runes - 1) << 8) | (subsequence.size() - 1))});
-			do {
-				do_append(instruction{subsequence});
-				subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
-			} while (!subsequence.empty());
-		}
-	}
-
 public:
-	evaluator() = default;
 	virtual ~evaluator() {}
 
 	evaluator& append(instruction instr) {
@@ -338,17 +314,35 @@ public:
 	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
 	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate::zero) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 
+	evaluator& encode(opcode op, std::size_t val, std::string_view subsequence) {
+		if (!subsequence.empty()) {
+			if (val == 0 || val > 256 || subsequence.size() > instruction::maxstrlen)
+				throw grammar_error{"invalid immediate value or subsequence exceeds allowed number of UTF8 octets"};
+			do_append(instruction{op, operands::str, static_cast<immediate>(((val - 1) << 8) | (subsequence.size() - 1))});
+			do {
+				do_append(instruction{subsequence});
+				subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
+			} while (!subsequence.empty());
+		}
+		return *this;
+	}
+
 	evaluator& match(std::string_view sequence) {
 		while (sequence.size() > instruction::maxstrlen) {
 			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
 			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
 				subsequence.remove_suffix(1);
 			subsequence.remove_suffix(!subsequence.empty());
-			subsequence_match(subsequence);
+			encode(opcode::match, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
 			sequence.remove_prefix(subsequence.size());
 		}
-		subsequence_match(sequence);
-		return *this;
+		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+	}
+
+	evaluator& match_range(std::string_view first, std::string_view last) {
+		if (first < last)
+			return encode(opcode::match_range, first.size(), std::string{first}.append(last));
+		return match(first);
 	}
 
 	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>;
@@ -421,7 +415,7 @@ struct empty_terminal { void operator()(evaluator& v) const { v.encode(opcode::m
 struct char_terminal
 {
 	char c;
-	void operator()(evaluator& v) const { v.append(instruction{opcode::match, operands::str, immediate::zero}).append(std::string_view{&c, 1}); }
+	void operator()(evaluator& v) const { v.match(std::string_view{&c, 1}); }
 };
 
 template <class Target>
@@ -435,37 +429,52 @@ class string_expression
 {
 	std::vector<instruction> instructions_;
 
-	class generator : public semantic_environment
+	struct generator : public semantic_environment
 	{
-		std::multimap<std::string_view, std::string_view> ranges_;
-		bool circumflex_;
-
-	public:
+		bool circumflex;
 		instruction_evaluator evaluator;
-		explicit generator(string_expression& se) : circumflex_{false}, evaluator{se.instructions_} {}
-		void bracket_circumflex() { circumflex_ = true; }
-		void bracket_char(std::string_view s) { ranges_.emplace(s, s); }
+		std::multimap<std::string_view, std::string_view> ranges;
+
+		explicit generator(string_expression& se)
+			: circumflex{false}, evaluator{se.instructions_} {}
 
 		void bracket_range(std::string_view s) {
 			auto sep = s.find('-');
 			auto first = s.substr(0, sep), last = s.substr(sep + 1);
 			if (first > last)
 				std::swap(first, last);
-			ranges_.emplace(first, last);
+			ranges.emplace(first, last);
 		}
 
 		void bracket_commit() {
-			for (auto curr = ranges_.begin(); curr != ranges_.end(); ) {
+			for (auto curr = ranges.begin(); curr != ranges.end(); ) {
 				auto next = std::next(curr);
-				if (next != ranges_.end() && next->first >= curr->first && next->first <= curr->second) {
+				if (next != ranges.end() && next->first >= curr->first && next->first <= curr->second) {
 					if (curr->second < next->second)
 						curr->second = next->second;
-					ranges_.erase(next);
+					ranges.erase(next);
 				} else {
 					curr = next;
 				}
 			}
-			circumflex_ = false;
+			std::vector<instruction> choices;
+			if (auto curr = ranges.crbegin(), last = ranges.crend(); curr != last) {
+				instruction_evaluator{choices}.match_range(curr->first, curr->second);
+				for (++curr; curr != last; ++curr) {
+					std::vector<instruction> left, both;
+					instruction_evaluator{left}.match_range(curr->first, curr->second);
+					instruction_evaluator{both}
+						.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
+						.encode(opcode::commit, choices.size()).append(choices.begin(), choices.end());
+					choices = std::move(both);
+				}
+			}
+			if (circumflex)
+				evaluator.encode(opcode::choice, 3 + choices.size());
+			evaluator.append(choices.begin(), choices.end());
+			if (circumflex)
+				evaluator.encode(opcode::commit, 0).encode(opcode::fail);
+			circumflex = false;
 		}
 	};
 
@@ -732,7 +741,7 @@ public:
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
 					auto end = syntax_position{cr, lr};
-					auto[range, start] = capture_stack_.back();
+					auto [range, start] = capture_stack_.back();
 					capture_stack_.pop_back();
 					stack_frames_.pop_back();
 					if (range.index < ir) {
@@ -767,7 +776,6 @@ public:
 						backtrack_stack_.pop_back();
 					} break;
 					case stack_frame_type::call: {
-						program_state_ = call_stack_.back();
 						call_stack_.pop_back();
 						++fc;
 					} break;
@@ -926,14 +934,10 @@ inline grammar string_expression::make_grammar() {
 	constexpr auto Any = any_terminal{};
 	rule Empty = empty_terminal{}                       <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
 	rule Dot = Char{'.'}                                <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
-	rule Element
-		= Any > Char{'-'} > !Char{']'} > Any            <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
-		| Any                                           <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_char(x.match); };
-	rule Bracket
-		= Char{'['}
-		> ~(Char{'^'}                                   <[](semantics s) { dynamic_cast<generator&>(s).bracket_circumflex(); })
-		> Element > *(!Char{']'} > Element)
-		> Char{']'}                                     <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
+	rule Element = Any > Char{'-'} > !Char{']'} > Any   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
+		| Any                                           <[](semantics s, syntax x) { dynamic_cast<generator&>(s).ranges.emplace(x.match, x.match); };
+	rule Bracket = Char{'['} > ~(Char{'^'}              <[](semantics s) { dynamic_cast<generator&>(s).circumflex = true; })
+		> Element > *(!Char{']'} > Element) > Char{']'} <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
 	rule Sequence = +(!(Char{'.'} | Char{'['}) > Any)   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > !Any);
 }
