@@ -632,7 +632,9 @@ class parser
 {
 public:
 	parser(const grammar& g, semantic_environment& s)
-		: grammar_{g}, semantics_(s), parsing_{false}, reading_{false} {
+		: grammar_{g}, semantics_(s), parsing_{false}, reading_{false}
+		, stack_frames_(256), backtrack_stack_(128), call_stack_(128)
+		, call_left_stack_(8), capture_stack_(8) {
 		reset();
 	}
 
