@@ -248,18 +248,20 @@ public:
 
 	void accept(std::string_view c) {
 		capture_ = c;
+		on_accept_begin();
 		while (!actions_.empty()) {
 			semantic_action a{std::move(actions_.front())};
 			actions_.pop_front();
 			a(*this);
 		}
+		on_accept_end();
 	}
 
 	void clear() {
 		actions_.clear();
 		attributes_.clear();
 		capture_ = std::string_view{};
-		do_clear();
+		on_clear();
 	}
 
 	std::size_t action_count() const noexcept { return actions_.size(); }
@@ -274,10 +276,10 @@ public:
 
 	const std::string_view& capture() const { return capture_; }
 
-protected:
-	virtual void do_clear() {}
-
 private:
+	virtual void on_accept_begin() {}
+	virtual void on_accept_end() {}
+	virtual void on_clear() {}
 	std::deque<semantic_action> actions_;
 	std::vector<std::any> attributes_;
 	std::string_view capture_;
@@ -510,15 +512,15 @@ inline auto operator!(E&& e) {
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator*(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		const std::ptrdiff_t xlen = program_length(x);
-		ev.encode(opcode::choice, 2 + xlen).evaluate(x).encode(opcode::commit, -(xlen + 4));
+		auto x_length = program_length(x);
+		ev.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4));
 	};
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.encode(opcode::choice, program_length(x1)).evaluate(x1).encode(opcode::commit, program_length(x2)).evaluate(x2);
+		ev.encode(opcode::choice, 2 + program_length(x1)).evaluate(x1).encode(opcode::commit, program_length(x2)).evaluate(x2);
 	};
 }
 
