@@ -411,10 +411,12 @@ public:
 
 template <class E> std::ptrdiff_t program_length(const E& e) { return instruction_length_evaluator{}.evaluate(e).length(); }
 
-struct any_expression { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
-struct empty_expression { void operator()(evaluator& v) const { v.encode(opcode::match); } };
+struct accept_action { void operator()(evaluator& v) const { v.encode(opcode::accept); } };
+struct newline_action { void operator()(evaluator& v) const { v.encode(opcode::newline); } };
+struct any_terminal { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
+struct empty_terminal { void operator()(evaluator& v) const { v.encode(opcode::match); } };
 
-struct char_expression
+struct char_terminal
 {
 	char c;
 	void operator()(evaluator& v) const { v.append(instruction{opcode::match, operands::str, immediate::zero}).append(std::string_view{&c, 1}); }
@@ -479,7 +481,7 @@ inline auto make_expression(const T& t) {
 	if constexpr (is_callable_v<T>)
 		return call_expression<T>{t};
 	else if constexpr (std::is_same_v<char, T>)
-		return char_expression{t};
+		return char_terminal{t};
 	else if constexpr (is_string_expression_v<T>)
 		return string_expression{t};
 	else
@@ -566,7 +568,7 @@ inline auto operator%(T& x, E&& e) {
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_expression{}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_terminal{}; }
 
 } // namespace operators
 
@@ -722,8 +724,7 @@ public:
 				stack_frames_.pop_back();
 				if (range.index < ir) {
 					range.length = ir - range.index;
-				}
-				else {
+				} else {
 					range.length = range.index - ir;
 					range.index = ir;
 					std::swap(start, end);
@@ -911,9 +912,9 @@ namespace expr
 
 inline grammar string_expression::make_grammar() {
 	using namespace operators;
-	using Char = char_expression;
-	constexpr auto Any = any_expression{};
-	rule Empty = empty_expression{}                     <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
+	using Char = char_terminal;
+	constexpr auto Any = any_terminal{};
+	rule Empty = empty_terminal{}                       <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
 	rule Dot = Char{'.'}                                <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
 	rule Element
 		= Any > Char{'-'} > !Char{']'} > Any            <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
@@ -927,7 +928,7 @@ inline grammar string_expression::make_grammar() {
 	return start((+(Dot | Bracket | Sequence) | Empty) > !Any);
 }
 
-void string_expression::compile(const std::string& s) {
+inline void string_expression::compile(const std::string& s) {
 	static grammar grmr = make_grammar();
 	generator genr(*this);
 	if (!parse(s, grmr, genr))
@@ -939,10 +940,10 @@ void string_expression::compile(const std::string& s) {
 namespace lang
 {
 
-using lug::grammar;
-using lug::rule;
-using namespace expr::operators;
-using namespace std::literals::string_literals;
+using lug::grammar; using lug::rule;
+using expr::accept_action; using expr::newline_action;
+using expr::any_terminal; using expr::char_terminal; using expr::empty_terminal;
+using namespace expr::operators; using namespace std::literals::string_literals;
 
 } // namespace lang
 
