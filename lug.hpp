@@ -33,32 +33,27 @@ class program_error : public lug_error { using lug_error::lug_error; };
 namespace utf8
 {
 
-constexpr bool is_lead(char c) noexcept
-{
+constexpr bool is_lead(char c) noexcept {
 	return (static_cast<unsigned char>(c) & 0xC0) != 0x80;
 }
 
 template <class InputIt>
-constexpr std::size_t count_runes(InputIt first, InputIt last)
-{
+constexpr std::size_t count_runes(InputIt first, InputIt last) {
 	return std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c); });
 }
 
 template <class InputIt>
-constexpr InputIt next_rune(InputIt first, InputIt last)
-{
+constexpr InputIt next_rune(InputIt first, InputIt last) {
 	return first != last ? std::find_if(std::next(first), last, is_lead) : last;
 }
 
 template <class InputIt>
-constexpr std::size_t size_of_first_rune(InputIt first, InputIt last)
-{
+constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 	return static_cast<std::size_t>(std::distance(first, next_rune(first, last)));
 }
 
 template <class Input>
-inline std::size_t size_of_first_rune(Input input, std::size_t pos, std::size_t len)
-{
+inline std::size_t size_of_first_rune(Input input, std::size_t pos, std::size_t len) {
 	auto first = std::next(std::cbegin(input), static_cast<std::ptrdiff_t>(pos));
 	auto last = std::next(first, static_cast<std::ptrdiff_t>(len));
 	return size_of_first_rune(first, last);
@@ -89,8 +84,6 @@ typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_ac
 class rule;
 class grammar;
 
-enum class immediate : unsigned short { zero = 0 };
-
 enum class opcode : unsigned char
 {
 	match,          match_any,      match_class,    match_range,
@@ -100,21 +93,14 @@ enum class opcode : unsigned char
 };
 
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
+constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
+constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
 
-constexpr operands operator&(operands x, operands y) noexcept
-{
-	return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y));
-}
-
-constexpr operands operator|(operands x, operands y) noexcept
-{
-	return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y));
-}
+enum class immediate : unsigned short { zero = 0 };
 
 union instruction
 {
 	static constexpr std::size_t maxstrlen = 256;
-
 	struct prefix { opcode op; operands aux; unsigned short val; } pf;
 	int off;
 	std::array<char, 4> str;
@@ -259,15 +245,6 @@ public:
 	void enter_frame() { vframes_.emplace_back(); }
 	void leave_frame() { std::for_each(vframes_.back().begin(), vframes_.back().end(), [](auto& entry) { entry.second(entry.first); }); vframes_.pop_back(); }
 
-	template <class T>
-	void save_variable(T& x) {
-		if (!vframes_.empty()) {
-			auto& vframe = vframes_.back();
-			if (vframe.count(&x) == 0)
-				vframe.emplace(&x, [v = std::decay_t<T>{x}](void* p) { *static_cast<std::decay_t<T>*>(p) = v; });
-		}
-	}
-
 	void accept(std::string_view c) {
 		capture_ = c;
 		on_accept_begin();
@@ -284,6 +261,15 @@ public:
 		attributes_.clear();
 		capture_ = std::string_view{};
 		on_clear();
+	}
+
+	template <class T>
+	void save_variable(T& x) {
+		if (!vframes_.empty()) {
+			auto& vframe = vframes_.back();
+			if (vframe.count(&x) == 0)
+				vframe.emplace(&x, [v = std::decay_t<T>{x}](void* p) { *static_cast<std::decay_t<T>*>(p) = v; });
+		}
 	}
 };
 
@@ -603,11 +589,11 @@ inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp *
 inline grammar start(const rule& start_rule) {
 	const instruction rule_final_accept{opcode::accept, operands::none, immediate{0x1337}};
 	const instruction rule_return{opcode::ret, operands::none, immediate::zero};
+	program p;
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> references;
-	std::stack<const rule*> unprocessed;
 	std::unordered_set<const rule*> visited;
-	program p;
+	std::stack<const rule*> unprocessed;
 	unprocessed.push(&start_rule);
 	do {
 		const rule* r = unprocessed.top();
@@ -693,7 +679,7 @@ public:
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.emplace_back(program_state{ac,pc + off}, syntax_state{{ir - (imm & 255),nr},{cr - (imm >> 8),lr},ir + nr == input_.size()});
+					backtrack_stack_.emplace_back(program_state{ac,pc+off}, syntax_state{{ir-(imm&255),nr},{cr-(imm>>8),lr},ir+nr == input_.size()});
 				} break;
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
@@ -715,9 +701,9 @@ public:
 					if (stack_frames_.empty())
 						goto failure;
 					switch (stack_frames_.back()) {
-					case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
+						case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
 						//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
-					default: goto failure;
+						default: goto failure;
 					}
 					stack_frames_.pop_back();
 					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
