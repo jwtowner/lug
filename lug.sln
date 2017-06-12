@@ -1,13 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26403.7
+VisualStudioVersion = 15.0.26606.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{E698D93F-872B-4273-801C-07DDD9A0CB79}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "lug", "msvs\lug.vcxproj", "{A4F4E93C-1E56-4BE6-918E-5CD0C7A039D3}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "calc", "msvs\calc.vcxproj", "{C917A525-845E-4CA1-AA5F-BC0F1FD42550}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test", "msvs\test.vcxproj", "{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -33,11 +35,20 @@ Global
 		{C917A525-845E-4CA1-AA5F-BC0F1FD42550}.Release|x64.Build.0 = Release|x64
 		{C917A525-845E-4CA1-AA5F-BC0F1FD42550}.Release|x86.ActiveCfg = Release|Win32
 		{C917A525-845E-4CA1-AA5F-BC0F1FD42550}.Release|x86.Build.0 = Release|Win32
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Debug|x64.ActiveCfg = Debug|x64
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Debug|x64.Build.0 = Debug|x64
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Debug|x86.ActiveCfg = Debug|Win32
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Debug|x86.Build.0 = Debug|Win32
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Release|x64.ActiveCfg = Release|x64
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Release|x64.Build.0 = Release|x64
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Release|x86.ActiveCfg = Release|Win32
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{C917A525-845E-4CA1-AA5F-BC0F1FD42550} = {E698D93F-872B-4273-801C-07DDD9A0CB79}
+		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1} = {E698D93F-872B-4273-801C-07DDD9A0CB79}
 	EndGlobalSection
 EndGlobal

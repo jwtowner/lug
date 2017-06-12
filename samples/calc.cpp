@@ -55,7 +55,7 @@ namespace calc
 	grammar Grammar = start(Stmt);
 }
 
-int main()
+int main(int argc, char** argv)
 {
 	try {
 		while(lug::parse(calc::Grammar));

@@ -9,11 +9,11 @@ PREFIX = /usr/local
 
 # toolchain
 CXX = clang++
-CXXSTD = -std=c++1z -stdlib=libc++ -pedantic
-CXXFLAGS = $(CXXSTD) -Wall -Os -I.
+CXXSTD = -std=c++17 -stdlib=libc++
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
-SAMPLES = calc
+SAMPLES = calc test
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
@@ -34,6 +34,7 @@ samples: $(SAMPLES_BIN)
 options:
 	@echo lug build options:
 	@echo "CXX       = $(CXX)"
+	@echo "CXXSTD    = $(CXXSTD)"
 	@echo "CXXLAGS   = $(CXXFLAGS)"
 	@echo "LDFLAGS   = $(LDFLAGS)"
 

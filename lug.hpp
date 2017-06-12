@@ -371,7 +371,7 @@ class instruction_evaluator : public evaluator
 	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
 
 	void do_append(instruction instr) override {
-		if (instructions_.size() >= (std::numeric_limits<std::ptrdiff_t>::max)())
+		if (instructions_.size() >= static_cast<size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
 			throw grammar_error{"program length exceeds limits"};
 		instructions_.push_back(instr);
 	}
