@@ -240,21 +240,33 @@ class semantic_environment
 {
 	std::deque<semantic_action> actions_;
 	std::vector<std::any> attributes_;
+	std::vector<std::unordered_map<void*, std::function<void(void*)>>> vframes_;
 	std::string_view capture_;
 	virtual void on_accept_begin() {}
 	virtual void on_accept_end() {}
 	virtual void on_clear() {}
 public:
 	virtual ~semantic_environment() {}
+	const std::string_view& capture() const { return capture_; }
 	std::size_t action_count() const noexcept { return actions_.size(); }
-	void push_action(semantic_action a) { actions_.push_back(std::move(a)); }
+	std::size_t push_action(semantic_action a) { actions_.push_back(std::move(a)); return action_count(); }
 	void pop_action() { actions_.pop_back(); }
 	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
 	void skip_action() { actions_.pop_front(); }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
-	const std::string_view& capture() const { return capture_; }
+	void enter_frame() { vframes_.emplace_back(); }
+	void leave_frame() { std::for_each(vframes_.back().begin(), vframes_.back().end(), [](auto& entry) { entry.second(entry.first); }); vframes_.pop_back(); }
+
+	template <class T>
+	void save_variable(T& x) {
+		if (!vframes_.empty()) {
+			auto& vframe = vframes_.back();
+			if (vframe.count(&x) == 0)
+				vframe.emplace(&x, [v = std::decay_t<T>{x}](void* p) { *static_cast<std::decay_t<T>*>(p) = v; });
+		}
+	}
 
 	void accept(std::string_view c) {
 		capture_ = c;
@@ -574,7 +586,7 @@ inline auto operator<=(E&& e, A a) {
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator%(T& x, E&& e) {
-	return ::std::forward<E>(e) < [&x](semantics s) { x = s.pop_attribute<T>(); };
+	return ::std::forward<E>(e) < [&x](semantics s) { s.save_variable(x); x = s.pop_attribute<T>(); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
@@ -693,6 +705,7 @@ public:
 				case opcode::call: {
 					stack_frames_.push_back(stack_frame_type::call);
 					call_stack_.push_back({ac, pc});
+					ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
 					pc += off;
 				} break;
 				case opcode::jump: {
@@ -707,6 +720,7 @@ public:
 					default: goto failure;
 					}
 					stack_frames_.pop_back();
+					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
 				} break;
 				case opcode::fail: {
 					fc = imm;
@@ -732,8 +746,7 @@ public:
 					load_registers(ir, nr, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
-					semantics_.push_action(prog.semantic_actions[imm]);
-					ac = semantics_.action_count();
+					ac = semantics_.push_action(prog.semantic_actions[imm]);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
@@ -753,10 +766,8 @@ public:
 						range.index = ir;
 						std::swap(start, end);
 					}
-					semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
-						a(s, {s.capture().substr(range.index, range.length), start, end});
-					});
-					ac = semantics_.action_count();
+					ac = semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
+						a(s, {s.capture().substr(range.index, range.length), start, end}); });
 				} break;
 				default: throw parser_error{"invalid opcode"};
 			}

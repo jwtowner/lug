@@ -4,7 +4,7 @@ lug is an embedded domain specific language in C++ for expressing parsers as Par
 
 TODO
 ---
-- implement variable scoping for the attribute extraction operator, bound to a rule expression
+- intermediate accept should ensure back-tracking is no longer possible
 - left recursion
 - parser error recovery
 - tail recursion optimization of rules
