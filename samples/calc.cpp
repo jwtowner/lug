@@ -16,8 +16,8 @@ namespace calc
 	rule SPACE  = *" \t"s;
 	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
 
-	rule NUMBER = +"[0-9]"s >= SPACE <= [](std::string_view t) { return std::stoll(std::string{t}); };
-	rule ID     = "[a-z]"s >= SPACE <= [](std::string_view t) -> int { return t[0] - 'a'; };
+	rule NUMBER = +"[0-9]"s >= SPACE <=[](std::string_view t) { return std::stoll(std::string{t}); };
+	rule ID     = "[a-z]"s >= SPACE <=[](std::string_view t) -> int { return t[0] - 'a'; };
 
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
@@ -28,29 +28,29 @@ namespace calc
 	rule CLOSE  = ")" > SPACE;
 
 	rule Value =
-		n%NUMBER                < []() { return n; }
-		| i%ID > !ASSIGN        < []() { return variables[i]; }
-		| OPEN > e%Expr > CLOSE < []() { return e; };
+		n%NUMBER                <[]() { return n; }
+		| i%ID > !ASSIGN        <[]() { return variables[i]; }
+		| OPEN > e%Expr > CLOSE <[]() { return e; };
 
 	rule Product =
 		l%Value > *(
-			TIMES > r%Value     < []() { l *= r; }
-			| DIVIDE > r%Value  < []() { l /= r; }
-		)                       < []() { return l; };
+			TIMES > r%Value     <[]() { l *= r; }
+			| DIVIDE > r%Value  <[]() { l /= r; }
+		)                       <[]() { return l; };
 
 	rule Sum =
 		l%Product > *(
-			PLUS > r%Product    < []() { l += r; }
-			| MINUS > r%Product < []() { l -= r; }
-		)                       < []() { return l; };
+			PLUS > r%Product    <[]() { l += r; }
+			| MINUS > r%Product <[]() { l -= r; }
+		)                       <[]() { return l; };
 
 	rule Expr =
-		i%ID > ASSIGN > s%Sum   < []() { return variables[i] = s; }
-		| s%Sum                 < []() { return s; };
+		i%ID > ASSIGN > s%Sum   <[]() { return variables[i] = s; }
+		| s%Sum                 <[]() { return s; };
 
 	rule Stmt =
-		SPACE > e%Expr > EOL    < []() { std::cout << e << std::endl; }
-		| *(!EOL > ".") > EOL   < []() { std::cerr << "syntax error" << std::endl; };
+		SPACE > e%Expr > EOL    <[]() { std::cout << e << std::endl; }
+		| *(!EOL > ".") > EOL   <[]() { std::cerr << "syntax error" << std::endl; };
 
 	grammar Grammar = start(Stmt);
 }

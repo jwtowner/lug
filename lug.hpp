@@ -11,6 +11,7 @@
 #include <deque>
 #include <iostream>
 #include <locale>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <stack>
@@ -179,7 +180,7 @@ struct program
 			}
 			j = std::next(i, instruction::length(instr.pf));
 			instructions.push_back(instr);
-			instructions.insert(instructions.end(), i, j);
+			instructions.insert(instructions.end(), i + 1, j);
 		}
 		error_handlers.insert(error_handlers.end(), src.error_handlers.begin(), src.error_handlers.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
@@ -243,6 +244,8 @@ private:
 class semantic_environment
 {
 public:
+	virtual ~semantic_environment() {}
+
 	void accept(std::string_view c) {
 		capture_ = c;
 		while (!actions_.empty()) {
@@ -256,6 +259,7 @@ public:
 		actions_.clear();
 		attributes_.clear();
 		capture_ = std::string_view{};
+		do_clear();
 	}
 
 	std::size_t action_count() const noexcept { return actions_.size(); }
@@ -270,6 +274,9 @@ public:
 
 	const std::string_view& capture() const { return capture_; }
 
+protected:
+	virtual void do_clear() {}
+
 private:
 	std::deque<semantic_action> actions_;
 	std::vector<std::any> attributes_;
@@ -278,9 +285,6 @@ private:
 
 namespace expr
 {
-
-template <class T>
-auto make_expression(const T& t);
 
 class evaluator
 {
@@ -292,6 +296,19 @@ class evaluator
 	virtual void do_add_reference(const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
+
+	void subsequence_match(std::string_view subsequence) {
+		if (subsequence.size() > instruction::maxstrlen)
+			throw grammar_error{"subsequence exceeds allowed number of UTF8 octets"};
+		if (!subsequence.empty()) {
+			std::size_t runes = utf8::count_runes(subsequence.cbegin(), subsequence.cend());
+			do_append(instruction{opcode::match, operands::str, static_cast<immediate>(((runes - 1) << 8) | (subsequence.size() - 1))});
+			do {
+				do_append(instruction{subsequence});
+				subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
+			} while (!subsequence.empty());
+		}
+	}
 
 public:
 	evaluator() = default;
@@ -319,11 +336,24 @@ public:
 	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
 	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate::zero) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 
-	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&> { make_expression(e)(*this); return *this; }
+	evaluator& match(std::string_view sequence) {
+		while (sequence.size() > instruction::maxstrlen) {
+			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
+			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
+				subsequence.remove_suffix(1);
+			subsequence.remove_suffix(!subsequence.empty());
+			subsequence_match(subsequence);
+			sequence.remove_prefix(subsequence.size());
+		}
+		subsequence_match(sequence);
+		return *this;
+	}
+
+	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 };
 
-class program_length_evaluator : public evaluator
+class instruction_length_evaluator : public evaluator
 {
 	std::ptrdiff_t length_ = 0;
 	std::ptrdiff_t do_length() const noexcept override { return length_; }
@@ -335,20 +365,28 @@ class program_length_evaluator : public evaluator
 	}
 };
 
-class program_evaluator : public evaluator
+class instruction_evaluator : public evaluator
+{
+	std::vector<instruction>& instructions_;
+	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
+
+	void do_append(instruction instr) override {
+		if (instructions_.size() >= (std::numeric_limits<std::ptrdiff_t>::max)())
+			throw grammar_error{"program length exceeds limits"};
+		instructions_.push_back(instr);
+	}
+
+public:
+	explicit instruction_evaluator(std::vector<instruction>& i) : instructions_{i} {}
+};
+
+class program_evaluator : public instruction_evaluator
 {
 	program& program_;
 	immediate do_add_error_handler(parser_error_handler h) override { return add_item(program_.error_handlers, std::move(h)); }
 	immediate do_add_predicate(parser_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.semantic_actions, std::move(a)); }
 	immediate do_add_syntax_action(syntax_action a) override { return add_item(program_.syntax_actions, std::move(a)); }
-	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
-
-	void do_append(instruction instr) override {
-		if (program_.instructions.size() >= (std::numeric_limits<std::ptrdiff_t>::max)())
-			throw grammar_error{"program length exceeds limits"};
-		program_.instructions.push_back(instr);
-	}
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item) {
@@ -359,7 +397,7 @@ class program_evaluator : public evaluator
 	}
 
 public:
-	explicit program_evaluator(program& p) : program_{p} {}
+	explicit program_evaluator(program& p) : instruction_evaluator{p.instructions}, program_{p} {}
 };
 
 class rule_evaluator : public program_evaluator
@@ -371,7 +409,7 @@ public:
 	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
 };
 
-template <class E> std::ptrdiff_t program_length(const E& e) { return program_length_evaluator{}.evaluate(e).length(); }
+template <class E> std::ptrdiff_t program_length(const E& e) { return instruction_length_evaluator{}.evaluate(e).length(); }
 
 struct any_expression { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
 struct empty_expression { void operator()(evaluator& v) const { v.encode(opcode::match); } };
@@ -388,6 +426,71 @@ struct call_expression
 	const Target& target;
 	void operator()(evaluator& v) const { v.call(target); }
 };
+
+class string_expression
+{
+	std::vector<instruction> instructions_;
+
+	class generator : public semantic_environment
+	{
+		std::multimap<std::string_view, std::string_view> ranges_;
+		bool circumflex_;
+
+	public:
+		instruction_evaluator evaluator;
+		explicit generator(string_expression& se) : circumflex_{false}, evaluator{se.instructions_} {}
+		void bracket_circumflex() { circumflex_ = true; }
+		void bracket_char(std::string_view s) { ranges_.emplace(s, s); }
+
+		void bracket_range(std::string_view s) {
+			auto sep = s.find('-');
+			auto first = s.substr(0, sep), last = s.substr(sep + 1);
+			if (first > last)
+				std::swap(first, last);
+			ranges_.emplace(first, last);
+		}
+
+		void bracket_commit() {
+			for (auto curr = ranges_.begin(); curr != ranges_.end(); ) {
+				auto next = std::next(curr);
+				if (next != ranges_.end() && next->first >= curr->first && next->first <= curr->second) {
+					if (curr->second < next->second)
+						curr->second = next->second;
+					ranges_.erase(next);
+				} else {
+					curr = next;
+				}
+			}
+			circumflex_ = false;
+		}
+	};
+
+	static grammar make_grammar();
+	void compile(const std::string& s);
+
+public:
+	string_expression(const std::string& s) { compile(s); }
+	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
+};
+
+template <class T>
+inline auto make_expression(const T& t) {
+	static_assert(is_expression_v<T>, "T must be an expression type");
+	if constexpr (is_callable_v<T>)
+		return call_expression<T>{t};
+	else if constexpr (std::is_same_v<char, T>)
+		return char_expression{t};
+	else if constexpr (is_string_expression_v<T>)
+		return string_expression{t};
+	else
+		return t;
+}
+
+template <class E>
+inline auto evaluator::evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&> {
+	make_expression(e)(*this);
+	return *this;
+}
 
 namespace operators
 {
@@ -467,80 +570,6 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 
 } // namespace operators
 
-class string_expression
-{
-public:
-	string_expression(const std::string& s) { compile(s); }
-	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
-
-private:
-	void compile(const std::string& s) {
-		// TODO: replace this all with a pre-compiled program once parser engine is working
-		if (s.empty()) {
-			instructions_.emplace_back(opcode::match, operands::none, immediate::zero);
-			return;
-		}
-		std::string::size_type i = 0, j = 0, k = 0;
-		for (;;) {
-			k = s.find_first_of(".[", j);
-			compile_sequence_match(std::string_view{s}.substr(i, k < std::string::npos ? k - i : k));
-			if (k == std::string::npos)
-				break;
-			if (s[k] == '.') {
-				instructions_.emplace_back(opcode::match_any, operands::none, immediate::zero);
-			} else {
-				i = (j = k)++;
-				j += j < s.size() && s[j] == '^';
-				j += j < s.size() && s[j] == ']';
-				k = s.find_first_of(']', j);
-				if (k == std::string::npos) throw grammar_error{"expected closing bracket ']'"};
-				// bracket from i+1 k-1
-			}
-			i = j = k + 1;
-		}
-	}
-
-	void compile_sequence_match(std::string_view sequence) {
-		while (sequence.size() > instruction::maxstrlen) {
-			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
-			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
-				subsequence.remove_suffix(1);
-			subsequence.remove_suffix(!subsequence.empty());
-			compile_subsequence_match(subsequence);
-			sequence.remove_prefix(subsequence.size());
-		}
-		compile_subsequence_match(sequence);
-	}
-
-	void compile_subsequence_match(std::string_view subsequence) {
-		if (subsequence.size() > instruction::maxstrlen)
-			throw grammar_error{"subsequence exceeds allowed number of UTF8 octets"};
-		if (!subsequence.empty()) {
-			std::size_t runes = utf8::count_runes(subsequence.cbegin(), subsequence.cend());
-			instructions_.emplace_back(opcode::match, operands::str, static_cast<immediate>(((runes - 1) << 8) | (subsequence.size() - 1)));
-			do {
-				instructions_.emplace_back(subsequence);
-				subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
-			} while (!subsequence.empty());
-		}
-	}
-
-	std::vector<instruction> instructions_;
-};
-
-template <class T>
-inline auto make_expression(const T& t) {
-	static_assert(is_expression_v<T>, "T must be an expression type");
-	if constexpr (is_callable_v<T>)
-		return call_expression<T>{t};
-	else if constexpr (std::is_same_v<char, T>)
-		return char_expression{t};
-	else if constexpr (is_string_expression_v<T>)
-		return string_expression{t};
-	else
-		return t;
-}
-
 } // namespace expr
 
 template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
@@ -587,13 +616,8 @@ inline grammar start(const rule& start_rule) {
 class parser
 {
 public:
-	struct options {};
-
-	parser(const grammar& g, const options& o)
-			: grammar_{g}
-			, options_(o)
-			, parsing_{false}
-			, reading_{false} {
+	parser(const grammar& g, semantic_environment& s)
+		: grammar_{g}, semantics_(s), parsing_{false}, reading_{false} {
 		reset();
 	}
 
@@ -610,107 +634,106 @@ public:
 
 		while (nr > 0 || read_more(ir, nr)) {
 			switch (instruction::decode(instr, pc, imm, off, str)) {
-				case opcode::match: {
-					if (str.size() > 0) {
-						if (!available(str.size(), ir, nr))
-							goto failure;
-						if (input_.compare(ir, str.size(), str) != 0)
-							goto failure;
-						advance(str.size(), imm, ir, nr, cr);
-					}
-				} break;
-				case opcode::match_any: {
-					if (!available(1, ir, nr))
+			case opcode::match: {
+				if (str.size() > 0) {
+					if (!available(str.size(), ir, nr))
 						goto failure;
-					advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
-				} break;
-				case opcode::match_class: {
-					// TODO
-				} break;
-				case opcode::match_range: {
-					std::string_view first = str.substr(0, imm), last = str.substr(imm);
-					if (!available((std::min)(first.size(), last.size()), ir, nr))
+					if (input_.compare(ir, str.size(), str) != 0)
 						goto failure;
-					std::size_t sz = utf8::size_of_first_rune(input_, ir, nr);
-					if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
-						goto failure;
-					advance(sz, 1, ir, nr, cr);
-				} break;
-				case opcode::choice: {
-					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.emplace_back(program_state{ac,pc+off}, syntax_state{{ir-(imm&255),nr},{cr-(imm>>8),lr},ir+nr == input_.size()});
-				} break;
-				case opcode::commit: {
-					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
-						goto failure;
-					backtrack_stack_.pop_back();
-					stack_frames_.pop_back();
-					pc += off;
-				} break;
-				case opcode::call: {
-					stack_frames_.push_back(stack_frame_type::call);
-					call_stack_.push_back({ac, pc});
-					pc += off;
-				} break;
-				case opcode::jump: {
-					pc += off;
-				} break;
-				case opcode::ret: {
-					if (stack_frames_.empty())
-						goto failure;
-					switch (stack_frames_.back()) {
-						case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
-						//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
-						default: goto failure;
-					}
-					stack_frames_.pop_back();
-				} break;
-				case opcode::fail: {
-					fc = imm;
-				} goto failure;
-				case opcode::accept: {
-					// TODO
-				} break;
-				case opcode::newline: {
-					cr = 1;
-					lr += 1;
-				} break;
-				case opcode::predicate: {
-					save_registers(ir, nr, cr, lr, ac, pc);
-					if (!prog.predicates[imm](*this))
-						goto failure;
-					load_registers(ir, nr, cr, lr, ac, pc);
-				} break;
-				case opcode::action: {
-					semantics_.push_action(prog.semantic_actions[imm]);
-					ac = semantics_.action_count();
-				} break;
-				case opcode::begin_capture: {
-					stack_frames_.push_back(stack_frame_type::capture);
-					capture_stack_.emplace_back(syntax_range{ir, nr}, syntax_position{cr, lr});
-				} break;
-				case opcode::end_capture: {
-					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
-						goto failure;
-					auto end = syntax_position{cr, lr};
-					auto [range, start] = capture_stack_.back();
-					capture_stack_.pop_back();
-					stack_frames_.pop_back();
-					if (range.index < ir) {
-						range.length = ir - range.index;
-					} else {
-						range.length = range.index - ir;
-						range.index = ir;
-						std::swap(start, end);
-					}
-					semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
-						a(s, {s.capture().substr(range.index, range.length), start, end});
-					});
-					ac = semantics_.action_count();
-				} break;
-				default:
-					// invalid opcode
-					break;
+					advance(str.size(), imm, ir, nr, cr);
+				}
+			} break;
+			case opcode::match_any: {
+				if (!available(1, ir, nr))
+					goto failure;
+				advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
+			} break;
+			case opcode::match_class: {
+				// TODO
+			} break;
+			case opcode::match_range: {
+				std::string_view first = str.substr(0, imm), last = str.substr(imm);
+				if (!available((std::min)(first.size(), last.size()), ir, nr))
+					goto failure;
+				auto sz = utf8::size_of_first_rune(input_, ir, nr);
+				if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
+					goto failure;
+				advance(sz, 1, ir, nr, cr);
+			} break;
+			case opcode::choice: {
+				stack_frames_.push_back(stack_frame_type::backtrack);
+				backtrack_stack_.emplace_back(program_state{ac,pc + off}, syntax_state{{ir - (imm & 255),nr},{cr - (imm >> 8),lr},ir + nr == input_.size()});
+			} break;
+			case opcode::commit: {
+				if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
+					goto failure;
+				backtrack_stack_.pop_back();
+				stack_frames_.pop_back();
+				pc += off;
+			} break;
+			case opcode::call: {
+				stack_frames_.push_back(stack_frame_type::call);
+				call_stack_.push_back({ac, pc});
+				pc += off;
+			} break;
+			case opcode::jump: {
+				pc += off;
+			} break;
+			case opcode::ret: {
+				if (stack_frames_.empty())
+					goto failure;
+				switch (stack_frames_.back()) {
+				case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
+					//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
+				default: goto failure;
+				}
+				stack_frames_.pop_back();
+			} break;
+			case opcode::fail: {
+				fc = imm;
+			} goto failure;
+			case opcode::accept: {
+				// TODO
+			} break;
+			case opcode::newline: {
+				cr = 1;
+				lr += 1;
+			} break;
+			case opcode::predicate: {
+				save_registers(ir, nr, cr, lr, ac, pc);
+				if (!prog.predicates[imm](*this))
+					goto failure;
+				load_registers(ir, nr, cr, lr, ac, pc);
+			} break;
+			case opcode::action: {
+				semantics_.push_action(prog.semantic_actions[imm]);
+				ac = semantics_.action_count();
+			} break;
+			case opcode::begin_capture: {
+				stack_frames_.push_back(stack_frame_type::capture);
+				capture_stack_.emplace_back(syntax_range{ir, nr}, syntax_position{cr, lr});
+			} break;
+			case opcode::end_capture: {
+				if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
+					goto failure;
+				auto end = syntax_position{cr, lr};
+				auto[range, start] = capture_stack_.back();
+				capture_stack_.pop_back();
+				stack_frames_.pop_back();
+				if (range.index < ir) {
+					range.length = ir - range.index;
+				}
+				else {
+					range.length = range.index - ir;
+					range.index = ir;
+					std::swap(start, end);
+				}
+				semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
+					a(s, {s.capture().substr(range.index, range.length), start, end});
+				});
+				ac = semantics_.action_count();
+			} break;
+			default: throw parser_error{"invalid opcode"};
 			}
 			continue;
 		failure:
@@ -838,7 +861,7 @@ private:
 	}
 
 	const lug::grammar& grammar_;
-	options options_;
+	semantic_environment& semantics_;
 	std::string input_;
 	syntax_state input_state_;
 	program_state program_state_;
@@ -850,31 +873,68 @@ private:
 	std::vector<program_state> call_stack_;
 	std::vector<std::tuple<program_state, program_state, syntax_state, syntax_state, unsigned short>> call_left_stack_;
 	std::vector<std::tuple<syntax_range, syntax_position>> capture_stack_;
-	semantic_environment semantics_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
-inline bool parse(InputIt first, InputIt last, const grammar& g, const parser::options& options = parser::options{}) {
-	return parser{g, options}.enqueue(first, last).parse();
+inline bool parse(InputIt first, InputIt last, const grammar& grmr, semantic_environment& sema) {
+	return parser{grmr, sema}.enqueue(first, last).parse();
 }
 
-inline bool parse(const std::string& t, const grammar& g, const parser::options& options = parser::options{}) {
-	return parse(t.cbegin(), t.cend(), g, options);
+template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
+inline bool parse(InputIt first, InputIt last, const grammar& grmr) {
+	semantic_environment sema;
+	return parse(first, last, grmr, sema);
 }
 
-inline bool parse(std::istream& s, const grammar& g, const parser::options& options = parser::options{}) {
-	return parser{g, options}.push_source([&s](std::string& t) {
-		if (std::getline(s, t)) {
-			t.push_back('\n');
+inline bool parse(std::istream& input, const grammar& grmr, semantic_environment& sema) {
+	return parser{grmr, sema}.push_source([&input](std::string& line) {
+		if (std::getline(input, line)) {
+			line.push_back('\n');
 			return true;
 		}
 		return false;
 	}).parse();
 }
 
-inline bool parse(const grammar& g, const parser::options& options = parser::options{}) {
-	return parse(std::cin, g, options);
+inline bool parse(std::istream& input, const grammar& grmr) {
+	semantic_environment sema;
+	return parse(input, grmr, sema);
 }
+
+inline bool parse(const std::string& input, const grammar& grmr, semantic_environment& sema) { return parse(input.cbegin(), input.cend(), grmr, sema); }
+inline bool parse(const std::string& input, const grammar& grmr) { return parse(input.cbegin(), input.cend(), grmr); }
+inline bool parse(const grammar& grmr, semantic_environment& sema) { return parse(std::cin, grmr, sema); }
+inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
+
+namespace expr
+{
+
+inline grammar string_expression::make_grammar() {
+	using namespace operators;
+	using Char = char_expression;
+	constexpr auto Any = any_expression{};
+	rule Empty = empty_expression{}                     <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
+	rule Dot = Char{'.'}                                <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
+	rule Element
+		= Any > Char{'-'} > !Char{']'} > Any            <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
+		| Any                                           <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_char(x.match); };
+	rule Bracket
+		= Char{'['}
+		> ~(Char{'^'}                                   <[](semantics s) { dynamic_cast<generator&>(s).bracket_circumflex(); })
+		> Element > *(!Char{']'} > Element)
+		> Char{']'}                                     <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
+	rule Sequence = +(!(Char{'.'} | Char{'['}) > Any)   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };
+	return start((+(Dot | Bracket | Sequence) | Empty) > !Any);
+}
+
+void string_expression::compile(const std::string& s) {
+	static grammar grmr = make_grammar();
+	generator genr(*this);
+	if (!parse(s, grmr, genr))
+		throw grammar_error{"invalid string or bracket expression"};
+}
+
+} // namespace expr
 
 namespace lang
 {
