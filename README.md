@@ -5,7 +5,7 @@ An embedded domain specific language in C++ for expressing parsers as extended P
 - Header only library written using modern C++17 language and library features
 - Has a natural syntax more akin to an external parser generator language, unlike other C++ parsing toolkits
 - Generated parsers are compiled down to a special-purpose bytecode that runs in a compact parsing machine
-- Uses fexpr-like expression template functors for evaluating and optimizing grammar rule expression trees at compile time
+- Uses fexpr-like expression template functors for evaluating and optimizing grammar rules at compile time
 - Traditional PEG syntax has been extended to support attribute grammars
 - Written to be extremely small, is currently under 1000 lines of (very terse) code (this may be relaxed in the future)
 
