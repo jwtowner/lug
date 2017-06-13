@@ -7,18 +7,14 @@ namespace calc
 {
 	using namespace lug::lang;
 
-	extern rule Expr;
-
 	long long variables[26];
 	long long e, l, n, r, s;
 	int i;
 
 	rule SPACE  = *"[ \t]"s;
 	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
-
-	rule NUMBER = +"[0-9]"s >= SPACE <= [](std::string_view t) { return std::stoll(std::string{t}); };
-	rule ID     = "[a-z]"s >= SPACE <= [](std::string_view t) -> int { return t[0] - 'a'; };
-
+	rule NUMBER = +"[0-9]"s >= SPACE <= [](auto t) { return std::stoll(std::string{t}); };
+	rule ID     = "[a-z]"s >= SPACE <= [](auto t) -> int { return t[0] - 'a'; };
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
 	rule MINUS  = "-" > SPACE;
@@ -26,6 +22,8 @@ namespace calc
 	rule DIVIDE = "/" > SPACE;
 	rule OPEN   = "(" > SPACE;
 	rule CLOSE  = ")" > SPACE;
+
+	extern rule Expr;
 
 	rule Value =
 		n%NUMBER                < []() { return n; }
