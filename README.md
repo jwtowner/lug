@@ -11,7 +11,7 @@ Key features:
 - Traditional PEG syntax has been extended to support attribute grammars
 - Written to be extremely small, is currently under 1000 lines of (very terse) code (this may be relaxed in the future)
 
-It is based off of the following research:
+It is based off of the research introduced in the following papers:
 
 > [Bryan Ford, Parsing expression grammars: a recognition-based syntactic foundation, Proceedings of the 31st ACM SIGPLAN-SIGACT symposium on Principles of programming languages, p.111-122, January 2004](https://doi.org/10.1145/583852.581483)
 > [Sérgio Medeiros et. al, A parsing machine for PEGs, Proceedings of the 2008 symposium on Dynamic languages, p.1-12, July 2008](https://doi.org/10.1145/1408681.1408683)
