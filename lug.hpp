@@ -528,7 +528,7 @@ inline auto operator<(E&& e, A a) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, semantics>) {
-		return[x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
