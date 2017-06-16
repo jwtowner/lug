@@ -2,18 +2,19 @@
 // Copyright (c) 2017 Jesse W. Towner
 
 #include <lug.hpp>
+#include <cstdlib>
 
 namespace calc
 {
 	using namespace lug::lang;
 
-	long long variables[26];
-	long long e, l, n, r, s;
+	double variables[26];
+	double e, l, n, r, s;
 	int i;
 
 	rule SPACE  = *"[ \t]"s;
 	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
-	rule NUMBER = +"[0-9]"s >= SPACE <= [](auto t) { return std::stoll(std::string{t}); };
+	rule NUMBER = +"[0-9]"s >= SPACE <= [](auto t) { return std::stod(std::string{t}); };
 	rule ID     = "[a-z]"s >= SPACE <= [](auto t) -> int { return t[0] - 'a'; };
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
@@ -47,7 +48,10 @@ namespace calc
 		| s%Sum                 < []() { return s; };
 
 	rule Stmt =
-		SPACE > e%Expr > EOL    < []() { std::cout << e << std::endl; }
+		SPACE > (
+			"quit" > SPACE      < []() { std::exit(EXIT_SUCCESS); }
+			| e%Expr            < []() { std::cout << e << std::endl; }
+		) > EOL
 		| *(!EOL > ".") > EOL   < []() { std::cerr << "syntax error" << std::endl; };
 
 	grammar Grammar = start(Stmt);
