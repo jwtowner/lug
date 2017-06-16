@@ -73,16 +73,15 @@ struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, length; };
 struct syntax_view { std::string_view match; syntax_position start, end; };
 
-class parser;
-typedef std::function<void(parser&)> parser_error_handler;
-typedef std::function<bool(parser&)> parser_predicate;
-
-class semantic_environment;
-typedef std::function<void(semantic_environment&)> semantic_action;
-typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
-
 class rule;
 class grammar;
+class parser;
+class semantic_environment;
+
+typedef std::function<void(parser&)> parser_error_handler;
+typedef std::function<bool(parser&)> parser_predicate;
+typedef std::function<void(semantic_environment&)> semantic_action;
+typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
 
 enum class opcode : unsigned char
 {
@@ -286,9 +285,18 @@ class evaluator
 	virtual void do_add_reference(const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
-
 public:
 	virtual ~evaluator() {}
+	evaluator& call(const program& p) { do_add_reference(&p, length() + 1); return encode(opcode::call, -1); }
+	evaluator& call(const rule& r) { do_add_dependency(&r); return call(r.program_); }
+	evaluator& call(const grammar& g) { return call(g.program()); }
+	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
+	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
+	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
+	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
+	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate::zero) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
+	template <class E> auto evaluate(const E& e)->std::enable_if_t<is_expression_v<E>, evaluator&>;
+	std::ptrdiff_t length() const noexcept { return do_length(); }
 
 	evaluator& append(instruction instr) {
 		do_append(instr);
@@ -301,16 +309,6 @@ public:
 			do_append(*first);
 		return *this;
 	}
-
-	evaluator& call(const program& p) { do_add_reference(&p, length() + 1); return encode(opcode::call, -1); }
-	evaluator& call(const rule& r) { do_add_dependency(&r); return call(r.program_); }
-	evaluator& call(const grammar& g) { return call(g.program()); }
-
-	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
-	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
-	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
-	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate::zero) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 
 	evaluator& encode(opcode op, std::size_t val, std::string_view subsequence) {
 		if (!subsequence.empty()) {
@@ -342,9 +340,6 @@ public:
 			return encode(opcode::match_range, first.size(), std::string{first}.append(last));
 		return match(first);
 	}
-
-	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>;
-	std::ptrdiff_t length() const noexcept { return do_length(); }
 };
 
 class instruction_length_evaluator : public evaluator
@@ -409,19 +404,8 @@ struct accept_action { void operator()(evaluator& v) const { v.encode(opcode::ac
 struct newline_action { void operator()(evaluator& v) const { v.encode(opcode::newline); } };
 struct any_terminal { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
 struct empty_terminal { void operator()(evaluator& v) const { v.encode(opcode::match); } };
-
-struct char_terminal
-{
-	char c;
-	void operator()(evaluator& v) const { v.match(std::string_view{&c, 1}); }
-};
-
-template <class Target>
-struct call_expression
-{
-	const Target& target;
-	void operator()(evaluator& v) const { v.call(target); }
-};
+struct char_terminal { char c; void operator()(evaluator& v) const { v.match(std::string_view{&c, 1}); } };
+template <class Target> struct call_expression { const Target& target; void operator()(evaluator& v) const { v.call(target); } };
 
 class string_expression
 {
@@ -550,7 +534,7 @@ inline auto operator<(E&& e, A a) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
-		return[x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
 	}
 }
@@ -589,11 +573,11 @@ inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp *
 inline grammar start(const rule& start_rule) {
 	const instruction rule_final_accept{opcode::accept, operands::none, immediate{0x1337}};
 	const instruction rule_return{opcode::ret, operands::none, immediate::zero};
-	program p;
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> references;
 	std::unordered_set<const rule*> visited;
 	std::stack<const rule*> unprocessed;
+	program p;
 	unprocessed.push(&start_rule);
 	do {
 		const rule* r = unprocessed.top();
@@ -653,9 +637,7 @@ public:
 			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
 				case opcode::match: {
 					if (str.size() > 0) {
-						if (!available(str.size(), ir, nr))
-							goto failure;
-						if (input_.compare(ir, str.size(), str) != 0)
+						if (!available(str.size(), ir, nr) || input_.compare(ir, str.size(), str) != 0)
 							goto failure;
 						advance(str.size(), imm, ir, nr, cr);
 					}
@@ -722,8 +704,7 @@ public:
 					load_registers(ir, nr, cr, lr, ac, pc);
 				} break;
 				case opcode::newline: {
-					cr = 1;
-					lr += 1;
+					cr = 1; lr += 1;
 				} break;
 				case opcode::predicate: {
 					save_registers(ir, nr, cr, lr, ac, pc);
@@ -839,9 +820,7 @@ private:
 	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
 
 	void advance(std::size_t n, std::size_t c, std::size_t& ir, std::size_t& nr, std::size_t& cr) {
-		ir += n;
-		nr -= n;
-		cr += c;
+		ir += n; nr -= n; cr += c;
 	}
 
 	bool available(std::size_t n, std::size_t ir, std::size_t& nr) {
