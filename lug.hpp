@@ -827,7 +827,7 @@ private:
 		do {
 			if (n <= nr)
 				return true;
-			if (ir + nr < input_.size())
+			if (ir + nr < input_.size() || nr != 0)
 				return false;
 		} while (read_more(ir, nr));
 		return false;
