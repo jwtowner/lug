@@ -25,6 +25,7 @@ TODO
 ---
 - left recursion (WIP)
 - parser error recovery (WIP)
+- POSIX BRE character classes
 - intermediate accept should ensure back-tracking is no longer possible, possibly investigate using progressive tabling and dynamic analysis
 - tail recursion optimization of rules
 - rule inlining optimization
