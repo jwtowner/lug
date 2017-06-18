@@ -38,23 +38,23 @@ constexpr bool is_lead(char c) noexcept {
 
 template <class InputIt>
 constexpr std::size_t count_runes(InputIt first, InputIt last) {
-	return std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c); });
+	return ::std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c); });
 }
 
 template <class InputIt>
 constexpr InputIt next_rune(InputIt first, InputIt last) {
-	return first != last ? std::find_if(std::next(first), last, is_lead) : last;
+	return first != last ? ::std::find_if(::std::next(first), last, is_lead) : last;
 }
 
 template <class InputIt>
 constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
-	return static_cast<std::size_t>(std::distance(first, next_rune(first, last)));
+	return static_cast<std::size_t>(::std::distance(first, next_rune(first, last)));
 }
 
 template <class Input>
 inline std::size_t size_of_first_rune(Input input, std::size_t pos, std::size_t len) {
-	auto first = std::next(std::cbegin(input), static_cast<std::ptrdiff_t>(pos));
-	auto last = std::next(first, static_cast<std::ptrdiff_t>(len));
+	auto first = ::std::next(::std::cbegin(input), static_cast<std::ptrdiff_t>(pos));
+	auto last = ::std::next(first, static_cast<std::ptrdiff_t>(len));
 	return size_of_first_rune(first, last);
 }
 
@@ -90,11 +90,10 @@ enum class opcode : unsigned char
 	predicate,      action,         begin_capture,  end_capture
 };
 
+enum class immediate : unsigned short { zero = 0 };
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
 constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
 constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
-
-enum class immediate : unsigned short { zero = 0 };
 
 union instruction
 {
@@ -213,8 +212,8 @@ public:
 class grammar
 {
 	friend grammar start(const rule&);
-	grammar(lug::program p) : program_{std::move(p)} {}
 	lug::program program_;
+	grammar(lug::program p) : program_{std::move(p)} {}
 public:
 	grammar() = default;
 	void swap(grammar& g) { program_.swap(g.program_); }
@@ -500,30 +499,26 @@ using syntax = const lug::syntax_view&;
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		ev.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail);
-	};
+		ev.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator*(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
 		auto x_length = instruction_length(x);
-		ev.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4));
-	};
+		ev.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2);
-	};
+		ev.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator>(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.evaluate(x1).evaluate(x2);
-	};
+		ev.evaluate(x1).evaluate(x2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
@@ -554,8 +549,7 @@ inline auto operator<=(E&& e, A a) {
 		if constexpr (std::is_invocable_v<A, std::string_view> && std::is_same_v<void, std::invoke_result_t<A, std::string_view>>)
 			a(s.pop_attribute<std::string_view>());
 		else
-			s.push_attribute(a(s.pop_attribute<std::string_view>()));
-	};
+			s.push_attribute(a(s.pop_attribute<std::string_view>())); };
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
