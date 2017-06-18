@@ -198,7 +198,7 @@ class rule
 	friend class expr::rule_evaluator;
 	friend grammar start(const rule&);
 	lug::program program_;
-	std::vector<std::pair<const lug::program*, std::ptrdiff_t>> references_;
+	std::vector<std::pair<const lug::program*, std::ptrdiff_t>> callees_;
 	std::unordered_set<const rule*> dependencies_;
 public:
 	rule() = default;
@@ -207,7 +207,7 @@ public:
 	rule(rule&& r) = default;
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
-	void swap(rule& r) { program_.swap(r.program_); references_.swap(r.references_); dependencies_.swap(r.dependencies_); }
+	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); dependencies_.swap(r.dependencies_); }
 };
 
 class grammar
@@ -281,13 +281,13 @@ class evaluator
 	virtual immediate do_add_predicate(parser_predicate) { return immediate::zero; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate::zero; }
 	virtual immediate do_add_syntax_action(syntax_action) { return immediate::zero; }
+	virtual void do_add_callee(const program*, std::ptrdiff_t) {}
 	virtual void do_add_dependency(const rule*) {}
-	virtual void do_add_reference(const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
 	virtual ~evaluator() {}
-	evaluator& call(const program& p) { do_add_reference(&p, length() + 1); return encode(opcode::call, -1); }
+	evaluator& call(const program& p) { do_add_callee(&p, length() + 1); return encode(opcode::call, -1); }
 	evaluator& call(const rule& r) { do_add_dependency(&r); return call(r.program_); }
 	evaluator& call(const grammar& g) { return call(g.program()); }
 	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
@@ -392,8 +392,8 @@ public:
 class rule_evaluator : public program_evaluator
 {
 	rule& rule_;
+	void do_add_callee(const program* p, std::ptrdiff_t off) override { rule_.callees_.push_back(std::make_pair(p, off)); }
 	void do_add_dependency(const rule* r) override { rule_.dependencies_.insert(r); }
-	void do_add_reference(const program* p, std::ptrdiff_t off) override { rule_.references_.push_back(std::make_pair(p, off)); }
 public:
 	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
 };
@@ -571,8 +571,8 @@ template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*
 inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
 
 inline grammar start(const rule& start_rule) {
-	const instruction rule_final_accept{opcode::accept, operands::none, immediate{0x1337}};
-	const instruction rule_return{opcode::ret, operands::none, immediate::zero};
+	const instruction final_accept_instr{opcode::accept, operands::none, immediate{0x1337}};
+	const instruction return_intsr{opcode::ret, operands::none, immediate::zero};
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> references;
 	std::unordered_set<const rule*> visited;
@@ -588,13 +588,13 @@ inline grammar start(const rule& start_rule) {
 		auto addr = addresses.emplace(&r->program_, static_cast<std::ptrdiff_t>(p.instructions.size()));
 		if (addr.second) {
 			p.concatenate(r->program_);
-			p.instructions.push_back(r == &start_rule ? rule_final_accept : rule_return);
+			p.instructions.push_back(r == &start_rule ? final_accept_instr : return_intsr);
 		}
-		for (auto ref : r->references_) {
-			references.emplace_back(ref.first, ref.second + addr.first->second);
-			if (addresses.emplace(ref.first, static_cast<std::ptrdiff_t>(p.instructions.size())).second) {
-				p.concatenate(*ref.first);
-				p.instructions.push_back(rule_return);
+		for (auto callee : r->callees_) {
+			references.emplace_back(callee.first, callee.second + addr.first->second);
+			if (addresses.emplace(callee.first, static_cast<std::ptrdiff_t>(p.instructions.size())).second) {
+				p.concatenate(*callee.first);
+				p.instructions.push_back(return_intsr);
 			}
 		}
 		for (auto dep : r->dependencies_)
