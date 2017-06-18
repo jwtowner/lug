@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace lug
@@ -90,7 +91,7 @@ enum class opcode : unsigned char
 	predicate,      action,         begin_capture,  end_capture
 };
 
-enum class immediate : unsigned short { zero = 0 };
+enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
 constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
 constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
@@ -205,8 +206,8 @@ public:
 	rule(rule&& r) = default;
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
-	expr::call_expression<rule> operator()(unsigned short precedence);
 	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
+	expr::call_expression<rule> operator()(unsigned short precedence);
 };
 
 class grammar
@@ -276,10 +277,10 @@ namespace expr
 
 class evaluator
 {
-	virtual immediate do_add_error_handler(parser_error_handler h) { return immediate::zero; }
-	virtual immediate do_add_predicate(parser_predicate) { return immediate::zero; }
-	virtual immediate do_add_semantic_action(semantic_action) { return immediate::zero; }
-	virtual immediate do_add_syntax_action(syntax_action) { return immediate::zero; }
+	virtual immediate do_add_error_handler(parser_error_handler h) { return immediate{0}; }
+	virtual immediate do_add_predicate(parser_predicate) { return immediate{0}; }
+	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
+	virtual immediate do_add_syntax_action(syntax_action) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
@@ -288,11 +289,11 @@ public:
 	evaluator& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
 	evaluator& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
 	evaluator& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
-	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
+	evaluator& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
 	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
-	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate::zero) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
+	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	template <class E> auto evaluate(const E& e)->std::enable_if_t<is_expression_v<E>, evaluator&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 
@@ -475,7 +476,7 @@ template <class T>
 inline auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
-		return call_expression<T>{t, 1};
+		return call_expression<T>{t, 0};
 	else if constexpr (std::is_same_v<char, T>)
 		return char_terminal{t};
 	else if constexpr (is_string_expression_v<T>)
@@ -566,37 +567,42 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 } // namespace expr
 
 template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r, 1); /* TODO: jump instead of call */ }
+inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r, 0); /* TODO: jump instead of call */ }
 inline expr::call_expression<rule> rule::operator()(unsigned short precedence) { return expr::call_expression<rule>{*this, precedence}; }
 
 inline grammar start(const rule& start_rule) {
 	program gp;
-	expr::program_evaluator{gp}.encode(opcode::call, 1, immediate{0}).encode(opcode::accept, immediate{0x1337});
+	expr::program_evaluator{gp}.encode(opcode::call, 1, immediate{0}).encode(opcode::accept, immediate{1});
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
-	std::unordered_map<const program*, std::ptrdiff_t> subprogram_addresses;
-	std::stack<std::pair<const rule*, const program*>> unprocessed;
-	unprocessed.emplace(&start_rule, &start_rule.program_);
+	std::unordered_map<const program*, std::ptrdiff_t> addresses;
+	std::unordered_set<const program*> recursive;
+	std::stack<std::pair<std::vector<const rule*>, const program*>> unprocessed;
+	unprocessed.emplace(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
-		auto [r, p] = unprocessed.top();
+		auto [rules, subprogram] = unprocessed.top();
 		unprocessed.pop();
 		auto address = static_cast<std::ptrdiff_t>(gp.instructions.size());
-		if (subprogram_addresses.emplace(p, address).second) {
-			gp.concatenate(r->program_);
-			gp.instructions.emplace_back(opcode::ret, operands::none, immediate::zero);
-			if (r) {
-				for (auto [cr, cp, call_instr_offset] : r->callees_) {
-					calls.emplace_back(cp, address + call_instr_offset);
-					unprocessed.emplace(cr, cp);
+		if (addresses.emplace(subprogram, address).second) {
+			gp.concatenate(*subprogram);
+			gp.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
+			if (auto r = rules.back(); r) {
+				for (auto [cr, cp, instr_offset] : r->callees_) {
+					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend())
+						recursive.insert(cp);
+					calls.emplace_back(cp, address + instr_offset);
+					rules.push_back(cr); unprocessed.emplace(rules, cp); rules.pop_back();
 				}
 			}
 		}
 	} while (!unprocessed.empty());
-	for (auto [subprogram, call_instr_addr] : calls) {
-		instruction& instr = gp.instructions[call_instr_addr + 1];
-		std::ptrdiff_t reladdr = instr.off + subprogram_addresses[subprogram] - (call_instr_addr + 2);
+	for (auto [subprogram, instr_addr] : calls) {
+		if (auto& iprefix = gp.instructions[instr_addr]; iprefix.pf.op == opcode::call)
+			iprefix.pf.val = recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
+		auto& ioffset = gp.instructions[instr_addr + 1];
+		std::ptrdiff_t reladdr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
 		if (reladdr < std::numeric_limits<int>::lowest() || (std::numeric_limits<int>::max)() < reladdr)
 			throw grammar_error("program offset exceeds addressable range");
-		instr.off = static_cast<int>(reladdr);
+		ioffset.off = static_cast<int>(reladdr);
 	}
 	return grammar(std::move(gp));
 }
@@ -687,7 +693,7 @@ public:
 				case opcode::accept: {
 					save_registers(ir, nr, cr, lr, ac, pc);
 					semantics_.accept(input_);
-					if (imm == 0x1337) {
+					if (imm != 0) {
 						result = true;
 						done = true;
 						break;
