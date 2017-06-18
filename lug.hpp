@@ -183,6 +183,7 @@ namespace expr
 
 class evaluator;
 class rule_evaluator;
+template <class Target> struct call_expression;
 template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
 template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, evaluator&>;
@@ -205,6 +206,7 @@ public:
 	rule(rule&& r) = default;
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
+	expr::call_expression<rule> operator()(unsigned short precedence);
 	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
 };
 
@@ -284,9 +286,9 @@ class evaluator
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
 	virtual ~evaluator() {}
-	evaluator& call(const program& p) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0); }
-	evaluator& call(const rule& r) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0); }
-	evaluator& call(const grammar& g) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3); }
+	evaluator& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
+	evaluator& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
+	evaluator& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
 	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
 	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
 	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
@@ -401,11 +403,20 @@ struct newline_action { void operator()(evaluator& v) const { v.encode(opcode::n
 struct any_terminal { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
 struct empty_terminal { void operator()(evaluator& v) const { v.encode(opcode::match); } };
 struct char_terminal { char c; void operator()(evaluator& v) const { v.match(std::string_view{&c, 1}); } };
-template <class Target> struct call_expression { const Target& target; void operator()(evaluator& v) const { v.call(target); } };
+
+template <class Target>
+struct call_expression
+{
+	const Target& target;
+	unsigned short precedence;
+	void operator()(evaluator& v) const { v.call(target, precedence); }
+};
 
 class string_expression
 {
 	std::vector<instruction> instructions_;
+	static grammar make_grammar();
+	void compile(const std::string& s);
 
 	struct generator : public semantic_environment
 	{
@@ -456,9 +467,6 @@ class string_expression
 		}
 	};
 
-	static grammar make_grammar();
-	void compile(const std::string& s);
-
 public:
 	string_expression(const std::string& s) { compile(s); }
 	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
@@ -468,7 +476,7 @@ template <class T>
 inline auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
-		return call_expression<T>{t};
+		return call_expression<T>{t, 1};
 	else if constexpr (std::is_same_v<char, T>)
 		return char_terminal{t};
 	else if constexpr (is_string_expression_v<T>)
@@ -564,11 +572,12 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 } // namespace expr
 
 template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); }
+inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r, 1); /* TODO: jump instead of call */ }
+inline expr::call_expression<rule> rule::operator()(unsigned short precedence) { return expr::call_expression<rule>{*this, precedence}; }
 
 inline grammar start(const rule& start_rule) {
 	program gp;
-	expr::program_evaluator{gp}.encode(opcode::call, 1).encode(opcode::accept, immediate{0x1337});
+	expr::program_evaluator{gp}.encode(opcode::call, 1, immediate{0}).encode(opcode::accept, immediate{0x1337});
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
 	std::unordered_map<const program*, std::ptrdiff_t> subprogram_addresses;
 	std::stack<std::pair<const rule*, const program*>> unprocessed;
@@ -604,7 +613,7 @@ public:
 	parser(const grammar& g, semantic_environment& s)
 		: grammar_{g}, semantics_(s), parsing_{false}, reading_{false}
 		, stack_frames_(256), backtrack_stack_(128), call_stack_(128)
-		, call_left_stack_(8), capture_stack_(8) {
+		, call_left_stack_(16), capture_stack_(8) {
 		reset();
 	}
 
