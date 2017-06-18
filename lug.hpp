@@ -394,7 +394,7 @@ public:
 	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
 };
 
-template <class E> std::ptrdiff_t program_length(const E& e) { return instruction_length_evaluator{}.evaluate(e).length(); }
+template <class E> std::ptrdiff_t instruction_length(const E& e) { return instruction_length_evaluator{}.evaluate(e).length(); }
 
 struct accept_action { void operator()(evaluator& v) const { v.encode(opcode::accept); } };
 struct newline_action { void operator()(evaluator& v) const { v.encode(opcode::newline); } };
@@ -492,14 +492,14 @@ using syntax = const lug::syntax_view&;
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		ev.encode(opcode::choice, 3 + program_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail);
+		ev.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail);
 	};
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator*(E&& e) {
 	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		auto x_length = program_length(x);
+		auto x_length = instruction_length(x);
 		ev.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4));
 	};
 }
@@ -507,7 +507,7 @@ inline auto operator*(E&& e) {
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(E1&& e1, E2&& e2) {
 	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.encode(opcode::choice, 2 + program_length(x1)).evaluate(x1).encode(opcode::commit, program_length(x2)).evaluate(x2);
+		ev.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2);
 	};
 }
 
@@ -564,7 +564,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 } // namespace expr
 
 template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
+inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); }
 
 inline grammar start(const rule& start_rule) {
 	program gp;
