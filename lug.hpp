@@ -19,7 +19,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace lug
@@ -198,8 +197,7 @@ class rule
 	friend class expr::rule_evaluator;
 	friend grammar start(const rule&);
 	lug::program program_;
-	std::vector<std::pair<const lug::program*, std::ptrdiff_t>> callees_;
-	std::unordered_set<const rule*> dependencies_;
+	std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t>> callees_;
 public:
 	rule() = default;
 	template <class E, class = std::enable_if_t<expr::is_expression_v<E>>> rule(const E& e);
@@ -207,7 +205,7 @@ public:
 	rule(rule&& r) = default;
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
-	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); dependencies_.swap(r.dependencies_); }
+	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
 };
 
 class grammar
@@ -281,15 +279,14 @@ class evaluator
 	virtual immediate do_add_predicate(parser_predicate) { return immediate::zero; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate::zero; }
 	virtual immediate do_add_syntax_action(syntax_action) { return immediate::zero; }
-	virtual void do_add_callee(const program*, std::ptrdiff_t) {}
-	virtual void do_add_dependency(const rule*) {}
+	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
 	virtual ~evaluator() {}
-	evaluator& call(const program& p) { do_add_callee(&p, length() + 1); return encode(opcode::call, -1); }
-	evaluator& call(const rule& r) { do_add_dependency(&r); return call(r.program_); }
-	evaluator& call(const grammar& g) { return call(g.program()); }
+	evaluator& call(const program& p) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0); }
+	evaluator& call(const rule& r) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0); }
+	evaluator& call(const grammar& g) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3); }
 	evaluator& encode(opcode op, immediate imm = immediate::zero) { return append(instruction{op, operands::none, imm}); }
 	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
 	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
@@ -392,8 +389,7 @@ public:
 class rule_evaluator : public program_evaluator
 {
 	rule& rule_;
-	void do_add_callee(const program* p, std::ptrdiff_t off) override { rule_.callees_.push_back(std::make_pair(p, off)); }
-	void do_add_dependency(const rule* r) override { rule_.dependencies_.insert(r); }
+	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n) override { rule_.callees_.emplace_back(r, p, n); }
 public:
 	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
 };
@@ -571,43 +567,35 @@ template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*
 inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r); /* jmp */ }
 
 inline grammar start(const rule& start_rule) {
-	const instruction final_accept_instr{opcode::accept, operands::none, immediate{0x1337}};
-	const instruction return_intsr{opcode::ret, operands::none, immediate::zero};
-	std::unordered_map<const program*, std::ptrdiff_t> addresses;
-	std::vector<std::pair<const program*, std::ptrdiff_t>> references;
-	std::unordered_set<const rule*> visited;
-	std::stack<const rule*> unprocessed;
-	program p;
-	unprocessed.push(&start_rule);
+	program gp;
+	expr::program_evaluator{gp}.encode(opcode::call, 1).encode(opcode::accept, immediate{0x1337});
+	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
+	std::unordered_map<const program*, std::ptrdiff_t> subprogram_addresses;
+	std::stack<std::pair<const rule*, const program*>> unprocessed;
+	unprocessed.emplace(&start_rule, &start_rule.program_);
 	do {
-		const rule* r = unprocessed.top();
+		auto [r, p] = unprocessed.top();
 		unprocessed.pop();
-		if (visited.count(r) != 0)
-			continue;
-		visited.insert(r);
-		auto addr = addresses.emplace(&r->program_, static_cast<std::ptrdiff_t>(p.instructions.size()));
-		if (addr.second) {
-			p.concatenate(r->program_);
-			p.instructions.push_back(r == &start_rule ? final_accept_instr : return_intsr);
-		}
-		for (auto callee : r->callees_) {
-			references.emplace_back(callee.first, callee.second + addr.first->second);
-			if (addresses.emplace(callee.first, static_cast<std::ptrdiff_t>(p.instructions.size())).second) {
-				p.concatenate(*callee.first);
-				p.instructions.push_back(return_intsr);
+		auto address = static_cast<std::ptrdiff_t>(gp.instructions.size());
+		if (subprogram_addresses.emplace(p, address).second) {
+			gp.concatenate(r->program_);
+			gp.instructions.emplace_back(opcode::ret, operands::none, immediate::zero);
+			if (r) {
+				for (auto [cr, cp, call_instr_offset] : r->callees_) {
+					calls.emplace_back(cp, address + call_instr_offset);
+					unprocessed.emplace(cr, cp);
+				}
 			}
 		}
-		for (auto dep : r->dependencies_)
-			unprocessed.push(dep);
 	} while (!unprocessed.empty());
-	for (auto ref : references) {
-		instruction& instr = p.instructions[ref.second];
-		std::ptrdiff_t reladdr = instr.off + addresses[ref.first] - ref.second;
+	for (auto [subprogram, call_instr_addr] : calls) {
+		instruction& instr = gp.instructions[call_instr_addr + 1];
+		std::ptrdiff_t reladdr = instr.off + subprogram_addresses[subprogram] - (call_instr_addr + 2);
 		if (reladdr < std::numeric_limits<int>::lowest() || (std::numeric_limits<int>::max)() < reladdr)
 			throw grammar_error("program offset exceeds addressable range");
 		instr.off = static_cast<int>(reladdr);
 	}
-	return grammar(std::move(p));
+	return grammar(std::move(gp));
 }
 
 class parser
