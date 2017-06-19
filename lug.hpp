@@ -8,7 +8,6 @@
 #include <array>
 #include <algorithm>
 #include <functional>
-#include <deque>
 #include <iostream>
 #include <locale>
 #include <map>
@@ -213,21 +212,23 @@ public:
 
 class semantic_environment
 {
-	std::deque<semantic_action> actions_;
+	std::string_view capture_;
+	std::size_t base_actions_;
+	std::vector<std::vector<semantic_action>> actions_;
 	std::vector<std::any> attributes_;
 	std::vector<std::unordered_map<void*, std::function<void(void*)>>> vframes_;
-	std::string_view capture_;
 	virtual void on_accept_begin() {}
 	virtual void on_accept_end() {}
 	virtual void on_clear() {}
 public:
 	virtual ~semantic_environment() {}
 	const std::string_view& capture() const { return capture_; }
-	std::size_t action_count() const noexcept { return actions_.size(); }
-	std::size_t push_action(semantic_action a) { actions_.push_back(std::move(a)); return action_count(); }
-	void pop_action() { actions_.pop_back(); }
-	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
-	void skip_action() { actions_.pop_front(); }
+	std::size_t action_count() const noexcept { return actions_.back().size() + base_actions_; }
+	auto push_action(semantic_action a) { actions_.back().push_back(std::move(a)); return action_count(); }
+	void pop_actions_after(std::size_t n) { auto& b = actions_.back(); if (n < b.size() + base_actions_) b.resize(n - base_actions_); }
+	auto drop_actions() { auto d{std::move(actions_.back())}; actions_.pop_back(); base_actions_ -= actions_.back().size(); return d; }
+	auto commit_actions() { auto d{drop_actions()}; auto& b = actions_.back(); b.insert(b.end(), std::make_move_iterator(d.begin()), std::make_move_iterator(d.end())); return action_count(); }
+	auto restore_actions(std::vector<semantic_action> actions) { base_actions_ = action_count(); actions_.push_back(std::move(actions)); return action_count(); }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
@@ -237,16 +238,20 @@ public:
 	void accept(std::string_view c) {
 		capture_ = c;
 		on_accept_begin();
-		while (!actions_.empty()) {
-			semantic_action a{std::move(actions_.front())};
-			actions_.pop_front();
-			a(*this);
+		for (std::size_t i = 0; i != actions_.size(); ++i) {
+			auto actions = std::move(actions_[i]);
+			actions_[i].clear();
+			for (auto& a : actions)
+				a(*this);
 		}
 		on_accept_end();
 	}
 
 	void clear() {
+		base_actions_ = 0;
 		actions_.clear();
+		actions_.reserve(32);
+		actions_.emplace_back();
 		attributes_.clear();
 		capture_ = std::string_view{};
 		on_clear();
@@ -603,7 +608,7 @@ class parser
 public:
 	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) {
 		stack_frames_.reserve(256); backtrack_stack_.reserve(128); call_stack_.reserve(128);
-		lrcall_stack_.reserve(16); capture_stack_.reserve(16);
+		capture_stack_.reserve(32); lrcall_stack_.reserve(32);
 		reset();
 	}
 
@@ -657,27 +662,27 @@ public:
 					pc += off;
 				} break;
 				case opcode::call: {
-					if (imm == 0) {
+					if (imm != 0) {
+						if (auto memo = std::find_if(lrcall_stack_.crbegin(), lrcall_stack_.crend(),
+									[pc = pc + off, ir](auto& x) { return pc == x.pca && ir == x.sr.index; });
+								memo != lrcall_stack_.crend()) {
+							if (memo->sa.index == lrfailcode || imm < memo->prec)
+								goto failure;
+							ir = memo->sa.index;
+							cr = memo->sa.position.column;
+							lr = memo->sa.position.line;
+							//semantics_.pop_actions_after(memo->actions.size()); // TODO: do restore here
+							continue;
+						}
+						stack_frames_.push_back(stack_frame_type::lrcall);
+						lrcall_stack_.push_back({ac,pc,pc+off,{ir,cr,lr},{lrfailcode,0,0},std::vector<semantic_action>{},imm});
+						ac = semantics_.restore_actions(std::vector<semantic_action>{});
+					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac,pc});
-						ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
-						pc += off;
-					} else if (auto memorecord = std::find_if(lrcall_stack_.crbegin(), lrcall_stack_.crend(),
-								[pc = pc + off, ir](auto& x) { return pc == std::get<1>(x).program_counter && ir == std::get<2>(x).index; });
-							memorecord != lrcall_stack_.crend()) {
-						auto memosubject = std::get<3>(*memorecord);
-						if (memosubject.index == lrfailcode || imm < std::get<4>(*memorecord))
-							goto failure;
-						ir = memosubject.index;
-						cr = memosubject.position.column;
-						lr = memosubject.position.line;
-					} else {
-						auto acnext = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
-						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrcall_stack_.push_back({{ac,pc},{acnext,pc+off},{ir,cr,lr},{lrfailcode,0,0},imm});
-						ac = acnext;
-						pc += off;
 					}
+					ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
+					pc += off;
 				} break;
 				case opcode::ret: {
 					if (stack_frames_.empty())
@@ -685,23 +690,24 @@ public:
 					switch (stack_frames_.back()) {
 						case stack_frame_type::call: {
 							pc = call_stack_.back().program_counter;
-							ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
 							call_stack_.pop_back();
 						} break;
 						case stack_frame_type::lrcall: {
-							auto& [psr, psa, ss, ts, k] = lrcall_stack_.back(); (void)k;
-							if (ir > ts.index || ts.index == lrfailcode) {
-								ts = {ir, cr, lr};
-								load_registers(ss, psa, ir, cr, lr, ac, pc);
-							} else {
-								pc = psr.program_counter;
-								ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
-								lrcall_stack_.pop_back();
-								stack_frames_.pop_back();
+							auto& memo = lrcall_stack_.back();
+							if (memo.sa.index == lrfailcode || ir > memo.sa.index) {
+								memo.sa = {ir, cr, lr};
+								memo.actions = semantics_.drop_actions();
+								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
+								ac = semantics_.restore_actions(memo.actions);
+								continue;
 							}
+							load_registers(memo.sa, {semantics_.commit_actions(), memo.pcr}, ir, cr, lr, ac, pc);
+							lrcall_stack_.pop_back();
 						} break;
 						default: goto failure;
 					}
+					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
+					stack_frames_.pop_back();
 				} break;
 				case opcode::fail: {
 					fc = imm;
@@ -726,10 +732,12 @@ public:
 								++fc;
 							} break;
 							case stack_frame_type::lrcall: {
-								const auto& [psr, psa, ss, ts, k] = lrcall_stack_.back(); (void)psa, ss, k;
-								if (ts.index != lrfailcode) {
-									program_state_ = psr;
-									input_state_ = ts;
+								auto& memo = lrcall_stack_.back();
+								semantics_.drop_actions();
+								if (memo.sa.index != lrfailcode) {
+									semantics_.restore_actions(memo.actions);
+									program_state_ = {semantics_.commit_actions(), memo.pcr};
+									input_state_ = memo.sa;
 								} else {
 									++fc;
 								}
@@ -823,6 +831,7 @@ private:
 	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
 	struct syntax_state { std::size_t index; syntax_position position; };
 	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
+	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_action> actions; std::size_t prec; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 
 	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
@@ -875,10 +884,10 @@ private:
 	bool reading_;
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::vector<stack_frame_type> stack_frames_;
-	std::vector<std::tuple<program_state, syntax_state>> backtrack_stack_;
+	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
 	std::vector<program_state> call_stack_;
-	std::vector<std::tuple<program_state, program_state, syntax_state, syntax_state, std::size_t>> lrcall_stack_;
 	std::vector<syntax_state> capture_stack_;
+	std::vector<lrmemo_state> lrcall_stack_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>

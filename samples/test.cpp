@@ -69,8 +69,8 @@ void test_direct_left_recursion() {
 	using namespace lug::lang;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule S = (S > C{'a'} | C{'a'}) > !C{'a'};
-	grammar G = start(S);
+	rule S = (S > C{'a'} | C{'a'});
+	grammar G = start(S > !C{'a'});
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));
 	assert(lug::parse("a", G));
