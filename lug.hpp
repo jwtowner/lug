@@ -30,6 +30,14 @@ class grammar_error : public lug_error { using lug_error::lug_error; };
 class parser_error : public lug_error { using lug_error::lug_error; };
 class program_error : public lug_error { using lug_error::lug_error; };
 
+template <class Error>
+struct reentrancy_sentinel
+{
+	bool& value;
+	reentrancy_sentinel(bool& x, const char* msg) : value{x} { if (value) throw Error{msg}; value = true; }
+	~reentrancy_sentinel() { value = false; }
+};
+
 namespace utf8
 {
 
@@ -39,7 +47,7 @@ constexpr bool is_lead(char c) noexcept {
 
 template <class InputIt>
 constexpr std::size_t count_runes(InputIt first, InputIt last) {
-	return ::std::accumulate(first, last, std::size_t{0}, [&](std::size_t l, char c) { return l + is_lead(c); });
+	return ::std::accumulate(first, last, std::size_t{0}, [](std::size_t l, char c) { return l + is_lead(c); });
 }
 
 template <class InputIt>
@@ -52,32 +60,14 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 	return static_cast<std::size_t>(::std::distance(first, next_rune(first, last)));
 }
 
-template <class Input>
-inline std::size_t size_of_first_rune(Input input, std::size_t pos, std::size_t len) {
-	auto first = ::std::next(::std::cbegin(input), static_cast<std::ptrdiff_t>(pos));
-	auto last = ::std::next(first, static_cast<std::ptrdiff_t>(len));
-	return size_of_first_rune(first, last);
-}
-
 } // namespace utf8
-
-template <class Error>
-struct reentrancy_sentinel
-{
-	bool& value;
-	reentrancy_sentinel(bool& x, const char* msg) : value{x} { if (value) throw Error{msg}; value = true; }
-	~reentrancy_sentinel() { value = false; }
-};
-
-struct syntax_position { std::size_t column, line; };
-struct syntax_range { std::size_t index, length; };
-struct syntax_view { std::string_view match; syntax_position start, end; };
 
 class rule;
 class grammar;
 class parser;
 class semantic_environment;
-
+struct syntax_position { std::size_t column, line; };
+struct syntax_view { std::string_view match; syntax_position start, end; };
 typedef std::function<void(parser&)> parser_error_handler;
 typedef std::function<bool(parser&)> parser_predicate;
 typedef std::function<void(semantic_environment&)> semantic_action;
@@ -558,8 +548,8 @@ inline auto operator%(T& x, E&& e) {
 	return ::std::forward<E>(e) < [&x](semantics s) { s.save_variable(x); x = s.pop_attribute<T>(); };
 }
 
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_terminal{}; }
 
 } // namespace operators
@@ -572,9 +562,10 @@ inline expr::call_expression<rule> rule::operator()(unsigned short precedence) {
 
 inline grammar start(const rule& start_rule) {
 	program gp;
-	expr::program_evaluator{gp}.encode(opcode::call, 1, immediate{0}).encode(opcode::accept, immediate{1});
-	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
+	expr::program_evaluator{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
+	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
+	calls.emplace_back(&start_rule.program_, 0);
 	std::unordered_set<const program*> recursive;
 	std::stack<std::pair<std::vector<const rule*>, const program*>> unprocessed;
 	unprocessed.emplace(std::vector<const rule*>{&start_rule}, &start_rule.program_);
@@ -610,168 +601,193 @@ inline grammar start(const rule& start_rule) {
 class parser
 {
 public:
-	parser(const grammar& g, semantic_environment& s)
-		: grammar_{g}, semantics_(s), parsing_{false}, reading_{false}
-		, stack_frames_(256), backtrack_stack_(128), call_stack_(128)
-		, call_left_stack_(16), capture_stack_(8) {
+	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) {
+		stack_frames_.reserve(256); backtrack_stack_.reserve(128); call_stack_.reserve(128);
+		lrcall_stack_.reserve(16); capture_stack_.reserve(16);
 		reset();
 	}
 
 	bool parse() {
 		reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
 		const program& prog = grammar_.program();
-		std::size_t imm, ir, nr, cr, lr, ac, fc = 0;
+		bool result = false, done = false;
+		std::size_t imm, ir, cr, lr, ac, fc = 0;
 		std::ptrdiff_t off, pc;
 		std::string_view str;
-		bool result = false;
-		bool done = false;
-
 		semantics_.clear();
 		program_state_ = {0, 0};
-		load_registers(ir, nr, cr, lr, ac, pc);
-
+		load_registers(ir, cr, lr, ac, pc);
 		while (!done) {
 			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
 				case opcode::match: {
 					if (str.size() > 0) {
-						if (!available(str.size(), ir, nr) || input_.compare(ir, str.size(), str) != 0)
+						if (!available(str.size(), ir) || input_.compare(ir, str.size(), str) != 0)
 							goto failure;
-						advance(str.size(), imm, ir, nr, cr);
+						ir += str.size(), cr += imm;
 					}
 				} break;
 				case opcode::match_any: {
-					if (!available(1, ir, nr))
+					if (!available(1, ir))
 						goto failure;
-					advance(utf8::size_of_first_rune(input_, ir, nr), 1, ir, nr, cr);
+					ir += utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend()), ++cr;
 				} break;
 				case opcode::match_class: {
 					// TODO
 				} break;
 				case opcode::match_range: {
 					std::string_view first = str.substr(0, imm), last = str.substr(imm);
-					if (!available((std::min)(first.size(), last.size()), ir, nr))
+					if (!available((std::min)(first.size(), last.size()), ir))
 						goto failure;
-					auto sz = utf8::size_of_first_rune(input_, ir, nr);
+					auto sz = utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend());
 					if (input_.compare(ir, sz, first) < 0 || input_.compare(ir, sz, last) > 0)
 						goto failure;
-					advance(sz, 1, ir, nr, cr);
+					ir += sz, ++cr;
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.emplace_back(program_state{ac,pc+off}, syntax_state{{ir-(imm&255),nr},{cr-(imm>>8),lr},ir+nr == input_.size()});
+					backtrack_stack_.push_back({{ac,pc+off},{ir-(imm&255),cr-(imm>>8),lr}});
 				} break;
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
 					backtrack_stack_.pop_back();
 					stack_frames_.pop_back();
+				} [[fallthrough]];
+				case opcode::jump: {
 					pc += off;
 				} break;
 				case opcode::call: {
-					stack_frames_.push_back(stack_frame_type::call);
-					call_stack_.push_back({ac, pc});
-					ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
-					pc += off;
-				} break;
-				case opcode::jump: {
-					pc += off;
+					if (imm == 0) {
+						stack_frames_.push_back(stack_frame_type::call);
+						call_stack_.push_back({ac,pc});
+						ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
+						pc += off;
+					} else if (auto memorecord = std::find_if(lrcall_stack_.crbegin(), lrcall_stack_.crend(),
+								[pc = pc + off, ir](auto& x) { return pc == std::get<1>(x).program_counter && ir == std::get<2>(x).index; });
+							memorecord != lrcall_stack_.crend()) {
+						auto memosubject = std::get<3>(*memorecord);
+						if (memosubject.index == lrfailcode || imm < std::get<4>(*memorecord))
+							goto failure;
+						ir = memosubject.index;
+						cr = memosubject.position.column;
+						lr = memosubject.position.line;
+					} else {
+						auto acnext = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
+						stack_frames_.push_back(stack_frame_type::lrcall);
+						lrcall_stack_.push_back({{ac,pc},{acnext,pc+off},{ir,cr,lr},{lrfailcode,0,0},imm});
+						ac = acnext;
+						pc += off;
+					}
 				} break;
 				case opcode::ret: {
 					if (stack_frames_.empty())
 						goto failure;
 					switch (stack_frames_.back()) {
-						case stack_frame_type::call: pc = call_stack_.back().program_counter; call_stack_.pop_back(); break;
-						//case stack_frame_type::call_left: pc = call_left_stack_.back().; call_left_stack_.pop_back(); break;
+						case stack_frame_type::call: {
+							pc = call_stack_.back().program_counter;
+							ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
+							call_stack_.pop_back();
+						} break;
+						case stack_frame_type::lrcall: {
+							auto& [psr, psa, ss, ts, k] = lrcall_stack_.back(); (void)k;
+							if (ir > ts.index || ts.index == lrfailcode) {
+								ts = {ir, cr, lr};
+								load_registers(ss, psa, ir, cr, lr, ac, pc);
+							} else {
+								pc = psr.program_counter;
+								ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
+								lrcall_stack_.pop_back();
+								stack_frames_.pop_back();
+							}
+						} break;
 						default: goto failure;
 					}
-					stack_frames_.pop_back();
-					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
 				} break;
 				case opcode::fail: {
 					fc = imm;
-				} goto failure;
+				failure:
+					save_registers(ir, cr, lr, ac, pc);
+					for (++fc; fc > 0; --fc) {
+						if (stack_frames_.empty()) {
+							done = true;
+							break;
+						}
+						stack_frame_type type = stack_frames_.back();
+						stack_frames_.pop_back();
+						switch (type) {
+							case stack_frame_type::backtrack: {
+								const auto& frame = backtrack_stack_.back();
+								program_state_ = std::get<0>(frame);
+								input_state_ = std::get<1>(frame);
+								backtrack_stack_.pop_back();
+							} break;
+							case stack_frame_type::call: {
+								call_stack_.pop_back();
+								++fc;
+							} break;
+							case stack_frame_type::lrcall: {
+								const auto& [psr, psa, ss, ts, k] = lrcall_stack_.back(); (void)psa, ss, k;
+								if (ts.index != lrfailcode) {
+									program_state_ = psr;
+									input_state_ = ts;
+								} else {
+									++fc;
+								}
+								lrcall_stack_.pop_back();
+							} break;
+							case stack_frame_type::capture: {
+								capture_stack_.pop_back();
+								++fc;
+							} break;
+							default: break;
+						}
+					}
+					load_registers(ir, cr, lr, ac, pc);
+				} break;
 				case opcode::accept: {
-					save_registers(ir, nr, cr, lr, ac, pc);
+					save_registers(ir, cr, lr, ac, pc);
 					semantics_.accept(input_);
 					if (imm != 0) {
 						result = true;
 						done = true;
 						break;
 					}
-					load_registers(ir, nr, cr, lr, ac, pc);
+					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::newline: {
 					cr = 1; lr += 1;
 				} break;
 				case opcode::predicate: {
-					save_registers(ir, nr, cr, lr, ac, pc);
+					save_registers(ir, cr, lr, ac, pc);
 					if (!prog.predicates[imm](*this))
 						goto failure;
-					load_registers(ir, nr, cr, lr, ac, pc);
+					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
 					ac = semantics_.push_action(prog.semantic_actions[imm]);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
-					capture_stack_.emplace_back(syntax_range{ir, nr}, syntax_position{cr, lr});
+					capture_stack_.push_back({ir, cr, lr});
 				} break;
 				case opcode::end_capture: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
+					auto last = ir;
 					auto end = syntax_position{cr, lr};
-					auto [range, start] = capture_stack_.back();
+					auto [first, start] = capture_stack_.back();
 					capture_stack_.pop_back();
 					stack_frames_.pop_back();
-					if (range.index < ir) {
-						range.length = ir - range.index;
-					} else {
-						range.length = range.index - ir;
-						range.index = ir;
+					if (first > last) {
+						std::swap(first, last);
 						std::swap(start, end);
 					}
-					ac = semantics_.push_action([a = prog.syntax_actions[imm], range, start, end](semantic_environment& s) {
-						a(s, {s.capture().substr(range.index, range.length), start, end}); });
+					ac = semantics_.push_action([a = prog.syntax_actions[imm], first, last, start, end](semantic_environment& s) {
+						a(s, {s.capture().substr(first, last - first), start, end}); });
 				} break;
 				default: throw parser_error{"invalid opcode"};
 			}
-			continue;
-		failure:
-			save_registers(ir, nr, cr, lr, ac, pc);
-			for (++fc; fc > 0; --fc) {
-				if (stack_frames_.empty()) {
-					done = true;
-					break;
-				}
-				stack_frame_type type = stack_frames_.back();
-				stack_frames_.pop_back();
-				switch (type) {
-					case stack_frame_type::backtrack: {
-						const auto& frame = backtrack_stack_.back();
-						program_state_ = std::get<0>(frame);
-						input_state_ = std::get<1>(frame);
-						backtrack_stack_.pop_back();
-					} break;
-					case stack_frame_type::call: {
-						call_stack_.pop_back();
-						++fc;
-					} break;
-					case stack_frame_type::call_left: {
-						const auto& frame = call_left_stack_.back();
-						program_state_ = std::get<0>(frame);
-						input_state_ = std::get<3>(frame);
-						call_left_stack_.pop_back();
-					} break;
-					case stack_frame_type::capture: {
-						capture_stack_.pop_back();
-						++fc;
-					} break;
-					default: break;
-				}
-			}
-			load_registers(ir, nr, cr, lr, ac, pc);
 		}
-
 		return result;
 	}
 
@@ -786,54 +802,52 @@ public:
 	template <class InputIt>
 	parser& enqueue(InputIt first, InputIt last) {
 		input_.insert(input_.end(), first, last);
-		if (input_state_.eof)
-			input_state_.range.length = input_.size() - input_state_.range.index;
 		return *this;
 	}
 
-	void save_registers(std::size_t ir, std::size_t nr, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = {{ir, nr}, {cr, lr}, ir + nr == input_.size()};
+	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
+		input_state_ = {ir, {cr, lr}};
 		program_state_ = {ac, pc};
 	}
 
-	void load_registers(std::size_t& ir, std::size_t& nr, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		ir = input_state_.range.index;
-		nr = input_state_.eof ? input_.size() - ir : input_state_.range.length;
-		cr = input_state_.position.column;
-		lr = input_state_.position.line;
-		ac = program_state_.action_counter;
-		pc = program_state_.program_counter;
-		semantics_.pop_actions_after(ac);
+	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		load_registers(input_state_, program_state_, ir, cr, lr, ac, pc);
 	}
 
-	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.range.index, input_state_.range.length}; }
+	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
 	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
 	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{column, line}); }
 
 private:
-	enum class stack_frame_type : unsigned char { backtrack, call, call_left, capture };
-	struct syntax_state { syntax_range range; syntax_position position; bool eof; };
+	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
+	struct syntax_state { std::size_t index; syntax_position position; };
 	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
+	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 
-	void advance(std::size_t n, std::size_t c, std::size_t& ir, std::size_t& nr, std::size_t& cr) {
-		ir += n; nr -= n; cr += c;
+	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		ir = ss.index;
+		cr = ss.position.column;
+		lr = ss.position.line;
+		ac = ps.action_counter;
+		pc = ps.program_counter;
+		semantics_.pop_actions_after(ac);
 	}
 
-	bool available(std::size_t n, std::size_t ir, std::size_t& nr) {
-		do {
-			if (n <= nr)
-				return true;
-			if (ir + nr < input_.size() || nr != 0)
-				return false;
-		} while (read_more(ir, nr));
+	bool available(std::size_t n, std::size_t ir) {
+		if (ir != lrfailcode) {
+			do {
+				if (n <= input_.size() - ir)
+					return true;
+				if (ir < input_.size())
+					return false;
+			} while (read_more());
+		}
 		return false;
 	}
 
-	bool read_more(std::size_t ir, std::size_t& nr) {
+	bool read_more() {
 		reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
-		input_state_.range = {ir, nr};
-		input_state_.eof = ir + nr == input_.size();
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
 			bool more = sources_.back()(text);
@@ -841,13 +855,11 @@ private:
 			if (!more)
 				sources_.pop_back();
 		}
-		if (input_state_.eof)
-			nr = input_state_.range.length = input_.size() - ir;
 		return !text.empty();
 	}
 
 	void reset() {
-		input_state_ = {{0, input_.size()}, {1, 1}, true};
+		input_state_ = {0, 1, 1};
 		program_state_ = {0, 0};
 		parsing_ = false;
 		reading_ = false;
@@ -865,8 +877,8 @@ private:
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::tuple<program_state, syntax_state>> backtrack_stack_;
 	std::vector<program_state> call_stack_;
-	std::vector<std::tuple<program_state, program_state, syntax_state, syntax_state, unsigned short>> call_left_stack_;
-	std::vector<std::tuple<syntax_range, syntax_position>> capture_stack_;
+	std::vector<std::tuple<program_state, program_state, syntax_state, syntax_state, std::size_t>> lrcall_stack_;
+	std::vector<syntax_state> capture_stack_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
@@ -929,7 +941,7 @@ inline void string_expression::compile(const std::string& s) {
 namespace lang
 {
 
-using lug::grammar; using lug::rule;
+using lug::grammar; using lug::rule; using lug::start;
 using expr::accept_action; using expr::newline_action;
 using expr::any_terminal; using expr::char_terminal; using expr::empty_terminal;
 using namespace expr::operators; using namespace std::literals::string_literals;
