@@ -583,10 +583,12 @@ inline grammar start(const rule& start_rule) {
 			gp.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
 			if (auto r = rules.back(); r) {
 				for (auto [cr, cp, instr_offset] : r->callees_) {
-					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend())
-						recursive.insert(cp);
 					calls.emplace_back(cp, address + instr_offset);
-					rules.push_back(cr); unprocessed.emplace(rules, cp); rules.pop_back();
+					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend()) {
+						recursive.insert(cp);
+					} else {
+						rules.push_back(cr); unprocessed.emplace(rules, cp); rules.pop_back();
+					}
 				}
 			}
 		}

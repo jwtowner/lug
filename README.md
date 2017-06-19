@@ -26,6 +26,8 @@ TODO
 ---
 - parser error recovery (WIP)
 - POSIX BRE character classes
+- restore semantic actions when calling memoized lr rule, not in opcode::ret
+- fix some left-recursive edge cases with trailing predicates that fail to execute properly
 - intermediate accept should ensure back-tracking is no longer possible, possibly investigate using progressive tabling and dynamic analysis
 - tail recursion optimization of rules
 - rule inlining optimization
