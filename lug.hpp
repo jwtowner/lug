@@ -227,7 +227,6 @@ public:
 	auto push_action(semantic_action a) { actions_.back().push_back(std::move(a)); return action_count(); }
 	void pop_actions_after(std::size_t n) { auto& b = actions_.back(); if (n < b.size() + base_actions_) b.resize(n - base_actions_); }
 	auto drop_actions() { auto d{std::move(actions_.back())}; actions_.pop_back(); base_actions_ -= actions_.back().size(); return d; }
-	auto commit_actions() { auto d{drop_actions()}; auto& b = actions_.back(); b.insert(b.end(), std::make_move_iterator(d.begin()), std::make_move_iterator(d.end())); return action_count(); }
 	auto restore_actions(std::vector<semantic_action> actions) { base_actions_ = action_count(); actions_.push_back(std::move(actions)); return action_count(); }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
@@ -255,6 +254,13 @@ public:
 		attributes_.clear();
 		capture_ = std::string_view{};
 		on_clear();
+	}
+
+	auto commit_actions() {
+		auto d{drop_actions()};
+		auto& b = actions_.back();
+		b.insert(b.end(), std::make_move_iterator(d.begin()), std::make_move_iterator(d.end()));
+		return action_count();
 	}
 
 	template <class T>
@@ -607,6 +613,67 @@ inline grammar start(const rule& start_rule) {
 
 class parser
 {
+	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
+	struct syntax_state { std::size_t index; syntax_position position; };
+	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
+	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_action> actions; std::size_t prec; };
+	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
+
+	const lug::grammar& grammar_;
+	semantic_environment& semantics_;
+	std::string input_;
+	syntax_state input_state_;
+	program_state program_state_;
+	bool parsing_;
+	bool reading_;
+	std::vector<std::function<bool(std::string&)>> sources_;
+	std::vector<stack_frame_type> stack_frames_;
+	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
+	std::vector<program_state> call_stack_;
+	std::vector<syntax_state> capture_stack_;
+	std::vector<lrmemo_state> lrcall_stack_;
+
+	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		ir = ss.index;
+		cr = ss.position.column;
+		lr = ss.position.line;
+		ac = ps.action_counter;
+		pc = ps.program_counter;
+		semantics_.pop_actions_after(ac);
+	}
+
+	bool available(std::size_t n, std::size_t ir) {
+		if (ir != lrfailcode) {
+			do {
+				if (n <= input_.size() - ir)
+					return true;
+				if (ir < input_.size())
+					return false;
+			} while (read_more());
+		}
+		return false;
+	}
+
+	bool read_more() {
+		reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
+		std::string text;
+		while (!sources_.empty() && text.empty()) {
+			bool more = sources_.back()(text);
+			input_.insert(input_.end(), text.begin(), text.end());
+			if (!more)
+				sources_.pop_back();
+		}
+		return !text.empty();
+	}
+
+	void reset() {
+		input_state_ = {0, 1, 1};
+		program_state_ = {0, 0};
+		parsing_ = false;
+		reading_ = false;
+		semantics_.clear();
+	}
+
 public:
 	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) {
 		stack_frames_.reserve(256); backtrack_stack_.reserve(128); call_stack_.reserve(128);
@@ -670,10 +737,8 @@ public:
 								memo != lrcall_stack_.crend()) {
 							if (memo->sa.index == lrfailcode || imm < memo->prec)
 								goto failure;
-							ir = memo->sa.index;
-							cr = memo->sa.position.column;
-							lr = memo->sa.position.line;
-							//semantics_.pop_actions_after(memo->actions.size()); // TODO: do restore here
+							ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
+							//semantics_.pop_actions_after(memo->actions.size()); // TODO: clear actions and restore here
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
@@ -700,7 +765,7 @@ public:
 								memo.sa = {ir, cr, lr};
 								memo.actions = semantics_.drop_actions();
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
-								ac = semantics_.restore_actions(memo.actions);
+								ac = semantics_.restore_actions(memo.actions); // TODO: move restore to call
 								continue;
 							}
 							load_registers(memo.sa, {semantics_.commit_actions(), memo.pcr}, ir, cr, lr, ac, pc);
@@ -765,7 +830,7 @@ public:
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::newline: {
-					cr = 1; lr += 1;
+					cr = 1, lr += 1;
 				} break;
 				case opcode::predicate: {
 					save_registers(ir, cr, lr, ac, pc);
@@ -828,68 +893,6 @@ public:
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
 	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
 	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{column, line}); }
-
-private:
-	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
-	struct syntax_state { std::size_t index; syntax_position position; };
-	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
-	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_action> actions; std::size_t prec; };
-	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-
-	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		ir = ss.index;
-		cr = ss.position.column;
-		lr = ss.position.line;
-		ac = ps.action_counter;
-		pc = ps.program_counter;
-		semantics_.pop_actions_after(ac);
-	}
-
-	bool available(std::size_t n, std::size_t ir) {
-		if (ir != lrfailcode) {
-			do {
-				if (n <= input_.size() - ir)
-					return true;
-				if (ir < input_.size())
-					return false;
-			} while (read_more());
-		}
-		return false;
-	}
-
-	bool read_more() {
-		reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
-		std::string text;
-		while (!sources_.empty() && text.empty()) {
-			bool more = sources_.back()(text);
-			input_.insert(input_.end(), text.begin(), text.end());
-			if (!more)
-				sources_.pop_back();
-		}
-		return !text.empty();
-	}
-
-	void reset() {
-		input_state_ = {0, 1, 1};
-		program_state_ = {0, 0};
-		parsing_ = false;
-		reading_ = false;
-		semantics_.clear();
-	}
-
-	const lug::grammar& grammar_;
-	semantic_environment& semantics_;
-	std::string input_;
-	syntax_state input_state_;
-	program_state program_state_;
-	bool parsing_;
-	bool reading_;
-	std::vector<std::function<bool(std::string&)>> sources_;
-	std::vector<stack_frame_type> stack_frames_;
-	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
-	std::vector<program_state> call_stack_;
-	std::vector<syntax_state> capture_stack_;
-	std::vector<lrmemo_state> lrcall_stack_;
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
