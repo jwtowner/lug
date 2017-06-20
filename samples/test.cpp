@@ -101,20 +101,29 @@ void test_indirect_left_recursion() {
 	assert(lug::parse("aaaak", G));
 }
 
-void test_left_association() {
+void test_association_and_precedence() {
 	using namespace lug::lang;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule N = C{'1'} | C{'2'} | C{'3'};
-	rule E = E(1) > C{'+'} > E(2) | N;
+	std::string out;
+	rule N	= C{'1'} | C{'2'} | C{'3'};
+	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
+			| E(2) > C{'*'} > E(2) < [&out]() { out += '*'; }
+			| N < [&out](semantics s, syntax x) { out += x.match; };
 	grammar G = start(E > !A);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("a", G));
-	assert(lug::parse("1", G));
-	assert(lug::parse("1+2", G));
-	assert(lug::parse("1+2+3", G));
-	assert(lug::parse("1+2+3+2", G));
-	assert(!lug::parse("1+a", G));
+	assert(!lug::parse("1+", G));
+	out.clear();
+	assert(lug::parse("1", G) && out == "1");
+	out.clear();
+	assert(lug::parse("1+2", G) && out == "12+");
+	out.clear();
+	assert(lug::parse("3*1", G) && out == "31*");
+	out.clear();
+	assert(lug::parse("1*2+3*2", G) && out == "12*32*+");
+	out.clear();
+	assert(lug::parse("2+2*3+1", G) && out == "*++");
 }
 
 int main(int argc, char** argv) {
@@ -126,7 +135,7 @@ int main(int argc, char** argv) {
 		test_terminal_choice();
 		test_direct_left_recursion();
 		test_indirect_left_recursion();
-		test_left_association();
+		test_association_and_precedence();
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;

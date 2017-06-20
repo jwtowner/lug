@@ -213,8 +213,7 @@ public:
 class semantic_environment
 {
 	std::string_view capture_;
-	std::size_t base_actions_;
-	std::vector<std::vector<semantic_action>> actions_;
+	std::vector<semantic_action> actions_;
 	std::vector<std::any> attributes_;
 	std::vector<std::unordered_map<void*, std::function<void(void*)>>> vframes_;
 	virtual void on_accept_begin() {}
@@ -223,11 +222,10 @@ class semantic_environment
 public:
 	virtual ~semantic_environment() {}
 	const std::string_view& capture() const { return capture_; }
-	std::size_t action_count() const noexcept { return actions_.back().size() + base_actions_; }
-	auto push_action(semantic_action a) { actions_.back().push_back(std::move(a)); return action_count(); }
-	void pop_actions_after(std::size_t n) { auto& b = actions_.back(); if (n < b.size() + base_actions_) b.resize(n - base_actions_); }
-	auto drop_actions() { auto d{std::move(actions_.back())}; actions_.pop_back(); base_actions_ -= actions_.back().size(); return d; }
-	auto restore_actions(std::vector<semantic_action> actions) { base_actions_ = action_count(); actions_.push_back(std::move(actions)); return action_count(); }
+	std::size_t action_count() const noexcept { return actions_.size(); }
+	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
+	auto push_action(semantic_action a) { actions_.push_back(std::move(a)); return action_count(); }
+	auto restore_actions(const std::vector<semantic_action>& a) { actions_.insert(actions_.end(), a.begin(), a.end()); return action_count(); }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
@@ -237,30 +235,26 @@ public:
 	void accept(std::string_view c) {
 		capture_ = c;
 		on_accept_begin();
-		for (std::size_t i = 0; i != actions_.size(); ++i) {
-			auto actions = std::move(actions_[i]);
-			actions_[i].clear();
-			for (auto& a : actions)
+		for (auto& a : actions_)
 				a(*this);
-		}
+		actions_.clear();
 		on_accept_end();
 	}
 
 	void clear() {
-		base_actions_ = 0;
-		actions_.clear();
-		actions_.reserve(32);
-		actions_.emplace_back();
-		attributes_.clear();
 		capture_ = std::string_view{};
+		actions_.clear();
+		attributes_.clear();
 		on_clear();
 	}
 
-	auto commit_actions() {
-		auto d{drop_actions()};
-		auto& b = actions_.back();
-		b.insert(b.end(), std::make_move_iterator(d.begin()), std::make_move_iterator(d.end()));
-		return action_count();
+	auto drop_actions_after(std::size_t n) {
+		std::vector<semantic_action> dropped;
+		if (n < actions_.size()) {
+			dropped.assign(std::make_move_iterator(actions_.begin() + n), std::make_move_iterator(actions_.end()));
+			actions_.resize(n);
+		}
+		return dropped;
 	}
 
 	template <class T>
@@ -676,8 +670,6 @@ class parser
 
 public:
 	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) {
-		stack_frames_.reserve(256); backtrack_stack_.reserve(128); call_stack_.reserve(128);
-		capture_stack_.reserve(32); lrcall_stack_.reserve(32);
 		reset();
 	}
 
@@ -743,7 +735,6 @@ public:
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
 						lrcall_stack_.push_back({ac,pc,pc+off,{ir,cr,lr},{lrfailcode,0,0},std::vector<semantic_action>{},imm});
-						ac = semantics_.restore_actions(std::vector<semantic_action>{});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac,pc});
@@ -763,12 +754,12 @@ public:
 							auto& memo = lrcall_stack_.back();
 							if (memo.sa.index == lrfailcode || ir > memo.sa.index) {
 								memo.sa = {ir, cr, lr};
-								memo.actions = semantics_.drop_actions();
+								memo.actions = semantics_.drop_actions_after(memo.acr);
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
 								ac = semantics_.restore_actions(memo.actions); // TODO: move restore to call
 								continue;
 							}
-							load_registers(memo.sa, {semantics_.commit_actions(), memo.pcr}, ir, cr, lr, ac, pc);
+							load_registers(memo.sa, {ac, memo.pcr}, ir, cr, lr, ac, pc);
 							lrcall_stack_.pop_back();
 						} break;
 						default: goto failure;
@@ -800,10 +791,9 @@ public:
 							} break;
 							case stack_frame_type::lrcall: {
 								auto& memo = lrcall_stack_.back();
-								semantics_.drop_actions();
+								semantics_.pop_actions_after(memo.acr);
 								if (memo.sa.index != lrfailcode) {
-									semantics_.restore_actions(memo.actions);
-									program_state_ = {semantics_.commit_actions(), memo.pcr};
+									program_state_ = {semantics_.restore_actions(memo.actions), memo.pcr};
 									input_state_ = memo.sa;
 								} else {
 									++fc;

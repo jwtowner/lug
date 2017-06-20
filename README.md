@@ -2,13 +2,13 @@ lug
 ===
 An embedded domain specific language in C++ for expressing parsers as extended Parsing Expression Grammars (PEGs)
 
-- Header only library written using modern C++17 language and library features
+- Standalone, header only library using modern C++17 language and library features
 - Natural syntax more akin to external parser generator languages, unlike other C++ parsing toolkits
 - Left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - Uses expression template functors as [fexprs](https://en.wikipedia.org/wiki/Fexpr) for evaluating and optimizing grammar rules at compile time
-- Written to be extremely small, is currently under 1000 lines of (very terse) code
+- Relatively small with no dependencies, is currently under 1000 lines of (very terse) code
 
 It is based on research introduced in the following papers:
 
