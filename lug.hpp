@@ -98,8 +98,7 @@ union instruction
 
 	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
 		const prefix pf = code[pc++].pf;
-		imm = pf.val;
-		off = (pf.aux & operands::off) == operands::off ? code[pc++].off : 0;
+		imm = pf.val, off = (pf.aux & operands::off) == operands::off ? code[pc++].off : 0;
 		if ((pf.aux & operands::str) == operands::str) {
 			str = std::string_view{code[pc].str.data(), (imm & 0xFF) + 1};
 			pc += ((imm & 0xFF) + 4) >> 2;
@@ -572,12 +571,12 @@ inline expr::call_expression<rule> rule::operator()(unsigned short precedence) {
 
 inline grammar start(const rule& start_rule) {
 	program gp;
-	expr::program_evaluator{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
-	calls.emplace_back(&start_rule.program_, 0);
 	std::unordered_set<const program*> recursive;
 	std::stack<std::pair<std::vector<const rule*>, const program*>> unprocessed;
+	expr::program_evaluator{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
+	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
 		auto [rules, subprogram] = unprocessed.top();
@@ -633,11 +632,8 @@ class parser
 	std::vector<lrmemo_state> lrcall_stack_;
 
 	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		ir = ss.index;
-		cr = ss.position.column;
-		lr = ss.position.line;
-		ac = ps.action_counter;
-		pc = ps.program_counter;
+		ir = ss.index, cr = ss.position.column, lr = ss.position.line;
+		ac = ps.action_counter, pc = ps.program_counter;
 		semantics_.pop_actions_after(ac);
 	}
 
@@ -666,10 +662,8 @@ class parser
 	}
 
 	void reset() {
-		input_state_ = {0, 1, 1};
-		program_state_ = {0, 0};
-		parsing_ = false;
-		reading_ = false;
+		input_state_ = {0, 1, 1}, program_state_ = {0, 0};
+		parsing_ = reading_ = false;
 		semantics_.clear();
 	}
 
@@ -791,8 +785,7 @@ public:
 								backtrack_stack_.pop_back();
 							} break;
 							case stack_frame_type::call: {
-								call_stack_.pop_back();
-								++fc;
+								call_stack_.pop_back(), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
 								auto& memo = lrcall_stack_.back();
@@ -805,8 +798,7 @@ public:
 								lrcall_stack_.pop_back();
 							} break;
 							case stack_frame_type::capture: {
-								capture_stack_.pop_back();
-								++fc;
+								capture_stack_.pop_back(), ++fc;
 							} break;
 							default: break;
 						}
@@ -845,12 +837,8 @@ public:
 					auto last = ir;
 					auto end = syntax_position{cr, lr};
 					auto [first, start] = capture_stack_.back();
-					capture_stack_.pop_back();
-					stack_frames_.pop_back();
-					if (first > last) {
-						std::swap(first, last);
-						std::swap(start, end);
-					}
+					capture_stack_.pop_back(), stack_frames_.pop_back();
+					if (first > last) { std::swap(first, last); std::swap(start, end); }
 					ac = semantics_.push_action([a = prog.syntax_actions[imm], first, last, start, end](semantic_environment& s) {
 						a(s, {s.capture().substr(first, last - first), start, end}); });
 				} break;
@@ -875,8 +863,7 @@ public:
 	}
 
 	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = {ir, {cr, lr}};
-		program_state_ = {ac, pc};
+		input_state_ = {ir, {cr, lr}}, program_state_ = {ac, pc};
 	}
 
 	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
