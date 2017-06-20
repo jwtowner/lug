@@ -69,7 +69,7 @@ void test_direct_left_recursion() {
 	using namespace lug::lang;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule S = (S > C{'a'} | C{'a'}) ;
+	rule S = (S > C{'a'} | C{'a'});
 	grammar G = start(S > !C{'a'});
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));
@@ -108,7 +108,7 @@ void test_association_and_precedence() {
 	std::string out;
 	rule N	= C{'1'} | C{'2'} | C{'3'};
 	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
-			| E(2) > C{'*'} > E(2) < [&out]() { out += '*'; }
+			| E(2) > C{'*'} > E(3) < [&out]() { out += '*'; }
 			| N < [&out](semantics s, syntax x) { out += x.match; };
 	grammar G = start(E > !A);
 	assert(!lug::parse("", G));
@@ -123,7 +123,9 @@ void test_association_and_precedence() {
 	out.clear();
 	assert(lug::parse("1*2+3*2", G) && out == "12*32*+");
 	out.clear();
-	assert(lug::parse("2+2*3+1", G) && out == "*++");
+	assert(lug::parse("2+2*3+1", G) && out == "223*+1+");
+	out.clear();
+	assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*1+");
 }
 
 int main(int argc, char** argv) {

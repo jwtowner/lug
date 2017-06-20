@@ -225,7 +225,6 @@ public:
 	std::size_t action_count() const noexcept { return actions_.size(); }
 	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
 	auto push_action(semantic_action a) { actions_.push_back(std::move(a)); return action_count(); }
-	auto restore_actions(const std::vector<semantic_action>& a) { actions_.insert(actions_.end(), a.begin(), a.end()); return action_count(); }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
@@ -255,6 +254,12 @@ public:
 			actions_.resize(n);
 		}
 		return dropped;
+	}
+
+	auto restore_actions_after(std::size_t n, const std::vector<semantic_action>& a) {
+		pop_actions_after(n);
+		actions_.insert(actions_.end(), a.begin(), a.end());
+		return action_count();
 	}
 
 	template <class T>
@@ -725,12 +730,12 @@ public:
 				case opcode::call: {
 					if (imm != 0) {
 						if (auto memo = std::find_if(lrcall_stack_.crbegin(), lrcall_stack_.crend(),
-									[pc = pc + off, ir](auto& x) { return pc == x.pca && ir == x.sr.index; });
+									[pca = pc + off, ir](auto& x) { return pca == x.pca && ir == x.sr.index; });
 								memo != lrcall_stack_.crend()) {
 							if (memo->sa.index == lrfailcode || imm < memo->prec)
 								goto failure;
 							ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
-							//semantics_.pop_actions_after(memo->actions.size()); // TODO: clear actions and restore here
+							ac = semantics_.restore_actions_after(ac, memo->actions);
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
@@ -743,6 +748,7 @@ public:
 					pc += off;
 				} break;
 				case opcode::ret: {
+					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
 					if (stack_frames_.empty())
 						goto failure;
 					switch (stack_frames_.back()) {
@@ -756,15 +762,14 @@ public:
 								memo.sa = {ir, cr, lr};
 								memo.actions = semantics_.drop_actions_after(memo.acr);
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
-								ac = semantics_.restore_actions(memo.actions); // TODO: move restore to call
+								ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
 								continue;
 							}
-							load_registers(memo.sa, {ac, memo.pcr}, ir, cr, lr, ac, pc);
+							load_registers(memo.sa, {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr}, ir, cr, lr, ac, pc);
 							lrcall_stack_.pop_back();
 						} break;
 						default: goto failure;
 					}
-					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
 					stack_frames_.pop_back();
 				} break;
 				case opcode::fail: {
@@ -791,9 +796,8 @@ public:
 							} break;
 							case stack_frame_type::lrcall: {
 								auto& memo = lrcall_stack_.back();
-								semantics_.pop_actions_after(memo.acr);
 								if (memo.sa.index != lrfailcode) {
-									program_state_ = {semantics_.restore_actions(memo.actions), memo.pcr};
+									program_state_ = {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr};
 									input_state_ = memo.sa;
 								} else {
 									++fc;
