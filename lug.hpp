@@ -622,8 +622,7 @@ class parser
 	std::string input_;
 	syntax_state input_state_;
 	program_state program_state_;
-	bool parsing_;
-	bool reading_;
+	bool parsing_, reading_;
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
@@ -668,8 +667,32 @@ class parser
 	}
 
 public:
-	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) {
-		reset();
+	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) { reset(); }
+	std::string_view input_view() const noexcept { return std::string_view{ input_.data() + input_state_.index, input_.size() - input_state_.index }; }
+	const syntax_position& input_position() const noexcept { return input_state_.position; }
+	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
+	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{ column, line }); }
+
+	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
+		input_state_ = { ir,{ cr, lr } }, program_state_ = { ac, pc };
+	}
+
+	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		load_registers(input_state_, program_state_, ir, cr, lr, ac, pc);
+	}
+
+	template <class InputIt>
+	parser& enqueue(InputIt first, InputIt last) {
+		input_.insert(input_.end(), first, last);
+		return *this;
+	}
+
+	template <class InputFunc>
+	parser& push_source(InputFunc&& func) {
+		if (reading_)
+			throw parser_error("new input source cannot be specified while reading from input sources");
+		sources_.emplace_back(::std::forward<InputFunc>(func));
+		return *this;
 	}
 
 	bool parse() {
@@ -847,33 +870,6 @@ public:
 		}
 		return result;
 	}
-
-	template <class InputFunc>
-	parser& push_source(InputFunc&& func) {
-		if (reading_)
-			throw parser_error("new input source cannot be specified while reading from input sources");
-		sources_.emplace_back(::std::forward<InputFunc>(func));
-		return *this;
-	}
-
-	template <class InputIt>
-	parser& enqueue(InputIt first, InputIt last) {
-		input_.insert(input_.end(), first, last);
-		return *this;
-	}
-
-	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = {ir, {cr, lr}}, program_state_ = {ac, pc};
-	}
-
-	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		load_registers(input_state_, program_state_, ir, cr, lr, ac, pc);
-	}
-
-	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
-	const syntax_position& input_position() const noexcept { return input_state_.position; }
-	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
-	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{column, line}); }
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>

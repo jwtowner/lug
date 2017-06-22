@@ -125,7 +125,7 @@ void test_association_and_precedence() {
 	out.clear();
 	assert(lug::parse("2+2*3+1", G) && out == "223*+1+");
 	out.clear();
-	assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*1+");
+	assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*+1+");
 }
 
 int main(int argc, char** argv) {
