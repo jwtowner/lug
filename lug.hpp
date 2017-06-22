@@ -549,23 +549,14 @@ inline auto operator<(E&& e, A a) {
 	}
 }
 
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-inline auto operator>=(E1&& e1, E2&& e2) {
-	return ::std::forward<E1>(e1) < [](semantics s, syntax x) { s.push_attribute(x.match); } > ::std::forward<E2>(e2);
-}
-
-template <class E, class A, class = std::enable_if_t<is_expression_v<E> && std::is_invocable_v<A, std::string_view>>>
-inline auto operator<=(E&& e, A a) {
-	return ::std::forward<E>(e) < [a = std::move(a)](semantics s) {
-		if constexpr (std::is_invocable_v<A, std::string_view> && std::is_same_v<void, std::invoke_result_t<A, std::string_view>>)
-			a(s.pop_attribute<std::string_view>());
-		else
-			s.push_attribute(a(s.pop_attribute<std::string_view>())); };
+template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator<<(T& v, E&& e) {
+	return ::std::forward<E>(e) < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.match}; };
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(T& x, E&& e) {
-	return ::std::forward<E>(e) < [&x](semantics s) { s.save_variable(x); x = s.pop_attribute<T>(); };
+inline auto operator%(T& v, E&& e) {
+	return ::std::forward<E>(e) < [&v](semantics s) { s.save_variable(v); v = s.pop_attribute<T>(); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }

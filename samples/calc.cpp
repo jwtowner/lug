@@ -10,12 +10,13 @@ namespace calc
 
 	double variables[26];
 	double e, l, n, r, s;
+	std::string_view m;
 	int i;
 
 	rule SPACE  = *"[ \t]"s;
 	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
-	rule NUMBER = +"[0-9]"s >= SPACE <= [](auto t) { return std::stod(std::string{t}); };
-	rule ID     = "[a-z]"s >= SPACE <= [](auto t) -> int { return t[0] - 'a'; };
+	rule NUMBER = m<< +"[[:digit:]]"s > SPACE < []() { return std::stod(std::string{m}); };
+	rule ID     = m<< "[a-z]"s > SPACE < []() -> int { return m[0] - 'a'; };
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
 	rule MINUS  = "-" > SPACE;
