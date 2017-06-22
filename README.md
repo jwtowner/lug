@@ -2,12 +2,13 @@ lug
 ===
 An embedded domain specific language in C++ for expressing parsers as extended Parsing Expression Grammars (PEGs)
 
-- Header only library using C++17 language and library features
+- UTF-8 text parsing with support for matching Unicode character classes
 - Natural syntax more akin to external parser generator languages, unlike many other C++ parsing toolkits
 - Left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - Uses expression template functors for evaluating and optimizing grammar rules at compile time
+- Header only library using C++17 language and library features
 - Relatively small, intended to remain under 1000 lines of (very terse) code
 
 It is based on research introduced in the following papers:
@@ -25,8 +26,7 @@ It is based on research introduced in the following papers:
 TODO
 ---
 - parser error recovery (WIP)
-- POSIX BRE character classes
-- intermediate accept should ensure back-tracking is no longer possible, possibly investigate using progressive tabling and dynamic analysis
+- cut operator should ensure back-tracking is no longer possible, possibly investigate using progressive tabling and dynamic analysis
 - optimization: better detection left-recursive rule calls
 - optimization: do not create attribute variable frames if a rule does not use the attribute binding operator
 - optimization: tail recursion

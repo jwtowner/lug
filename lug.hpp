@@ -121,6 +121,7 @@ union instruction
 
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
+static_assert(sizeof(std::ctype_base::mask) <= sizeof(immediate), "immediate must be large enough to hold std::ctype::mask");
 
 struct program
 {
@@ -419,18 +420,25 @@ class string_expression
 
 	struct generator : public semantic_environment
 	{
-		bool circumflex;
 		instruction_evaluator evaluator;
+		bool circumflex;
+		std::ctype_base::mask classes;
 		std::multimap<std::string_view, std::string_view> ranges;
+		generator(string_expression& se) : evaluator{se.instructions_}, circumflex{false}, classes{0} {}
 
-		explicit generator(string_expression& se)
-			: circumflex{false}, evaluator{se.instructions_} {}
+		void bracket_class(std::string_view s) {
+			using ct = std::ctype_base; static constexpr std::pair<const char* const, ct::mask> m[12] = {
+				{"alnum", ct::alnum}, {"alpha", ct::alpha}, {"blank", ct::blank}, {"cntrl", ct::cntrl},
+				{"digit", ct::digit}, {"graph", ct::graph}, {"lower", ct::lower}, {"print", ct::print},
+				{"punct", ct::punct}, {"space", ct::space}, {"upper", ct::upper}, {"xdigit", ct::xdigit}};
+			if (auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(2, s.size() - 4, x.first); }); c != std::end(m))
+				classes |= c->second;
+		}
 
 		void bracket_range(std::string_view s) {
 			auto sep = s.find('-');
 			auto first = s.substr(0, sep), last = s.substr(sep + 1);
-			if (first > last)
-				std::swap(first, last);
+			if (first > last) std::swap(first, last);
 			ranges.emplace(first, last);
 		}
 
@@ -460,9 +468,12 @@ class string_expression
 			if (circumflex)
 				evaluator.encode(opcode::choice, 3 + choices.size());
 			evaluator.append(choices.begin(), choices.end());
+			if (classes)
+				evaluator.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
 				evaluator.encode(opcode::commit, 0).encode(opcode::fail);
 			circumflex = false;
+			classes = 0;
 		}
 	};
 
@@ -619,6 +630,7 @@ class parser
 
 	const lug::grammar& grammar_;
 	semantic_environment& semantics_;
+	std::locale locale_;
 	std::string input_;
 	syntax_state input_state_;
 	program_state program_state_;
@@ -720,7 +732,13 @@ public:
 					ir += utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend()), ++cr;
 				} break;
 				case opcode::match_class: {
-					// TODO
+					const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
+					std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
+					auto sz = utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend());
+					auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
+					if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc.at(0)))
+						goto failure;
+					ir += sz, ++cr;
 				} break;
 				case opcode::match_range: {
 					std::string_view first = str.substr(0, imm), last = str.substr(imm);
@@ -908,16 +926,17 @@ namespace expr
 
 inline grammar string_expression::make_grammar() {
 	using namespace operators;
-	using Char = char_terminal;
-	constexpr auto Any = any_terminal{};
-	rule Empty = empty_terminal{}                       <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
-	rule Dot = Char{'.'}                                <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
-	rule Element = Any > Char{'-'} > !Char{']'} > Any   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
-		| Any                                           <[](semantics s, syntax x) { dynamic_cast<generator&>(s).ranges.emplace(x.match, x.match); };
-	rule Bracket = Char{'['} > ~(Char{'^'}              <[](semantics s) { dynamic_cast<generator&>(s).circumflex = true; })
-		> Element > *(!Char{']'} > Element) > Char{']'} <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
-	rule Sequence = +(!(Char{'.'} | Char{'['}) > Any)   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };
-	return start((+(Dot | Bracket | Sequence) | Empty) > !Any);
+	constexpr auto A = any_terminal{};
+	using C = char_terminal;
+	rule Empty = empty_terminal{}                               <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
+	rule Dot = C{'.'}                                           <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
+	rule Element = A > C{'-'} > !C{']'} > A                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
+		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_class(x.match); }
+		| A                                                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).ranges.emplace(x.match, x.match); };
+	rule Bracket = C{'['} > ~(C{'^'}                            <[](semantics s) { dynamic_cast<generator&>(s).circumflex = true; })
+		> Element > *(!C{']'} > Element) > C{']'}               <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
+	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };
+	return start((+(Dot | Bracket | Sequence) | Empty) > !A);
 }
 
 inline void string_expression::compile(const std::string& s) {
