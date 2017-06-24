@@ -10,10 +10,8 @@
 #include <functional>
 #include <iostream>
 #include <locale>
-#include <map>
 #include <memory>
 #include <numeric>
-#include <stack>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,7 +25,6 @@ namespace lug
 class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
 class grammar_error : public lug_error { using lug_error::lug_error; };
 class parser_error : public lug_error { using lug_error::lug_error; };
-class program_error : public lug_error { using lug_error::lug_error; };
 
 template <class Error>
 struct reentrancy_sentinel
@@ -93,7 +90,7 @@ union instruction
 	std::array<char, 4> str;
 
 	instruction(opcode op, operands aux, immediate imm) : pf{op, aux, static_cast<unsigned short>(imm)} {}
-	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_error{"offset exceeds allowable range"}; }
+	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw grammar_error{"offset exceeds allowable range"}; }
 	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
 	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
@@ -145,7 +142,7 @@ struct program
 			if (valoffset != 0) {
 				std::size_t val = instr.pf.val + valoffset;
 				if (val < valoffset || val > (std::numeric_limits<unsigned short>::max)())
-					throw program_error("immediate value exceeds 16-bit limit");
+					throw grammar_error("immediate value exceeds 16-bit limit");
 				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
@@ -294,7 +291,7 @@ public:
 	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
 	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
-	template <class E> auto evaluate(const E& e)->std::enable_if_t<is_expression_v<E>, evaluator&>;
+	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 
 	evaluator& append(instruction instr) {
@@ -335,9 +332,7 @@ public:
 	}
 
 	evaluator& match_range(std::string_view first, std::string_view last) {
-		if (first < last)
-			return encode(opcode::match_range, first.size(), std::string{first}.append(last));
-		return match(first);
+		return encode(opcode::match_range, first.size(), std::string{first}.append(last));
 	}
 };
 
@@ -355,14 +350,14 @@ class instruction_length_evaluator : public evaluator
 
 class instruction_evaluator : public evaluator
 {
-	std::vector<instruction>& instructions_;
-	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
+std::vector<instruction>& instructions_;
+std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
 
-	void do_append(instruction instr) override {
-		if (instructions_.size() >= static_cast<size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
-			throw grammar_error{"program length exceeds limits"};
-		instructions_.push_back(instr);
-	}
+void do_append(instruction instr) override {
+	if (instructions_.size() >= static_cast<size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
+		throw grammar_error{"program length exceeds limits"};
+	instructions_.push_back(instr);
+}
 
 public:
 	explicit instruction_evaluator(std::vector<instruction>& i) : instructions_{i} {}
@@ -423,7 +418,7 @@ class string_expression
 		instruction_evaluator evaluator;
 		bool circumflex;
 		std::ctype_base::mask classes;
-		std::multimap<std::string_view, std::string_view> ranges;
+		std::vector<std::pair<std::string_view, std::string_view>> ranges;
 		generator(string_expression& se) : evaluator{se.instructions_}, circumflex{false}, classes{0} {}
 
 		void bracket_class(std::string_view s) {
@@ -431,42 +426,46 @@ class string_expression
 				{"alnum", ct::alnum}, {"alpha", ct::alpha}, {"blank", ct::blank}, {"cntrl", ct::cntrl},
 				{"digit", ct::digit}, {"graph", ct::graph}, {"lower", ct::lower}, {"print", ct::print},
 				{"punct", ct::punct}, {"space", ct::space}, {"upper", ct::upper}, {"xdigit", ct::xdigit}};
-			if (auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(2, s.size() - 4, x.first); }); c != std::end(m))
-				classes |= c->second;
+			auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(x.first); });
+			if (c == std::end(m))
+				throw grammar_error{"invalid character class"};
+			classes |= c->second;
 		}
 
 		void bracket_range(std::string_view s) {
-			auto sep = s.find('-');
-			auto first = s.substr(0, sep), last = s.substr(sep + 1);
-			if (first > last) std::swap(first, last);
-			ranges.emplace(first, last);
+			bracket_range(s.substr(0, s.find('-')), s.substr(s.find('-') + 1));
+		}
+
+		void bracket_range(std::string_view first, std::string_view last) {
+			ranges.emplace_back(first > last ? last : first, first > last ? first : last);
+			std::push_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
 		}
 
 		void bracket_commit() {
-			for (auto curr = ranges.begin(); curr != ranges.end(); ) {
-				auto next = std::next(curr);
-				if (next != ranges.end() && next->first >= curr->first && next->first <= curr->second) {
-					if (curr->second < next->second)
-						curr->second = next->second;
-					ranges.erase(next);
-				} else {
-					curr = next;
-				}
-			}
 			std::vector<instruction> choices;
-			if (auto curr = ranges.crbegin(), last = ranges.crend(); curr != last) {
-				instruction_evaluator{choices}.match_range(curr->first, curr->second);
-				for (++curr; curr != last; ++curr) {
-					std::vector<instruction> left, both;
-					instruction_evaluator{left}.match_range(curr->first, curr->second);
-					instruction_evaluator{both}
-						.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
-						.encode(opcode::commit, choices.size()).append(choices.begin(), choices.end());
-					choices = std::move(both);
+			if (!ranges.empty()) {
+				std::vector<std::pair<std::string_view, std::string_view>> merged;
+				std::sort_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
+				for (auto curr = merged.end(), next = ranges.begin(), last = ranges.end(); next != last; ++next) {
+					if (curr == merged.end() || next->first < curr->first || curr->second < next->first)
+						curr = merged.insert(merged.end(), *next); 
+					else
+						curr->second = curr->second < next->second ? next->second : curr->second;
+				}
+				if (auto curr = merged.crbegin(), last = merged.crend(); curr != last) {
+					instruction_evaluator{choices}.match_range(curr->first, curr->second);
+					for (++curr; curr != last; ++curr) {
+						std::vector<instruction> left, both;
+						instruction_evaluator{left}.match_range(curr->first, curr->second);
+						instruction_evaluator{both}
+							.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
+							.encode(opcode::commit, choices.size()).append(choices.begin(), choices.end());
+						choices = std::move(both);
+					}
 				}
 			}
 			if (circumflex)
-				evaluator.encode(opcode::choice, 3 + choices.size());
+				evaluator.encode(opcode::choice, 3 + choices.size() + (classes ? 1 : 0));
 			evaluator.append(choices.begin(), choices.end());
 			if (classes)
 				evaluator.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
@@ -576,13 +575,13 @@ inline grammar start(const rule& start_rule) {
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
 	std::unordered_set<const program*> recursive;
-	std::stack<std::pair<std::vector<const rule*>, const program*>> unprocessed;
+	std::vector<std::pair<std::vector<const rule*>, const program*>> unprocessed;
 	expr::program_evaluator{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
 	calls.emplace_back(&start_rule.program_, 0);
-	unprocessed.emplace(std::vector<const rule*>{&start_rule}, &start_rule.program_);
+	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
-		auto [rules, subprogram] = unprocessed.top();
-		unprocessed.pop();
+		auto [rules, subprogram] = unprocessed.back();
+		unprocessed.pop_back();
 		auto address = static_cast<std::ptrdiff_t>(gp.instructions.size());
 		if (addresses.emplace(subprogram, address).second) {
 			gp.concatenate(*subprogram);
@@ -593,7 +592,7 @@ inline grammar start(const rule& start_rule) {
 					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend()) {
 						recursive.insert(cp);
 					} else {
-						rules.push_back(cr); unprocessed.emplace(rules, cp); rules.pop_back();
+						rules.push_back(cr); unprocessed.emplace_back(rules, cp); rules.pop_back();
 					}
 				}
 			}
@@ -623,9 +622,9 @@ class parser
 	semantic_environment& semantics_;
 	std::locale locale_;
 	std::string input_;
-	syntax_state input_state_;
-	program_state program_state_;
-	bool parsing_, reading_;
+	syntax_state input_state_{0, 1, 1};
+	program_state program_state_{0, 0};
+	bool parsing_{false}, reading_{false};
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
@@ -663,14 +662,8 @@ class parser
 		return !text.empty();
 	}
 
-	void reset() {
-		input_state_ = {0, 1, 1}, program_state_ = {0, 0};
-		parsing_ = reading_ = false;
-		semantics_.clear();
-	}
-
 public:
-	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_(s) { reset(); }
+	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_{s} {}
 	std::string_view input_view() const noexcept { return std::string_view{ input_.data() + input_state_.index, input_.size() - input_state_.index }; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
 	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
@@ -723,12 +716,16 @@ public:
 					ir += utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend()), ++cr;
 				} break;
 				case opcode::match_class: {
-					const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
-					std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
 					auto sz = utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend());
-					auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
-					if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc.at(0)))
+					try {
+						const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
+						std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
+						auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
+						if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc[0]))
+							goto failure;
+					} catch (std::exception&) {
 						goto failure;
+					}
 					ir += sz, ++cr;
 				} break;
 				case opcode::match_range: {
@@ -870,7 +867,8 @@ public:
 					auto end = syntax_position{cr, lr};
 					auto [first, start] = capture_stack_.back();
 					capture_stack_.pop_back(), stack_frames_.pop_back();
-					if (first > last) { std::swap(first, last); std::swap(start, end); }
+					if (first > last)
+						goto failure;
 					ac = semantics_.push_action([a = prog.syntax_actions[imm], first, last, start, end](semantic_environment& s) {
 						a(s, {s.capture().substr(first, last - first), start, end}); });
 				} break;
@@ -922,8 +920,8 @@ inline grammar string_expression::make_grammar() {
 	rule Empty = empty_terminal{}                               <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
 	rule Dot = C{'.'}                                           <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
 	rule Element = A > C{'-'} > !C{']'} > A                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
-		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_class(x.match); }
-		| A                                                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).ranges.emplace(x.match, x.match); };
+		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_class(x.match.substr(2,x.match.size()-4)); }
+		| A                                                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match, x.match); };
 	rule Bracket = C{'['} > ~(C{'^'}                            <[](semantics s) { dynamic_cast<generator&>(s).circumflex = true; })
 		> Element > *(!C{']'} > Element) > C{']'}               <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
 	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };

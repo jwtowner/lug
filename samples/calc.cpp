@@ -15,7 +15,7 @@ namespace calc
 
 	rule SPACE  = *"[ \t]"s;
 	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
-	rule NUMBER = m<< +"[[:digit:]]"s > SPACE < []() { return std::stod(std::string{m}); };
+	rule NUMBER = m<< (+"[0-9]"s > ~("[.]"s > +"[0-9]"s)) > SPACE < []() { return std::stod(std::string{m}); };
 	rule ID     = m<< "[a-z]"s > SPACE < []() -> int { return m[0] - 'a'; };
 	rule ASSIGN = "=" > SPACE;
 	rule PLUS   = "+" > SPACE;
