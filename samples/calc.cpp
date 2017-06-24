@@ -4,7 +4,7 @@
 #include <lug.hpp>
 #include <cstdlib>
 
-namespace calc
+namespace lug::samples::calc
 {
 	using namespace lug::lang;
 
@@ -13,47 +13,39 @@ namespace calc
 	std::string_view m;
 	int i;
 
-	rule SPACE  = *"[ \t]"s;
-	rule EOL    = "\n"s | "\r\n" | "\r" | ";";
-	rule NUMBER = m<< (+"[0-9]"s > ~("[.]"s > +"[0-9]"s)) > SPACE < []() { return std::stod(std::string{m}); };
-	rule ID     = m<< "[a-z]"s > SPACE < []() -> int { return m[0] - 'a'; };
-	rule ASSIGN = "=" > SPACE;
-	rule PLUS   = "+" > SPACE;
-	rule MINUS  = "-" > SPACE;
-	rule TIMES  = "*" > SPACE;
-	rule DIVIDE = "/" > SPACE;
-	rule OPEN   = "(" > SPACE;
-	rule CLOSE  = ")" > SPACE;
+	rule _		= *"[ \t]"s;
+
+	rule EOL	= "\n"s | "\r\n" | "\r" | ";";
+
+	rule ID		= m<< "[a-z]"s > _           < []() -> int { return m[0] - 'a'; };
+
+	rule NUMBER = m<< (~"[-+]"s > +"[0-9]"s
+				> ~("[.]"s > +"[0-9]"s)) > _ < []() { return std::stod(std::string{m}); };
 
 	extern rule Expr;
 
-	rule Value =
-		n%NUMBER                < []() { return n; }
-		| i%ID > !ASSIGN        < []() { return variables[i]; }
-		| OPEN > e%Expr > CLOSE < []() { return e; };
+	rule Value	= n%NUMBER                   < []() { return n; }
+				| i%ID > !( "=" > _ )        < []() { return variables[i]; }
+				| "(" > _ > e%Expr > ")" > _ < []() { return e; };
 
-	rule Product =
-		l%Value > *(
-			TIMES > r%Value     < []() { l *= r; }
-			| DIVIDE > r%Value  < []() { l /= r; }
-		)                       < []() { return l; };
+	rule Prod	= l%Value > *(
+				      "*" > _ > r%Value      < []() { l *= r; }
+				    | "/" > _ > r%Value      < []() { l /= r; }
+				)                            < []() { return l; };
 
-	rule Sum =
-		l%Product > *(
-			PLUS > r%Product    < []() { l += r; }
-			| MINUS > r%Product < []() { l -= r; }
-		)                       < []() { return l; };
+	rule Sum	= l%Prod > *(
+					  "+" > _ > r%Prod       < []() { l += r; }
+					| "-" > _ > r%Prod       < []() { l -= r; }
+				)                            < []() { return l; };
 
-	rule Expr =
-		i%ID > ASSIGN > s%Sum   < []() { return variables[i] = s; }
-		| s%Sum                 < []() { return s; };
-
-	rule Stmt =
-		SPACE > (
-			"quit" > SPACE      < []() { std::exit(EXIT_SUCCESS); }
-			| e%Expr            < []() { std::cout << e << std::endl; }
-		) > EOL
-		| *(!EOL > ".") > EOL   < []() { std::cerr << "syntax error" << std::endl; };
+	rule Expr	= i%ID > "=" > _ > s%Sum     < []() { return variables[i] = s; }
+				| s%Sum                      < []() { return s; };
+	
+	rule Stmt	= _ > (
+					  "quit" > _             < []() { std::exit(EXIT_SUCCESS); }
+					| e%Expr                 < []() { std::cout << e << std::endl; }
+				) > EOL
+				| *( !EOL > "." ) > EOL      < []() { std::cerr << "syntax error" << std::endl; };
 
 	grammar Grammar = start(Stmt);
 }
@@ -61,7 +53,7 @@ namespace calc
 int main(int argc, char** argv)
 {
 	try {
-		while(lug::parse(calc::Grammar));
+		while(lug::parse(lug::samples::calc::Grammar));
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;
