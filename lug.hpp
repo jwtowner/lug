@@ -22,10 +22,6 @@
 namespace lug
 {
 
-class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
-class grammar_error : public lug_error { using lug_error::lug_error; };
-class parser_error : public lug_error { using lug_error::lug_error; };
-
 namespace detail
 {
 
@@ -71,12 +67,20 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 
 } // namespace utf8
 
-class rule; class grammar; class parser; class semantic_environment;
+struct program; template <class Target> struct call_expression;
+class rule; class grammar; class encoder; class rule_encoder; class parser; class semantic_environment;
+class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
+class grammar_error : public lug_error { using lug_error::lug_error; };
+class parser_error : public lug_error { using lug_error::lug_error; };
 struct syntax_position { std::size_t column, line; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
-typedef std::function<bool(parser&)> parser_predicate;
+typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantic_environment&)> semantic_action;
 typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
+template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
+template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
+template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
 
 enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
@@ -132,8 +136,8 @@ static_assert(sizeof(std::ctype_base::mask) <= sizeof(immediate), "immediate mus
 struct program
 {
 	std::vector<instruction> instructions;
-	std::vector<parser_predicate> predicates;
-	std::vector<semantic_action> semantic_actions;
+	std::vector<semantic_predicate> predicates;
+	std::vector<semantic_action> actions;
 	std::vector<syntax_action> syntax_actions;
 
 	void concatenate(const program& src) {
@@ -143,7 +147,7 @@ struct program
 			std::size_t valoffset;
 			switch (instr.pf.op) {
 				case opcode::predicate: valoffset = predicates.size(); break;
-				case opcode::action: valoffset = semantic_actions.size(); break;
+				case opcode::action: valoffset = actions.size(); break;
 				case opcode::end_capture: valoffset = syntax_actions.size(); break;
 				default: valoffset = 0; break;
 			}
@@ -158,47 +162,34 @@ struct program
 			instructions.insert(instructions.end(), i + 1, j);
 		}
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
-		semantic_actions.insert(semantic_actions.end(), src.semantic_actions.begin(), src.semantic_actions.end());
+		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		syntax_actions.insert(syntax_actions.end(), src.syntax_actions.begin(), src.syntax_actions.end());
 	}
 
 	void swap(program& p) {
 		instructions.swap(p.instructions);
 		predicates.swap(p.predicates);
-		semantic_actions.swap(p.semantic_actions);
+		actions.swap(p.actions);
 		syntax_actions.swap(p.syntax_actions);
 	}
 };
 
-namespace expr
-{
-
-class evaluator;
-class rule_evaluator;
-template <class Target> struct call_expression;
-template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, evaluator&>;
-template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
-
-} // namespace expr
-
 class rule
 {
-	friend class expr::evaluator;
-	friend class expr::rule_evaluator;
+	friend class encoder;
+	friend class rule_encoder;
 	friend grammar start(const rule&);
 	lug::program program_;
 	std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t>> callees_;
 public:
 	rule() = default;
-	template <class E, class = std::enable_if_t<expr::is_expression_v<E>>> rule(const E& e);
+	template <class E, class = std::enable_if_t<is_expression_v<E>>> rule(const E& e);
 	rule(const rule& r);
 	rule(rule&& r) = default;
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
 	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
-	expr::call_expression<rule> operator()(unsigned short precedence);
+	call_expression<rule> operator()(unsigned short precedence);
 };
 
 class grammar
@@ -274,43 +265,40 @@ public:
 	}
 };
 
-namespace expr
+class encoder
 {
-
-class evaluator
-{
-	virtual immediate do_add_predicate(parser_predicate) { return immediate{0}; }
+	virtual immediate do_add_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_syntax_action(syntax_action) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
-	virtual ~evaluator() {}
-	evaluator& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
-	evaluator& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
-	evaluator& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
-	evaluator& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
-	evaluator& encode(opcode op, parser_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
-	evaluator& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	evaluator& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
-	evaluator& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
-	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&>;
+	virtual ~encoder() {}
+	encoder& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
+	encoder& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
+	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
+	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
+	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
+	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
+	encoder& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
+	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
+	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 
-	evaluator& append(instruction instr) {
+	encoder& append(instruction instr) {
 		do_append(instr);
 		return *this;
 	}
 
 	template <class InputIt>
-	evaluator& append(InputIt first, InputIt last) {
+	encoder& append(InputIt first, InputIt last) {
 		for ( ; first != last; ++first)
 			do_append(*first);
 		return *this;
 	}
 
-	evaluator& encode(opcode op, std::size_t val, std::string_view subsequence) {
+	encoder& encode(opcode op, std::size_t val, std::string_view subsequence) {
 		if (!subsequence.empty()) {
 			if (val == 0 || val > 256 || subsequence.size() > instruction::maxstrlen)
 				throw grammar_error{"invalid immediate value or subsequence exceeds allowed number of UTF8 octets"};
@@ -323,7 +311,7 @@ public:
 		return *this;
 	}
 
-	evaluator& match(std::string_view sequence) {
+	encoder& match(std::string_view sequence) {
 		while (sequence.size() > instruction::maxstrlen) {
 			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
 			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
@@ -335,12 +323,12 @@ public:
 		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
 	}
 
-	evaluator& match_range(std::string_view first, std::string_view last) {
+	encoder& match_range(std::string_view first, std::string_view last) {
 		return encode(opcode::match_range, first.size(), std::string{first}.append(last));
 	}
 };
 
-class instruction_length_evaluator : public evaluator
+class instruction_length_evaluator : public encoder
 {
 	std::ptrdiff_t length_ = 0;
 	std::ptrdiff_t do_length() const noexcept override { return length_; }
@@ -352,7 +340,12 @@ class instruction_length_evaluator : public evaluator
 	}
 };
 
-class instruction_evaluator : public evaluator
+template <class E>
+std::ptrdiff_t instruction_length(const E& e) {
+	return instruction_length_evaluator{}.evaluate(e).length();
+}
+
+class instruction_encoder : public encoder
 {
 std::vector<instruction>& instructions_;
 std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
@@ -364,14 +357,14 @@ void do_append(instruction instr) override {
 }
 
 public:
-	explicit instruction_evaluator(std::vector<instruction>& i) : instructions_{i} {}
+	explicit instruction_encoder(std::vector<instruction>& i) : instructions_{i} {}
 };
 
-class program_evaluator : public instruction_evaluator
+class program_encoder : public instruction_encoder
 {
 	program& program_;
-	immediate do_add_predicate(parser_predicate p) override { return add_item(program_.predicates, std::move(p)); }
-	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.semantic_actions, std::move(a)); }
+	immediate do_add_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
+	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
 	immediate do_add_syntax_action(syntax_action a) override { return add_item(program_.syntax_actions, std::move(a)); }
 
 	template <class Item>
@@ -383,31 +376,29 @@ class program_evaluator : public instruction_evaluator
 	}
 
 public:
-	explicit program_evaluator(program& p) : instruction_evaluator{p.instructions}, program_{p} {}
+	explicit program_encoder(program& p) : instruction_encoder{p.instructions}, program_{p} {}
 };
 
-class rule_evaluator : public program_evaluator
+class rule_encoder : public program_encoder
 {
 	rule& rule_;
 	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n) override { rule_.callees_.emplace_back(r, p, n); }
 public:
-	explicit rule_evaluator(rule& r) : program_evaluator{r.program_}, rule_{r} {}
+	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} {}
 };
 
-template <class E> std::ptrdiff_t instruction_length(const E& e) { return instruction_length_evaluator{}.evaluate(e).length(); }
-
-struct accept_action { void operator()(evaluator& v) const { v.encode(opcode::accept); } };
-struct newline_action { void operator()(evaluator& v) const { v.encode(opcode::newline); } };
-struct any_terminal { void operator()(evaluator& v) const { v.encode(opcode::match_any); } };
-struct empty_terminal { void operator()(evaluator& v) const { v.encode(opcode::match); } };
-struct char_terminal { char c; void operator()(evaluator& v) const { v.match(std::string_view{&c, 1}); } };
+struct accept_action { void operator()(encoder& v) const { v.encode(opcode::accept); } };
+struct newline_action { void operator()(encoder& v) const { v.encode(opcode::newline); } };
+struct any_terminal { void operator()(encoder& v) const { v.encode(opcode::match_any); } };
+struct empty_terminal { void operator()(encoder& v) const { v.encode(opcode::match); } };
+struct char_terminal { char c; void operator()(encoder& v) const { v.match(std::string_view{&c, 1}); } };
 
 template <class Target>
 struct call_expression
 {
 	const Target& target;
 	unsigned short precedence;
-	void operator()(evaluator& v) const { v.call(target, precedence); }
+	void operator()(encoder& v) const { v.call(target, precedence); }
 };
 
 class string_expression
@@ -418,11 +409,11 @@ class string_expression
 
 	struct generator : public semantic_environment
 	{
-		instruction_evaluator evaluator;
+		instruction_encoder encoder;
 		bool circumflex;
 		std::ctype_base::mask classes;
 		std::vector<std::pair<std::string_view, std::string_view>> ranges;
-		generator(string_expression& se) : evaluator{se.instructions_}, circumflex{false}, classes{0} {}
+		generator(string_expression& se) : encoder{se.instructions_}, circumflex{false}, classes{0} {}
 
 		void bracket_class(std::string_view s) {
 			using ct = std::ctype_base; static constexpr std::pair<const char* const, ct::mask> m[12] = {
@@ -456,11 +447,11 @@ class string_expression
 						curr->second = curr->second < next->second ? next->second : curr->second;
 				}
 				if (auto curr = merged.crbegin(), last = merged.crend(); curr != last) {
-					instruction_evaluator{matches}.match_range(curr->first, curr->second);
+					instruction_encoder{matches}.match_range(curr->first, curr->second);
 					for (++curr; curr != last; ++curr) {
 						std::vector<instruction> left, both;
-						instruction_evaluator{left}.match_range(curr->first, curr->second);
-						instruction_evaluator{both}
+						instruction_encoder{left}.match_range(curr->first, curr->second);
+						instruction_encoder{both}
 							.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
 							.encode(opcode::commit, matches.size()).append(matches.begin(), matches.end());
 						matches = std::move(both);
@@ -468,12 +459,12 @@ class string_expression
 				}
 			}
 			if (circumflex)
-				evaluator.encode(opcode::choice, 3 + matches.size() + (classes ? 1 : 0));
-			evaluator.append(matches.begin(), matches.end());
+				encoder.encode(opcode::choice, 3 + matches.size() + (classes ? 1 : 0));
+			encoder.append(matches.begin(), matches.end());
 			if (classes)
-				evaluator.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
+				encoder.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
-				evaluator.encode(opcode::commit, 0).encode(opcode::fail);
+				encoder.encode(opcode::commit, 0).encode(opcode::fail);
 			circumflex = false;
 			classes = 0;
 		}
@@ -481,7 +472,7 @@ class string_expression
 
 public:
 	string_expression(const std::string& s) { compile(s); }
-	void operator()(evaluator& v) const { v.append(instructions_.begin(), instructions_.end()); }
+	void operator()(encoder& v) const { v.append(instructions_.begin(), instructions_.end()); }
 };
 
 template <class T>
@@ -498,60 +489,66 @@ inline auto make_expression(const T& t) {
 }
 
 template <class E>
-inline auto evaluator::evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, evaluator&> {
+inline auto encoder::evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&> {
 	make_expression(e)(*this);
 	return *this;
 }
 
-namespace operators
+template <class E, class> inline rule::rule(const E& e) { rule_encoder{*this}.evaluate(e); }
+inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 0); /* TODO: jump instead of call */ }
+inline call_expression<rule> rule::operator()(unsigned short precedence) { return call_expression<rule>{*this, precedence}; }
+
+namespace language
 {
 
-using semantics = lug::semantic_environment&;
-using syntax = const lug::syntax_view&;
+using semantics = lug::semantic_environment&; using syntax = const lug::syntax_view&;
+using lug::grammar; using lug::rule; using lug::start;
+using lug::accept_action; using lug::newline_action; using lug::any_terminal; using lug::char_terminal; using lug::empty_terminal;
+using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(E&& e) {
-	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
-		ev.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
+	return [x = make_expression(::std::forward<E>(e))](encoder& d) {
+		d.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator*(E&& e) {
-	return [x = make_expression(::std::forward<E>(e))](evaluator& ev) {
+	return [x = make_expression(::std::forward<E>(e))](encoder& d) {
 		auto x_length = instruction_length(x);
-		ev.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
+		d.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(E1&& e1, E2&& e2) {
-	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2); };
+	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](encoder& d) {
+		d.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator>(E1&& e1, E2&& e2) {
-	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](evaluator& ev) {
-		ev.evaluate(x1).evaluate(x2); };
+	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](encoder& d) {
+		d.evaluate(x1).evaluate(x2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(E&& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics, syntax>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
-			ev.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>, syntax>) {
 		return ::std::forward<E>(e) < [a = std::move(a)](semantics s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
-			ev.evaluate(x).encode(opcode::action, semantic_action{a}); };
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+			d.evaluate(x).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>>) {
 		return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
-			ev.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+			d.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
-			ev.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
+		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+			d.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
 	}
 }
 
@@ -569,13 +566,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto ope
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_terminal{}; }
 
-} // namespace operators
-
-} // namespace expr
-
-template <class E, class> inline rule::rule(const E& e) { expr::rule_evaluator{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { expr::rule_evaluator{*this}.call(r, 0); /* TODO: jump instead of call */ }
-inline expr::call_expression<rule> rule::operator()(unsigned short precedence) { return expr::call_expression<rule>{*this, precedence}; }
+} // namespace language
 
 inline grammar start(const rule& start_rule) {
 	program gp;
@@ -583,7 +574,7 @@ inline grammar start(const rule& start_rule) {
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
 	std::unordered_set<const program*> recursive;
 	std::vector<std::pair<std::vector<const rule*>, const program*>> unprocessed;
-	expr::program_evaluator{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
+	program_encoder{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
 	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
@@ -856,7 +847,7 @@ public:
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
-					ac = semantics_.push_action(prog.semantic_actions[imm]);
+					ac = semantics_.push_action(prog.actions[imm]);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
@@ -912,21 +903,18 @@ inline bool parse(const std::string& input, const grammar& grmr) { return parse(
 inline bool parse(const grammar& grmr, semantic_environment& sema) { return parse(std::cin, grmr, sema); }
 inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 
-namespace expr
-{
-
 inline grammar string_expression::make_grammar() {
-	using namespace operators;
+	using namespace language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule Empty = empty_terminal{}                               <[](generator& g) { g.evaluator.encode(opcode::match); };
-	rule Dot = C{'.'}                                           <[](generator& g) { g.evaluator.encode(opcode::match_any); };
+	rule Empty = empty_terminal{}                               <[](generator& g) { g.encoder.encode(opcode::match); };
+	rule Dot = C{'.'}                                           <[](generator& g) { g.encoder.encode(opcode::match_any); };
 	rule Element = A > C{'-'} > !C{']'} > A                     <[](generator& g, syntax x) { g.bracket_range(x.capture); }
 		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
 		| A                                                     <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
 	rule Bracket = C{'['} > ~(C{'^'}                            <[](generator& g) { g.circumflex = true; })
 		> Element > *(!C{']'} > Element) > C{']'}               <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](generator& g, syntax x) { g.evaluator.match(x.capture); };
+	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > !A);
 }
 
@@ -936,18 +924,6 @@ inline void string_expression::compile(const std::string& s) {
 	if (!parse(s, grmr, genr))
 		throw grammar_error{"invalid string or bracket expression"};
 }
-
-} // namespace expr
-
-namespace language
-{
-
-using lug::grammar; using lug::rule; using lug::start;
-using expr::accept_action; using expr::newline_action;
-using expr::any_terminal; using expr::char_terminal; using expr::empty_terminal;
-using namespace expr::operators; using namespace std::literals::string_literals;
-
-} // namespace language
 
 } // namespace lug
 
