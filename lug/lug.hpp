@@ -737,7 +737,7 @@ public:
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.push_back({{ac,pc+off},{ir-(imm&255),cr-(imm>>8),lr}});
+					backtrack_stack_.push_back({{ac, pc + off}, {ir - (imm & 255), cr - (imm >> 8), lr}});
 				} break;
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
@@ -760,7 +760,7 @@ public:
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrcall_stack_.push_back({ac,pc,pc+off,{ir,cr,lr},{lrfailcode,0,0},std::vector<semantic_action>{},imm});
+						lrcall_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_action>{}, imm});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac,pc});
@@ -862,8 +862,8 @@ public:
 					capture_stack_.pop_back(), stack_frames_.pop_back();
 					if (first > last)
 						goto failure;
-					ac = semantics_.push_action([a = prog.syntax_actions[imm], first, last, start, end](semantic_environment& s) {
-						a(s, {s.capture().substr(first, last - first), start, end}); });
+					ac = semantics_.push_action([sa = prog.syntax_actions[imm], f = first, l = last, s = start, e = end](semantic_environment& se) {
+						sa(se, {se.capture().substr(f, l - f), s, e}); });
 				} break;
 				default: throw parser_error{"invalid opcode"};
 			}
