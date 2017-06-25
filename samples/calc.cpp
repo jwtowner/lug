@@ -1,7 +1,7 @@
 // lug - Embedded DSL for PE grammar parsers in C++
 // Copyright (c) 2017 Jesse W. Towner
 
-#include <lug.hpp>
+#include <lug/lug.hpp>
 #include <cstdlib>
 
 namespace lugsamples::calc
