@@ -26,6 +26,17 @@ class lug_error : public std::runtime_error { using std::runtime_error::runtime_
 class grammar_error : public lug_error { using lug_error::lug_error; };
 class parser_error : public lug_error { using lug_error::lug_error; };
 
+namespace detail
+{
+
+template <class T>
+struct dynamic_cast_if_base_of
+{
+	std::remove_reference_t<T>& b;
+	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
+	operator U&() const volatile { return dynamic_cast<std::remove_reference_t<U>&>(b); }
+};
+
 template <class Error>
 struct reentrancy_sentinel
 {
@@ -33,6 +44,8 @@ struct reentrancy_sentinel
 	reentrancy_sentinel(bool& x, const char* msg) : value{x} { if (value) throw Error{msg}; value = true; }
 	~reentrancy_sentinel() { value = false; }
 };
+
+} // namespace detail
 
 namespace utf8
 {
@@ -58,16 +71,18 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 
 } // namespace utf8
 
-class rule;
-class grammar;
-class parser;
-class semantic_environment;
+class rule; class grammar; class parser; class semantic_environment;
 struct syntax_position { std::size_t column, line; };
-struct syntax_view { std::string_view match; syntax_position start, end; };
+struct syntax_view { std::string_view capture; syntax_position start, end; };
 typedef std::function<void(parser&)> parser_error_handler;
 typedef std::function<bool(parser&)> parser_predicate;
 typedef std::function<void(semantic_environment&)> semantic_action;
 typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
+
+enum class immediate : unsigned short {};
+enum class operands : unsigned char { none = 0, off = 1, str = 2 };
+constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
+constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
 
 enum class opcode : unsigned char
 {
@@ -76,11 +91,6 @@ enum class opcode : unsigned char
 	ret,            fail,           accept,         newline,
 	predicate,      action,         begin_capture,  end_capture
 };
-
-enum class immediate : unsigned short {};
-enum class operands : unsigned char { none = 0, off = 1, str = 2 };
-constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
-constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
 
 union instruction
 {
@@ -170,8 +180,7 @@ namespace expr
 class evaluator;
 class rule_evaluator;
 template <class Target> struct call_expression;
-template <class E> constexpr bool is_callable_impl_v = std::is_same_v<grammar, E> || std::is_same_v<rule, E> || std::is_same_v<program, E>;
-template <class E> constexpr bool is_callable_v = is_callable_impl_v<std::remove_reference_t<E>>;
+template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, evaluator&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
@@ -232,7 +241,7 @@ public:
 		capture_ = c;
 		on_accept_begin();
 		for (auto& a : actions_)
-				a(*this);
+			a(*this);
 		actions_.clear();
 		on_accept_end();
 	}
@@ -442,7 +451,7 @@ class string_expression
 		}
 
 		void bracket_commit() {
-			std::vector<instruction> choices;
+			std::vector<instruction> matches;
 			if (!ranges.empty()) {
 				std::vector<std::pair<std::string_view, std::string_view>> merged;
 				std::sort_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
@@ -453,20 +462,20 @@ class string_expression
 						curr->second = curr->second < next->second ? next->second : curr->second;
 				}
 				if (auto curr = merged.crbegin(), last = merged.crend(); curr != last) {
-					instruction_evaluator{choices}.match_range(curr->first, curr->second);
+					instruction_evaluator{matches}.match_range(curr->first, curr->second);
 					for (++curr; curr != last; ++curr) {
 						std::vector<instruction> left, both;
 						instruction_evaluator{left}.match_range(curr->first, curr->second);
 						instruction_evaluator{both}
 							.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
-							.encode(opcode::commit, choices.size()).append(choices.begin(), choices.end());
-						choices = std::move(both);
+							.encode(opcode::commit, matches.size()).append(matches.begin(), matches.end());
+						matches = std::move(both);
 					}
 				}
 			}
 			if (circumflex)
-				evaluator.encode(opcode::choice, 3 + choices.size() + (classes ? 1 : 0));
-			evaluator.append(choices.begin(), choices.end());
+				evaluator.encode(opcode::choice, 3 + matches.size() + (classes ? 1 : 0));
+			evaluator.append(matches.begin(), matches.end());
 			if (classes)
 				evaluator.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
@@ -536,9 +545,13 @@ inline auto operator<(E&& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics, syntax>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>, syntax>) {
+		return ::std::forward<E>(e) < [a = std::move(a)](semantics s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, semantic_action{a}); };
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>>) {
+		return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](evaluator& ev) {
 			ev.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
@@ -550,7 +563,7 @@ inline auto operator<(E&& e, A a) {
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<<(T& v, E&& e) {
-	return ::std::forward<E>(e) < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.match}; };
+	return ::std::forward<E>(e) < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.capture}; };
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -592,7 +605,9 @@ inline grammar start(const rule& start_rule) {
 					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend()) {
 						recursive.insert(cp);
 					} else {
-						rules.push_back(cr); unprocessed.emplace_back(rules, cp); rules.pop_back();
+						rules.push_back(cr);
+						unprocessed.emplace_back(rules, cp);
+						rules.pop_back();
 					}
 				}
 			}
@@ -639,19 +654,17 @@ class parser
 	}
 
 	bool available(std::size_t n, std::size_t ir) {
-		if (ir != lrfailcode) {
-			do {
-				if (n <= input_.size() - ir)
-					return true;
-				if (ir < input_.size())
-					return false;
-			} while (read_more());
-		}
+		do {
+			if (n <= input_.size() - ir)
+				return true;
+			if (ir < input_.size())
+				return false;
+		} while (read_more());
 		return false;
 	}
 
 	bool read_more() {
-		reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
+		detail::reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
 			bool more = sources_.back()(text);
@@ -692,7 +705,7 @@ public:
 	}
 
 	bool parse() {
-		reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
+		detail::reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
 		const program& prog = grammar_.program();
 		bool result = false, done = false;
 		std::size_t imm, ir, cr, lr, ac, fc = 0;
@@ -821,9 +834,7 @@ public:
 								if (memo.sa.index != lrfailcode) {
 									program_state_ = {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr};
 									input_state_ = memo.sa;
-								} else {
-									++fc;
-								}
+								} else { ++fc; }
 								lrcall_stack_.pop_back();
 							} break;
 							case stack_frame_type::capture: {
@@ -837,11 +848,8 @@ public:
 				case opcode::accept: {
 					save_registers(ir, cr, lr, ac, pc);
 					semantics_.accept(input_);
-					if (imm != 0) {
-						result = true;
-						done = true;
+					if (result = done = imm != 0; done)
 						break;
-					}
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::newline: {
@@ -917,14 +925,14 @@ inline grammar string_expression::make_grammar() {
 	using namespace operators;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
-	rule Empty = empty_terminal{}                               <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match); };
-	rule Dot = C{'.'}                                           <[](semantics s) { dynamic_cast<generator&>(s).evaluator.encode(opcode::match_any); };
-	rule Element = A > C{'-'} > !C{']'} > A                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match); }
-		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_class(x.match.substr(2,x.match.size()-4)); }
-		| A                                                     <[](semantics s, syntax x) { dynamic_cast<generator&>(s).bracket_range(x.match, x.match); };
-	rule Bracket = C{'['} > ~(C{'^'}                            <[](semantics s) { dynamic_cast<generator&>(s).circumflex = true; })
-		> Element > *(!C{']'} > Element) > C{']'}               <[](semantics s) { dynamic_cast<generator&>(s).bracket_commit(); };
-	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](semantics s, syntax x) { dynamic_cast<generator&>(s).evaluator.match(x.match); };
+	rule Empty = empty_terminal{}                               <[](generator& g) { g.evaluator.encode(opcode::match); };
+	rule Dot = C{'.'}                                           <[](generator& g) { g.evaluator.encode(opcode::match_any); };
+	rule Element = A > C{'-'} > !C{']'} > A                     <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+		| A                                                     <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	rule Bracket = C{'['} > ~(C{'^'}                            <[](generator& g) { g.circumflex = true; })
+		> Element > *(!C{']'} > Element) > C{']'}               <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](generator& g, syntax x) { g.evaluator.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > !A);
 }
 
@@ -937,7 +945,7 @@ inline void string_expression::compile(const std::string& s) {
 
 } // namespace expr
 
-namespace lang
+namespace language
 {
 
 using lug::grammar; using lug::rule; using lug::start;
@@ -945,7 +953,7 @@ using expr::accept_action; using expr::newline_action;
 using expr::any_terminal; using expr::char_terminal; using expr::empty_terminal;
 using namespace expr::operators; using namespace std::literals::string_literals;
 
-} // namespace lang
+} // namespace language
 
 } // namespace lug
 

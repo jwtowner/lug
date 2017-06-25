@@ -5,7 +5,7 @@
 #include <cassert>
 
 void test_any_terminal() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	rule S = any_terminal{} > !any_terminal{};
 	grammar G = start(S);
 	assert(lug::parse("a", G));
@@ -16,7 +16,7 @@ void test_any_terminal() {
 }
 
 void test_char_terminal() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	rule S = 'a' > !any_terminal{};
 	grammar G = start(S);
 	assert(lug::parse("a", G));
@@ -27,7 +27,7 @@ void test_char_terminal() {
 }
 
 void test_empty_terminal() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	rule S = empty_terminal{} > !any_terminal{};
 	grammar G = start(S);
 	assert(!lug::parse("a", G));
@@ -38,7 +38,7 @@ void test_empty_terminal() {
 }
 
 void test_terminal_sequence() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
 	rule S = C{'a'} > A > C{'b'} > !A;
@@ -52,7 +52,7 @@ void test_terminal_sequence() {
 }
 
 void test_terminal_choice() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
 	rule S = (C{'a'} > A | C{'b'}) > !A;
@@ -66,7 +66,7 @@ void test_terminal_choice() {
 }
 
 void test_direct_left_recursion() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
 	rule S = (S > C{'a'} | C{'a'});
@@ -83,7 +83,7 @@ void test_direct_left_recursion() {
 }
 
 void test_indirect_left_recursion() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
 	rule Q, S;
@@ -102,14 +102,14 @@ void test_indirect_left_recursion() {
 }
 
 void test_association_and_precedence() {
-	using namespace lug::lang;
+	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
 	std::string out;
 	rule N	= C{'1'} | C{'2'} | C{'3'};
 	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
 			| E(2) > C{'*'} > E(3) < [&out]() { out += '*'; }
-			| N < [&out](semantics s, syntax x) { out += x.match; };
+			| N < [&out](semantics s, syntax x) { out += x.capture; };
 	grammar G = start(E > !A);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("a", G));
