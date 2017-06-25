@@ -74,7 +74,6 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 class rule; class grammar; class parser; class semantic_environment;
 struct syntax_position { std::size_t column, line; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
-typedef std::function<void(parser&)> parser_error_handler;
 typedef std::function<bool(parser&)> parser_predicate;
 typedef std::function<void(semantic_environment&)> semantic_action;
 typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
@@ -133,7 +132,6 @@ static_assert(sizeof(std::ctype_base::mask) <= sizeof(immediate), "immediate mus
 struct program
 {
 	std::vector<instruction> instructions;
-	std::vector<parser_error_handler> error_handlers;
 	std::vector<parser_predicate> predicates;
 	std::vector<semantic_action> semantic_actions;
 	std::vector<syntax_action> syntax_actions;
@@ -159,7 +157,6 @@ struct program
 			instructions.push_back(instr);
 			instructions.insert(instructions.end(), i + 1, j);
 		}
-		error_handlers.insert(error_handlers.end(), src.error_handlers.begin(), src.error_handlers.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		semantic_actions.insert(semantic_actions.end(), src.semantic_actions.begin(), src.semantic_actions.end());
 		syntax_actions.insert(syntax_actions.end(), src.syntax_actions.begin(), src.syntax_actions.end());
@@ -167,7 +164,6 @@ struct program
 
 	void swap(program& p) {
 		instructions.swap(p.instructions);
-		error_handlers.swap(p.error_handlers);
 		predicates.swap(p.predicates);
 		semantic_actions.swap(p.semantic_actions);
 		syntax_actions.swap(p.syntax_actions);
@@ -283,7 +279,6 @@ namespace expr
 
 class evaluator
 {
-	virtual immediate do_add_error_handler(parser_error_handler h) { return immediate{0}; }
 	virtual immediate do_add_predicate(parser_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_syntax_action(syntax_action) { return immediate{0}; }
@@ -375,7 +370,6 @@ public:
 class program_evaluator : public instruction_evaluator
 {
 	program& program_;
-	immediate do_add_error_handler(parser_error_handler h) override { return add_item(program_.error_handlers, std::move(h)); }
 	immediate do_add_predicate(parser_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.semantic_actions, std::move(a)); }
 	immediate do_add_syntax_action(syntax_action a) override { return add_item(program_.syntax_actions, std::move(a)); }
