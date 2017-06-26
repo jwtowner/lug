@@ -26,7 +26,6 @@ It is based on research introduced in the following papers:
 TODO
 ---
 - parser error recovery (WIP)
-- add support for backslash escape to string expressions
 - cut operator should ensure back-tracking is no longer possible, possibly investigate using progressive tabling and dynamic analysis
 - investigate binding only types and passing in attribute variables to lambdas as arguments
 - optimization: better detection of left-recursive rule calls

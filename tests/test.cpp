@@ -4,7 +4,8 @@
 #include <lug/lug.hpp>
 #include <cassert>
 
-void test_any_terminal() {
+void test_any_terminal()
+{
 	using namespace lug::language;
 	rule S = any_terminal{} > !any_terminal{};
 	grammar G = start(S);
@@ -15,7 +16,8 @@ void test_any_terminal() {
 	assert(!lug::parse("", G));
 }
 
-void test_char_terminal() {
+void test_char_terminal()
+{
 	using namespace lug::language;
 	rule S = 'a' > !any_terminal{};
 	grammar G = start(S);
@@ -26,7 +28,8 @@ void test_char_terminal() {
 	assert(!lug::parse("b", G));
 }
 
-void test_empty_terminal() {
+void test_empty_terminal()
+{
 	using namespace lug::language;
 	rule S = empty_terminal{} > !any_terminal{};
 	grammar G = start(S);
@@ -37,7 +40,8 @@ void test_empty_terminal() {
 	assert(lug::parse("", G));
 }
 
-void test_terminal_sequence() {
+void test_terminal_sequence()
+{
 	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
@@ -51,7 +55,8 @@ void test_terminal_sequence() {
 	assert(!lug::parse("", G));
 }
 
-void test_terminal_choice() {
+void test_terminal_choice()
+{
 	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
@@ -65,7 +70,8 @@ void test_terminal_choice() {
 	assert(!lug::parse("", G));
 }
 
-void test_direct_left_recursion() {
+void test_direct_left_recursion()
+{
 	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
@@ -82,7 +88,8 @@ void test_direct_left_recursion() {
 	assert(lug::parse("aaaak", G));
 }
 
-void test_indirect_left_recursion() {
+void test_indirect_left_recursion()
+{
 	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
@@ -101,7 +108,8 @@ void test_indirect_left_recursion() {
 	assert(lug::parse("aaaak", G));
 }
 
-void test_association_and_precedence() {
+void test_association_and_precedence()
+{
 	using namespace lug::language;
 	constexpr auto A = any_terminal{};
 	using C = char_terminal;
@@ -109,7 +117,7 @@ void test_association_and_precedence() {
 	rule N	= C{'1'} | C{'2'} | C{'3'};
 	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
 			| E(2) > C{'*'} > E(3) < [&out]() { out += '*'; }
-			| N < [&out](semantics s, syntax x) { out += x.capture; };
+			| N < [&out](semantics, syntax x) { out += x.capture; };
 	grammar G = start(E > !A);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("a", G));
@@ -128,7 +136,8 @@ void test_association_and_precedence() {
 	assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*+1+");
 }
 
-int main(int argc, char** argv) {
+int main()
+{
 	try {
 		test_any_terminal();
 		test_char_terminal();

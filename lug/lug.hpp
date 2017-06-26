@@ -324,7 +324,7 @@ public:
 	}
 
 	encoder& match_range(std::string_view first, std::string_view last) {
-		return encode(opcode::match_range, first.size(), std::string{first}.append(last));
+		return first == last ? match(first) : encode(opcode::match_range, first.size(), std::string{first}.append(last));
 	}
 };
 
@@ -333,7 +333,7 @@ class instruction_length_evaluator : public encoder
 	std::ptrdiff_t length_ = 0;
 	std::ptrdiff_t do_length() const noexcept override { return length_; }
 
-	void do_append(instruction instr) override {
+	void do_append(instruction) override {
 		if (length_ >= (std::numeric_limits<std::ptrdiff_t>::max)())
 			throw grammar_error{"program length exceeds limits"};
 		++length_;
@@ -416,14 +416,14 @@ class string_expression
 		generator(string_expression& se) : encoder{se.instructions_}, circumflex{false}, classes{0} {}
 
 		void bracket_class(std::string_view s) {
-			using ct = std::ctype_base; static constexpr std::pair<const char* const, ct::mask> m[12] = {
+			using ct = std::ctype_base; static constexpr std::pair<const char* const, int> m[12] = {
 				{"alnum", ct::alnum}, {"alpha", ct::alpha}, {"blank", ct::blank}, {"cntrl", ct::cntrl},
 				{"digit", ct::digit}, {"graph", ct::graph}, {"lower", ct::lower}, {"print", ct::print},
 				{"punct", ct::punct}, {"space", ct::space}, {"upper", ct::upper}, {"xdigit", ct::xdigit}};
 			auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(x.first); });
 			if (c == std::end(m))
 				throw grammar_error{"invalid character class"};
-			classes |= c->second;
+			classes |= static_cast<std::ctype_base::mask>(c->second);
 		}
 
 		void bracket_range(std::string_view s) {
@@ -464,9 +464,10 @@ class string_expression
 			if (classes)
 				encoder.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
-				encoder.encode(opcode::commit, 0).encode(opcode::fail);
+				encoder.encode(opcode::commit, 0).encode(opcode::fail).encode(opcode::match_any);
 			circumflex = false;
 			classes = 0;
+			ranges.clear();
 		}
 	};
 
@@ -545,7 +546,7 @@ inline auto operator<(E&& e, A a) {
 		return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, [a](semantics s) { a(); }); };
+			d.evaluate(x).encode(opcode::action, [a](semantics) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
 		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
 			d.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
@@ -692,6 +693,8 @@ public:
 	bool parse() {
 		detail::reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
 		const program& prog = grammar_.program();
+		if (prog.instructions.empty())
+			throw parser_error("unable to parse with empty grammar");
 		bool result = false, done = false;
 		std::size_t imm, ir, cr, lr, ac, fc = 0;
 		std::ptrdiff_t off, pc;

@@ -4,7 +4,7 @@
 #include <lug/lug.hpp>
 #include <cstdlib>
 
-namespace lugsamples::calc
+namespace samples::calc
 {
 	using namespace lug::language;
 
@@ -15,7 +15,7 @@ namespace lugsamples::calc
 
 	rule _		= *"[ \t]"s;
 
-	rule EOL	= "\n"s | "\r\n" | "\r" | ";";
+	rule EOL	= (("\n"s | "\r\n" | "\r") > lug::newline_action{}) | ";";
 
 	rule ID		= m<< "[a-z]"s > _           <[]() -> int { return m[0] - 'a'; };
 
@@ -50,10 +50,10 @@ namespace lugsamples::calc
 	grammar Grammar = start(Stmt);
 }
 
-int main(int argc, char** argv)
+int main()
 {
 	try {
-		while(lug::parse(lugsamples::calc::Grammar));
+		while(lug::parse(samples::calc::Grammar));
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;
