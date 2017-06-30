@@ -1,4 +1,4 @@
-// lug - Embedded DSL for PE grammar parsers in C++
+// lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
 
 #ifndef LUG_HPP
@@ -124,7 +124,7 @@ union instruction
 		if ((p.aux & operands::off) == operands::off)
 			len++;
 		if ((p.aux & operands::str) == operands::str)
-			len += static_cast<std::ptrdiff_t>(((p.val & 0xFF) >> 2) + 1);
+			len += static_cast<std::ptrdiff_t>(((p.val & 0xff) >> 2) + 1);
 		return len;
 	}
 };
@@ -387,7 +387,7 @@ public:
 	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} {}
 };
 
-struct accept_action { void operator()(encoder& v) const { v.encode(opcode::accept); } };
+struct cut_action { void operator()(encoder& v) const { v.encode(opcode::accept); } };
 struct newline_action { void operator()(encoder& v) const { v.encode(opcode::newline); } };
 struct any_terminal { void operator()(encoder& v) const { v.encode(opcode::match_any); } };
 struct empty_terminal { void operator()(encoder& v) const { v.encode(opcode::match); } };
@@ -504,7 +504,7 @@ namespace language
 
 using semantics = lug::semantic_environment&; using syntax = const lug::syntax_view&;
 using lug::grammar; using lug::rule; using lug::start;
-using lug::accept_action; using lug::newline_action; using lug::any_terminal; using lug::char_terminal; using lug::empty_terminal;
+using lug::cut_action; using lug::newline_action; using lug::any_terminal; using lug::char_terminal; using lug::empty_terminal;
 using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -566,6 +566,8 @@ inline auto operator%(T& v, E&& e) {
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_terminal{}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(E&& e) { return cut_action{} > ::std::forward<E>(e); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(E&& e, int) { return ::std::forward<E>(e) > cut_action{}; }
 
 } // namespace language
 
@@ -625,19 +627,15 @@ class parser
 	std::string input_;
 	syntax_state input_state_{0, 1, 1};
 	program_state program_state_{0, 0};
-	bool parsing_{false}, reading_{false};
+	bool parsing_{false}, reading_{false}, cut_deferred_{false};
+	std::size_t cut_frame_{0};
 	std::vector<std::function<bool(std::string&)>> sources_;
+	std::vector<bool> interactive_;
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
 	std::vector<program_state> call_stack_;
 	std::vector<syntax_state> capture_stack_;
-	std::vector<lrmemo_state> lrcall_stack_;
-
-	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		ir = ss.index, cr = ss.position.column, lr = ss.position.line;
-		ac = ps.action_counter, pc = ps.program_counter;
-		semantics_.pop_actions_after(ac);
-	}
+	std::vector<lrmemo_state> lrmemo_stack_;
 
 	bool available(std::size_t n, std::size_t ir) {
 		do {
@@ -661,15 +659,45 @@ class parser
 		return !text.empty();
 	}
 
+	void cut() {
+		semantics_.accept(input_);
+		program_state_.action_counter = 0;
+		cut_deferred_ = false;
+		cut_frame_ = stack_frames_.size();
+	}
+
+	void cut(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		save_registers(ir, cr, lr, ac, pc);
+		cut();
+		load_registers(ir, cr, lr, ac, pc);
+	}
+
+	template <class Stack, class... Args>
+	void pop_stack_frame(Stack& stack, Args&... args) {
+		stack.pop_back(), stack_frames_.pop_back();
+		cut_frame_ = (std::min)(cut_frame_, stack_frames_.size());
+		if constexpr (std::is_same_v<typename Stack::value_type, syntax_state> || std::is_same_v<typename Stack::value_type, lrmemo_state>) {
+			if (cut_deferred_ && capture_stack_.empty() && lrmemo_stack_.empty())
+				cut(args...);
+		}
+	}
+
+	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
+		ir = ss.index, cr = ss.position.column, lr = ss.position.line, ac = ps.action_counter, pc = ps.program_counter;
+		semantics_.pop_actions_after(ac);
+	}
+
 public:
 	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_{s} {}
-	std::string_view input_view() const noexcept { return std::string_view{ input_.data() + input_state_.index, input_.size() - input_state_.index }; }
+	const lug::grammar& grammar() const noexcept { return grammar_; }
+	semantic_environment& semantics() const noexcept { return semantics_; }
+	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
 	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
-	void input_position(std::size_t column, std::size_t line) noexcept { input_position(syntax_position{ column, line }); }
+	bool available(std::size_t n) { available(n, input_state_.index); }
 
 	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = { ir,{ cr, lr } }, program_state_ = { ac, pc };
+		input_state_ = { ir, cr, lr }, program_state_ = { ac, pc };
 	}
 
 	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
@@ -701,6 +729,7 @@ public:
 		std::string_view str;
 		semantics_.clear();
 		program_state_ = {0, 0};
+		cut_deferred_ = false;
 		load_registers(ir, cr, lr, ac, pc);
 		while (!done) {
 			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
@@ -718,15 +747,11 @@ public:
 				} break;
 				case opcode::match_class: {
 					auto sz = utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend());
-					try {
-						const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
-						std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
-						auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
-						if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc[0]))
-							goto failure;
-					} catch (std::exception&) {
+					const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
+					std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
+					auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
+					if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc[0]))
 						goto failure;
-					}
 					ir += sz, ++cr;
 				} break;
 				case opcode::match_range: {
@@ -745,17 +770,16 @@ public:
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
-					backtrack_stack_.pop_back();
-					stack_frames_.pop_back();
+					pop_stack_frame(backtrack_stack_);
 				} [[fallthrough]];
 				case opcode::jump: {
 					pc += off;
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						if (auto memo = std::find_if(lrcall_stack_.crbegin(), lrcall_stack_.crend(),
+						if (auto memo = std::find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
 									[pca = pc + off, ir](auto& x) { return pca == x.pca && ir == x.sr.index; });
-								memo != lrcall_stack_.crend()) {
+								memo != lrmemo_stack_.crend()) {
 							if (memo->sa.index == lrfailcode || imm < memo->prec)
 								goto failure;
 							ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
@@ -763,10 +787,10 @@ public:
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrcall_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_action>{}, imm});
+						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_action>{}, imm});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
-						call_stack_.push_back({ac,pc});
+						call_stack_.push_back({ac, pc});
 					}
 					ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
 					pc += off;
@@ -778,10 +802,10 @@ public:
 					switch (stack_frames_.back()) {
 						case stack_frame_type::call: {
 							pc = call_stack_.back().program_counter;
-							call_stack_.pop_back();
+							pop_stack_frame(call_stack_);
 						} break;
 						case stack_frame_type::lrcall: {
-							auto& memo = lrcall_stack_.back();
+							auto& memo = lrmemo_stack_.back();
 							if (memo.sa.index == lrfailcode || ir > memo.sa.index) {
 								memo.sa = {ir, cr, lr};
 								memo.actions = semantics_.drop_actions_after(memo.acr);
@@ -790,43 +814,37 @@ public:
 								continue;
 							}
 							load_registers(memo.sa, {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr}, ir, cr, lr, ac, pc);
-							lrcall_stack_.pop_back();
+							pop_stack_frame(lrmemo_stack_, ir, cr, lr, ac, pc);
 						} break;
 						default: goto failure;
 					}
-					stack_frames_.pop_back();
 				} break;
 				case opcode::fail: {
 					fc = imm;
 				failure:
 					save_registers(ir, cr, lr, ac, pc);
 					for (++fc; fc > 0; --fc) {
-						if (stack_frames_.empty()) {
-							done = true;
+						if (done = cut_frame_ >= stack_frames_.size(); done)
 							break;
-						}
 						stack_frame_type type = stack_frames_.back();
-						stack_frames_.pop_back();
 						switch (type) {
 							case stack_frame_type::backtrack: {
-								const auto& frame = backtrack_stack_.back();
-								program_state_ = std::get<0>(frame);
-								input_state_ = std::get<1>(frame);
-								backtrack_stack_.pop_back();
+								std::tie(program_state_, input_state_) = backtrack_stack_.back();
+								pop_stack_frame(backtrack_stack_);
 							} break;
 							case stack_frame_type::call: {
-								call_stack_.pop_back(), ++fc;
+								pop_stack_frame(call_stack_), ++fc;
+							} break;
+							case stack_frame_type::capture: {
+								pop_stack_frame(capture_stack_), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
-								auto& memo = lrcall_stack_.back();
+								auto& memo = lrmemo_stack_.back();
 								if (memo.sa.index != lrfailcode) {
 									program_state_ = {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr};
 									input_state_ = memo.sa;
-								} else { ++fc; }
-								lrcall_stack_.pop_back();
-							} break;
-							case stack_frame_type::capture: {
-								capture_stack_.pop_back(), ++fc;
+								} else ++fc;
+								pop_stack_frame(lrmemo_stack_);
 							} break;
 							default: break;
 						}
@@ -834,11 +852,11 @@ public:
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::accept: {
-					save_registers(ir, cr, lr, ac, pc);
-					semantics_.accept(input_);
-					if (result = done = imm != 0; done)
-						break;
-					load_registers(ir, cr, lr, ac, pc);
+					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
+						cut(ir, cr, lr, ac, pc);
+						if (result = done = imm != 0; done)
+							break;
+					}
 				} break;
 				case opcode::newline: {
 					cr = 1, lr += 1;
@@ -862,7 +880,7 @@ public:
 					auto last = ir;
 					auto end = syntax_position{cr, lr};
 					auto [first, start] = capture_stack_.back();
-					capture_stack_.pop_back(), stack_frames_.pop_back();
+					pop_stack_frame(capture_stack_, ir, cr, lr, ac, pc);
 					if (first > last)
 						goto failure;
 					ac = semantics_.push_action([sa = prog.syntax_actions[imm], f = first, l = last, s = start, e = end](semantic_environment& se) {

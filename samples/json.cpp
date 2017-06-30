@@ -1,4 +1,4 @@
-// lug - Embedded DSL for PE grammar parsers in C++
+// lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
 
 #include <lug/lug.hpp>
