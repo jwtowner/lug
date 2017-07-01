@@ -31,7 +31,8 @@ It is based on research introduced in the following papers:
 TODO
 ---
 - parser error recovery (WIP)
-- investigate binding only types and passing in attribute variables to lambdas as arguments
+- symbol tables and parsing conditions
+- adams' grammars and alignment elimination
 - optimization: better detection of left-recursive rule calls
 - optimization: do not create attribute variable frames if a rule does not use the attribute binding operator
 - optimization: tail recursion

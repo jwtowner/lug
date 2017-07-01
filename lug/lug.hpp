@@ -80,7 +80,7 @@ typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_ac
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E> || std::is_same_v<char, E>;
+template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
 
 enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
@@ -481,8 +481,6 @@ inline auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
 		return call_expression<T>{t, 0};
-	else if constexpr (std::is_same_v<char, T>)
-		return char_terminal{t};
 	else if constexpr (is_string_expression_v<T>)
 		return string_expression{t};
 	else
@@ -496,7 +494,7 @@ inline auto encoder::evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>
 }
 
 template <class E, class> inline rule::rule(const E& e) { rule_encoder{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 0); /* TODO: jump instead of call */ }
+inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 0); }
 inline call_expression<rule> rule::operator()(unsigned short precedence) { return call_expression<rule>{*this, precedence}; }
 
 namespace language
@@ -504,7 +502,6 @@ namespace language
 
 using semantics = lug::semantic_environment&; using syntax = const lug::syntax_view&;
 using lug::grammar; using lug::rule; using lug::start;
-using lug::cut_action; using lug::newline_action; using lug::any_terminal; using lug::char_terminal; using lug::empty_terminal;
 using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -661,6 +658,8 @@ class parser
 
 	void cut() {
 		semantics_.accept(input_);
+		input_.erase(0, input_state_.index);
+		input_state_.index = 0;
 		program_state_.action_counter = 0;
 		cut_deferred_ = false;
 		cut_frame_ = stack_frames_.size();
