@@ -33,7 +33,7 @@ TODO
 - parser error recovery (WIP)
 - symbol tables and parsing conditions
 - adams' grammars and alignment elimination
-- optimization: better detection of left-recursive rule calls to remove out false-positives
+- optimization: better detection of left-recursive rule calls to remove false-positives
 - optimization: do not create attribute variable frames if a rule does not use the attribute binding operator
 - optimization: tail recursion
 - optimization: rule inlining
