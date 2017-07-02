@@ -69,15 +69,15 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 } // namespace utf8
 
 struct program; template <class Target> struct call_expression;
-class rule; class grammar; class encoder; class rule_encoder; class parser; class semantic_environment;
+class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
 class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
 class grammar_error : public lug_error { using lug_error::lug_error; };
 class parser_error : public lug_error { using lug_error::lug_error; };
 struct syntax_position { std::size_t column, line; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
 typedef std::function<bool(parser&)> semantic_predicate;
-typedef std::function<void(semantic_environment&)> semantic_action;
-typedef std::function<void(semantic_environment&, const syntax_view&)> syntax_action;
+typedef std::function<void(semantics&)> semantic_action;
+typedef std::function<void(semantics&, const syntax_view&)> syntax_action;
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
@@ -204,7 +204,7 @@ public:
 	const lug::program& program() const noexcept { return program_; };
 };
 
-class semantic_environment
+class semantics
 {
 	std::string_view capture_;
 	std::vector<semantic_action> actions_;
@@ -214,7 +214,7 @@ class semantic_environment
 	virtual void on_accept_end() {}
 	virtual void on_clear() {}
 public:
-	virtual ~semantic_environment() {}
+	virtual ~semantics() {}
 	const std::string_view& capture() const { return capture_; }
 	std::size_t action_count() const noexcept { return actions_.size(); }
 	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
@@ -408,7 +408,7 @@ class string_expression
 	static grammar make_grammar();
 	void compile(std::string_view sv);
 
-	struct generator : semantic_environment
+	struct generator : semantics
 	{
 		instruction_encoder encoder;
 		bool circumflex;
@@ -501,7 +501,7 @@ inline call_expression<rule> rule::operator()(unsigned short precedence) { retur
 namespace language
 {
 
-using semantics = lug::semantic_environment&; using syntax = const lug::syntax_view&;
+using semantics = lug::semantics; using syntax = const lug::syntax_view&;
 using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
@@ -531,29 +531,29 @@ inline auto operator>(const E1& e1, const E2& e2) {
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(const E& e, A a) {
-	if constexpr (std::is_invocable_v<A, semantics, syntax>) {
+	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
 		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>, syntax>) {
-		return e < [a = std::move(a)](semantics s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics>{s}, x); };
-	} else if constexpr (std::is_invocable_v<A, semantics>) {
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
+		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
+	} else if constexpr (std::is_invocable_v<A, semantics&>) {
 		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.evaluate(x).encode(opcode::action, semantic_action{a}); };
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>>) {
-		return e < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
+		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, [a](semantics) { a(); }); };
+			d.evaluate(x).encode(opcode::action, [a](semantics&) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
 		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
+			d.evaluate(x).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); }); };
 	}
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(T& v, const E& e) { return e < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.capture}; }; }
+inline auto operator<<(T& v, const E& e) { return e < [&v](semantics& s, syntax x) { s.save_variable(v); v = T{x.capture}; }; }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(T& v, const E& e) { return e < [&v](semantics s) { s.save_variable(v); v = s.pop_attribute<T>(); }; }
+inline auto operator%(T& v, const E& e) { return e < [&v](semantics& s) { s.save_variable(v); v = s.pop_attribute<T>(); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(const E& e) { return !(!e); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(const E& e) { return e | empty_terminal{}; }
@@ -613,7 +613,7 @@ class parser
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 
 	const lug::grammar& grammar_;
-	semantic_environment& semantics_;
+	lug::semantics& semantics_;
 	std::locale locale_;
 	std::string input_;
 	syntax_state input_state_{0, 1, 1};
@@ -677,9 +677,9 @@ class parser
 	}
 
 public:
-	parser(const grammar& g, semantic_environment& s) : grammar_{g}, semantics_{s} {}
+	parser(const lug::grammar& g, lug::semantics& s) : grammar_{g}, semantics_{s} {}
 	const lug::grammar& grammar() const noexcept { return grammar_; }
-	semantic_environment& semantics() const noexcept { return semantics_; }
+	lug::semantics& semantics() const noexcept { return semantics_; }
 	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
 	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
@@ -781,11 +781,11 @@ public:
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac, pc});
 					}
-					ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
+					ac = semantics_.push_action([](lug::semantics& s) { s.enter_frame(); });
 					pc += off;
 				} break;
 				case opcode::ret: {
-					ac = semantics_.push_action([](semantic_environment& s) { s.leave_frame(); });
+					ac = semantics_.push_action([](lug::semantics& s) { s.leave_frame(); });
 					if (stack_frames_.empty())
 						goto failure;
 					switch (stack_frames_.back()) {
@@ -799,7 +799,7 @@ public:
 								memo.sa = {ir, cr, lr};
 								memo.actions = semantics_.drop_actions_after(memo.acr);
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
-								ac = semantics_.push_action([](semantic_environment& s) { s.enter_frame(); });
+								ac = semantics_.push_action([](lug::semantics& s) { s.enter_frame(); });
 								continue;
 							}
 							load_registers(memo.sa, {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr}, ir, cr, lr, ac, pc);
@@ -872,7 +872,7 @@ public:
 					pop_stack_frame(capture_stack_, ir, cr, lr, ac, pc);
 					if (first > last)
 						goto failure;
-					ac = semantics_.push_action([sa = prog.syntax_actions[imm], f = first, l = last, s = start, e = end](semantic_environment& se) {
+					ac = semantics_.push_action([sa = prog.syntax_actions[imm], f = first, l = last, s = start, e = end](lug::semantics& se) {
 						sa(se, {se.capture().substr(f, l - f), s, e}); });
 				} break;
 				default: throw parser_error{"invalid opcode"};
@@ -883,17 +883,17 @@ public:
 };
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
-inline bool parse(InputIt first, InputIt last, const grammar& grmr, semantic_environment& sema) {
+inline bool parse(InputIt first, InputIt last, const grammar& grmr, semantics& sema) {
 	return parser{grmr, sema}.enqueue(first, last).parse();
 }
 
 template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
 inline bool parse(InputIt first, InputIt last, const grammar& grmr) {
-	semantic_environment sema;
+	semantics sema;
 	return parse(first, last, grmr, sema);
 }
 
-inline bool parse(std::istream& input, const grammar& grmr, semantic_environment& sema) {
+inline bool parse(std::istream& input, const grammar& grmr, semantics& sema) {
 	return parser{grmr, sema}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
 			line.push_back('\n');
@@ -904,13 +904,13 @@ inline bool parse(std::istream& input, const grammar& grmr, semantic_environment
 }
 
 inline bool parse(std::istream& input, const grammar& grmr) {
-	semantic_environment sema;
+	semantics sema;
 	return parse(input, grmr, sema);
 }
 
-inline bool parse(std::string_view sv, const grammar& grmr, semantic_environment& sema) { return parse(sv.cbegin(), sv.cend(), grmr, sema); }
+inline bool parse(std::string_view sv, const grammar& grmr, semantics& sema) { return parse(sv.cbegin(), sv.cend(), grmr, sema); }
 inline bool parse(std::string_view sv, const grammar& grmr) { return parse(sv.cbegin(), sv.cend(), grmr); }
-inline bool parse(const grammar& grmr, semantic_environment& sema) { return parse(std::cin, grmr, sema); }
+inline bool parse(const grammar& grmr, semantics& sema) { return parse(std::cin, grmr, sema); }
 inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 
 inline grammar string_expression::make_grammar() {

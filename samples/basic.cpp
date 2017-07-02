@@ -85,7 +85,7 @@ public:
 
 	void repl()
 	{
-		lug::semantic_environment sema;
+		lug::semantics sema;
 		lug::parser parser{grammar_, sema};
 
 		parser.push_source( [this](std::string& out) {

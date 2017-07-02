@@ -3,6 +3,8 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <fstream>
+#include <streambuf>
 
 class json_parser
 {
