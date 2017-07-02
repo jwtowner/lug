@@ -1,17 +1,17 @@
 lug
 ===
-An embedded domain specific language in C++17 for expressing parser combinators as extended Parsing Expression Grammars (PEGs)
+An embedded domain specific language for expressing parsers as extended Parsing Expression Grammars (PEGs) in C++17
 
 Features
 ---
 - Natural syntax more akin to external parser generator languages, unlike many other C++ parsing toolkits
 - Direct and indirect left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
-- Cut operator to commit parser to currently matched parse prefix and prune all backtrack entries
+- Cut operator to commit to currently matched parse prefix and prune all backtrack entries
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - Uses expression template functors for evaluating and optimizing grammar rules at compile time
 - UTF-8 text parsing with support for matching Unicode character classes
-- Header only library using C++17 language and library features
+- Single header only library using C++17 language and library features
 - Relatively small with the intent to remain under 1000 lines of very terse code
 
 It is based on research introduced in the following papers:
@@ -33,12 +33,11 @@ TODO
 - parser error recovery (WIP)
 - symbol tables and parsing conditions
 - adams' grammars and alignment elimination
-- optimization: better detection of left-recursive rule calls
+- optimization: better detection of left-recursive rule calls to remove out false-positives
 - optimization: do not create attribute variable frames if a rule does not use the attribute binding operator
 - optimization: tail recursion
-- optimization: inlining
+- optimization: rule inlining
 - optimization: additional instructions
-- 
 - more samples, testing, and bug fixing
-- increase compiler warning level and fix issues
-- add documentation
+- increase compiler warning level and fix any issues
+- documentation
