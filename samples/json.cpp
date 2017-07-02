@@ -1,5 +1,6 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
+// See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
 
@@ -15,15 +16,14 @@ public:
 		rule FractionalPart = "[.]" > +"[0-9]"s;
 		rule IntegralPart = "0" | "[1-9]" > *"[0-9]"s;
 		rule Number = ~"-"s > IntegralPart > ~FractionalPart > ~ExponentPart;
-		rule True = "true";
-		rule False = "false";
+		rule Boolean = "true"s | "false";
 		rule Null = "null";
 		rule UnicodeEscape = "u" > +"[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"s;
 		rule Escape = "\\" > ("[/\\bfnrt]" | UnicodeEscape);
 		rule String = Space > "\"" > *(u8"[^\"\\\u0000-\u001F]"s | Escape) > "\"" > Space;
 		rule Array = "[[]" > ((JSON > *("," > JSON)) | Space) > "[]]";
 		rule Object = "{" > (String > ":" > JSON > *("," > String > ":" > JSON) | Space) > "}";
-		JSON = Space > (Object | Array | String | Number | True | False | Null) > Space;
+		JSON = Space > (Object | Array | String | Number | Boolean | Null) > Space;
 		grammar_ = start(JSON);
 	}
 

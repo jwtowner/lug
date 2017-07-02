@@ -1,5 +1,6 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
+// See LICENSE.md file for license details
 
 #ifndef LUG_HPP
 #define LUG_HPP
@@ -267,7 +268,7 @@ public:
 
 class encoder
 {
-	virtual immediate do_add_predicate(semantic_predicate) { return immediate{0}; }
+	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_syntax_action(syntax_action) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
@@ -279,7 +280,7 @@ public:
 	encoder& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
 	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
-	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_predicate(std::move(p))}); }
+	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
@@ -305,7 +306,7 @@ public:
 			do_append(instruction{op, operands::str, static_cast<immediate>(((val - 1) << 8) | (subsequence.size() - 1))});
 			do {
 				do_append(instruction{subsequence});
-				subsequence.remove_prefix((std::min)(size_t{4}, subsequence.size()));
+				subsequence.remove_prefix((std::min)(std::size_t{4}, subsequence.size()));
 			} while (!subsequence.empty());
 		}
 		return *this;
@@ -351,7 +352,7 @@ class instruction_encoder : public encoder
 	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
 
 	void do_append(instruction instr) override {
-		if (instructions_.size() >= static_cast<size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
+		if (instructions_.size() >= static_cast<std::size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
 			throw grammar_error{"program length exceeds limits"};
 		instructions_.push_back(instr);
 	}
@@ -363,7 +364,7 @@ public:
 class program_encoder : public instruction_encoder
 {
 	program& program_;
-	immediate do_add_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
+	immediate do_add_semantic_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
 	immediate do_add_syntax_action(syntax_action a) override { return add_item(program_.syntax_actions, std::move(a)); }
 
@@ -405,9 +406,9 @@ class string_expression
 {
 	std::vector<instruction> instructions_;
 	static grammar make_grammar();
-	void compile(const std::string& s);
+	void compile(std::string_view sv);
 
-	struct generator : public semantic_environment
+	struct generator : semantic_environment
 	{
 		instruction_encoder encoder;
 		bool circumflex;
@@ -472,7 +473,7 @@ class string_expression
 	};
 
 public:
-	string_expression(const std::string& s) { compile(s); }
+	string_expression(std::string_view sv) { compile(sv); }
 	void operator()(encoder& v) const { v.append(instructions_.begin(), instructions_.end()); }
 };
 
@@ -505,66 +506,59 @@ using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator!(E&& e) {
-	return [x = make_expression(::std::forward<E>(e))](encoder& d) {
+inline auto operator!(const E& e) {
+	return [x = make_expression(e)](encoder& d) {
 		d.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator*(E&& e) {
-	return [x = make_expression(::std::forward<E>(e))](encoder& d) {
+inline auto operator*(const E& e) {
+	return [x = make_expression(e)](encoder& d) {
 		auto x_length = instruction_length(x);
 		d.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-inline auto operator|(E1&& e1, E2&& e2) {
-	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](encoder& d) {
+inline auto operator|(const E1& e1, const E2& e2) {
+	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
 		d.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-inline auto operator>(E1&& e1, E2&& e2) {
-	return [x1 = make_expression(::std::forward<E1>(e1)), x2 = make_expression(::std::forward<E2>(e2))](encoder& d) {
-		d.evaluate(x1).evaluate(x2); };
+inline auto operator>(const E1& e1, const E2& e2) {
+	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) { d.evaluate(x1).evaluate(x2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<(E&& e, A a) {
+inline auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics, syntax>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>, syntax>) {
-		return ::std::forward<E>(e) < [a = std::move(a)](semantics s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics>{s}, x); };
+		return e < [a = std::move(a)](semantics s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.evaluate(x).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics>>) {
-		return ::std::forward<E>(e) < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
+		return e < [a = std::move(a)](semantics s) { a(detail::dynamic_cast_if_base_of<semantics>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.evaluate(x).encode(opcode::action, [a](semantics) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
-		return [x = make_expression(::std::forward<E>(e)), a = ::std::move(a)](encoder& d) {
+		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.evaluate(x).encode(opcode::action, [a](semantics s) { s.push_attribute(a()); }); };
 	}
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(T& v, E&& e) {
-	return ::std::forward<E>(e) < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.capture}; };
-}
-
+inline auto operator<<(T& v, const E& e) { return e < [&v](semantics s, syntax x) { s.save_variable(v); v = T{x.capture}; }; }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(T& v, E&& e) {
-	return ::std::forward<E>(e) < [&v](semantics s) { s.save_variable(v); v = s.pop_attribute<T>(); };
-}
-
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(E&& e) { return !(!(::std::forward<E>(e))); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(E&& e) { return ::std::forward<E>(e) > *(::std::forward<E>(e)); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(E&& e) { return ::std::forward<E>(e) | empty_terminal{}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(E&& e) { return cut_action{} > ::std::forward<E>(e); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(E&& e, int) { return ::std::forward<E>(e) > cut_action{}; }
+inline auto operator%(T& v, const E& e) { return e < [&v](semantics s) { s.save_variable(v); v = s.pop_attribute<T>(); }; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(const E& e) { return !(!e); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(const E& e) { return e | empty_terminal{}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(const E& e) { return cut_action{} > e; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(const E& e, int) { return e > cut_action{}; }
 
 } // namespace language
 
@@ -659,16 +653,12 @@ class parser
 	void cut() {
 		semantics_.accept(input_);
 		input_.erase(0, input_state_.index);
-		input_state_.index = 0;
-		program_state_.action_counter = 0;
-		cut_deferred_ = false;
-		cut_frame_ = stack_frames_.size();
+		input_state_.index = 0, program_state_.action_counter = 0;
+		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
 	}
 
 	void cut(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		save_registers(ir, cr, lr, ac, pc);
-		cut();
-		load_registers(ir, cr, lr, ac, pc);
+		save_registers(ir, cr, lr, ac, pc); cut(); load_registers(ir, cr, lr, ac, pc);
 	}
 
 	template <class Stack, class... Args>
@@ -733,7 +723,7 @@ public:
 		while (!done) {
 			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
 				case opcode::match: {
-					if (str.size() > 0) {
+					if (!str.empty()) {
 						if (!available(str.size(), ir) || input_.compare(ir, str.size(), str) != 0)
 							goto failure;
 						ir += str.size(), cr += imm;
@@ -918,8 +908,8 @@ inline bool parse(std::istream& input, const grammar& grmr) {
 	return parse(input, grmr, sema);
 }
 
-inline bool parse(const std::string& input, const grammar& grmr, semantic_environment& sema) { return parse(input.cbegin(), input.cend(), grmr, sema); }
-inline bool parse(const std::string& input, const grammar& grmr) { return parse(input.cbegin(), input.cend(), grmr); }
+inline bool parse(std::string_view sv, const grammar& grmr, semantic_environment& sema) { return parse(sv.cbegin(), sv.cend(), grmr, sema); }
+inline bool parse(std::string_view sv, const grammar& grmr) { return parse(sv.cbegin(), sv.cend(), grmr); }
 inline bool parse(const grammar& grmr, semantic_environment& sema) { return parse(std::cin, grmr, sema); }
 inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 
@@ -938,10 +928,10 @@ inline grammar string_expression::make_grammar() {
 	return start((+(Dot | Bracket | Sequence) | Empty) > !A);
 }
 
-inline void string_expression::compile(const std::string& s) {
+inline void string_expression::compile(std::string_view sv) {
 	static grammar grmr = make_grammar();
 	generator genr(*this);
-	if (!parse(s, grmr, genr))
+	if (!parse(sv, grmr, genr))
 		throw grammar_error{"invalid string or bracket expression"};
 }
 

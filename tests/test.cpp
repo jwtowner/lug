@@ -1,5 +1,6 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
+// See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
 #include <cassert>
@@ -7,7 +8,7 @@
 void test_any_terminal()
 {
 	using namespace lug::language;
-	rule S = any_terminal{} > !any_terminal{};
+	rule S = lug::any_terminal{} > !lug::any_terminal{};
 	grammar G = start(S);
 	assert(lug::parse("a", G));
 	assert(lug::parse("2", G));
@@ -19,7 +20,7 @@ void test_any_terminal()
 void test_char_terminal()
 {
 	using namespace lug::language;
-	rule S = 'a' > !any_terminal{};
+	rule S = lug::char_terminal{'a'} > !lug::any_terminal{};
 	grammar G = start(S);
 	assert(lug::parse("a", G));
 	assert(!lug::parse("2", G));
@@ -31,7 +32,7 @@ void test_char_terminal()
 void test_empty_terminal()
 {
 	using namespace lug::language;
-	rule S = empty_terminal{} > !any_terminal{};
+	rule S = lug::empty_terminal{} > !lug::any_terminal{};
 	grammar G = start(S);
 	assert(!lug::parse("a", G));
 	assert(!lug::parse("2", G));
@@ -43,8 +44,8 @@ void test_empty_terminal()
 void test_terminal_sequence()
 {
 	using namespace lug::language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
+	constexpr auto A = lug::any_terminal{};
+	using C = lug::char_terminal;
 	rule S = C{'a'} > A > C{'b'} > !A;
 	grammar G = start(S);
 	assert(!lug::parse("a", G));
@@ -58,8 +59,8 @@ void test_terminal_sequence()
 void test_terminal_choice()
 {
 	using namespace lug::language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
+	constexpr auto A = lug::any_terminal{};
+	using C = lug::char_terminal;
 	rule S = (C{'a'} > A | C{'b'}) > !A;
 	grammar G = start(S);
 	assert(!lug::parse("a", G));
@@ -73,8 +74,8 @@ void test_terminal_choice()
 void test_direct_left_recursion()
 {
 	using namespace lug::language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
+	constexpr auto A = lug::any_terminal{};
+	using C = lug::char_terminal;
 	rule S = (S > C{'a'} | C{'a'});
 	grammar G = start(S > !C{'a'});
 	assert(!lug::parse("", G));
@@ -91,8 +92,8 @@ void test_direct_left_recursion()
 void test_indirect_left_recursion()
 {
 	using namespace lug::language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
+	constexpr auto A = lug::any_terminal{};
+	using C = lug::char_terminal;
 	rule Q, S;
 	Q = S > C{'a'};
 	S = Q | C{'a'};
@@ -111,8 +112,8 @@ void test_indirect_left_recursion()
 void test_association_and_precedence()
 {
 	using namespace lug::language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
+	constexpr auto A = lug::any_terminal{};
+	using C = lug::char_terminal;
 	std::string out;
 	rule N	= C{'1'} | C{'2'} | C{'3'};
 	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
