@@ -74,10 +74,12 @@ class lug_error : public std::runtime_error { using std::runtime_error::runtime_
 class grammar_error : public lug_error { using lug_error::lug_error; };
 class parser_error : public lug_error { using lug_error::lug_error; };
 struct syntax_position { std::size_t column, line; };
+struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
 typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantics&)> semantic_action;
-typedef std::function<void(semantics&, const syntax_view&)> syntax_action;
+typedef std::function<void(semantics&, const syntax_view&)> semantic_capture_action;
+struct prospective_action { unsigned short rule_depth, action_index; unsigned int capture_index; };
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
@@ -139,7 +141,7 @@ struct program
 	std::vector<instruction> instructions;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
-	std::vector<syntax_action> syntax_actions;
+	std::vector<semantic_capture_action> capture_actions;
 
 	void concatenate(const program& src) {
 		instructions.reserve(instructions.size() + src.instructions.size());
@@ -149,7 +151,7 @@ struct program
 			switch (instr.pf.op) {
 				case opcode::predicate: valoffset = predicates.size(); break;
 				case opcode::action: valoffset = actions.size(); break;
-				case opcode::end_capture: valoffset = syntax_actions.size(); break;
+				case opcode::end_capture: valoffset = capture_actions.size(); break;
 				default: valoffset = 0; break;
 			}
 			if (valoffset != 0) {
@@ -164,14 +166,14 @@ struct program
 		}
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
-		syntax_actions.insert(syntax_actions.end(), src.syntax_actions.begin(), src.syntax_actions.end());
+		capture_actions.insert(capture_actions.end(), src.capture_actions.begin(), src.capture_actions.end());
 	}
 
 	void swap(program& p) {
 		instructions.swap(p.instructions);
 		predicates.swap(p.predicates);
 		actions.swap(p.actions);
-		syntax_actions.swap(p.syntax_actions);
+		capture_actions.swap(p.capture_actions);
 	}
 };
 
@@ -206,71 +208,100 @@ public:
 
 class semantics
 {
-	std::string_view capture_;
-	std::vector<semantic_action> actions_;
+	friend class parser;
+	std::string_view match_;
+	unsigned short prune_depth_, rule_depth_;
+	std::vector<prospective_action> prospective_actions_;
+	std::vector<syntax_range> captures_;
 	std::vector<std::any> attributes_;
-	std::vector<std::unordered_map<void*, std::function<void(void*)>>> vframes_;
 	virtual void on_accept_begin() {}
 	virtual void on_accept_end() {}
 	virtual void on_clear() {}
-public:
-	virtual ~semantics() {}
-	const std::string_view& capture() const { return capture_; }
-	std::size_t action_count() const noexcept { return actions_.size(); }
-	void pop_actions_after(std::size_t n) { if (n < actions_.size()) actions_.resize(n); }
-	auto push_action(semantic_action a) { actions_.push_back(std::move(a)); return action_count(); }
-	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
-	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
-	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
-	void enter_frame() { vframes_.emplace_back(); }
-	void leave_frame() { std::for_each(vframes_.back().begin(), vframes_.back().end(), [](auto& entry) { entry.second(entry.first); }); vframes_.pop_back(); }
-
-	void accept(std::string_view c) {
-		capture_ = c;
-		on_accept_begin();
-		for (auto& a : actions_)
-			a(*this);
-		actions_.clear();
-		on_accept_end();
-	}
-
-	void clear() {
-		capture_ = std::string_view{};
-		actions_.clear();
-		attributes_.clear();
-		on_clear();
-	}
+	std::size_t action_count() const noexcept { return prospective_actions_.size(); }
+	void pop_actions_after(std::size_t n) { if (n < prospective_actions_.size()) prospective_actions_.resize(n); }
 
 	auto drop_actions_after(std::size_t n) {
-		std::vector<semantic_action> dropped;
-		if (n < actions_.size()) {
-			dropped.assign(std::make_move_iterator(actions_.begin() + n), std::make_move_iterator(actions_.end()));
-			actions_.resize(n);
+		std::vector<prospective_action> dropped;
+		if (n < prospective_actions_.size()) {
+			dropped.assign(prospective_actions_.begin() + n, prospective_actions_.end());
+			prospective_actions_.resize(n);
 		}
 		return dropped;
 	}
 
-	auto restore_actions_after(std::size_t n, const std::vector<semantic_action>& a) {
+	auto restore_actions_after(std::size_t n, const std::vector<prospective_action>& a) {
 		pop_actions_after(n);
-		actions_.insert(actions_.end(), a.begin(), a.end());
+		prospective_actions_.insert(prospective_actions_.end(), a.begin(), a.end());
 		return action_count();
 	}
 
-	template <class T>
-	void save_variable(T& x) {
-		if (!vframes_.empty()) {
-			auto& vframe = vframes_.back();
-			if (vframe.count(&x) == 0)
-				vframe.emplace(&x, [v = std::decay_t<T>{x}](void* p) { *static_cast<std::decay_t<T>*>(p) = v; });
-		}
+	auto push_action(std::size_t depth, std::size_t action_index, unsigned int capture_index = (std::numeric_limits<unsigned int>::max)()) {
+		prospective_actions_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), capture_index});
+		return action_count();
 	}
+
+	auto push_capture_action(std::size_t depth, std::size_t action_index, const syntax_range& range) {
+		captures_.push_back(range);
+		return push_action(depth, action_index, static_cast<unsigned int>(captures_.size() - 1));
+	}
+
+public:
+	virtual ~semantics() {}
+	const std::string_view& match() const { return match_; }
+	void escape() { prune_depth_ = rule_depth_; }
+	unsigned short rule_depth() const { return rule_depth_; }
+	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
+	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
+	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+
+	void accept(const lug::grammar& grmr, std::string_view m) {
+		const auto& actions = grmr.program().actions;
+		const auto& capture_actions = grmr.program().capture_actions;
+		match_ = m;
+		on_accept_begin();
+		for (auto& pa : prospective_actions_) {
+			if (prune_depth_ <= pa.rule_depth)
+				continue;
+			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = pa.rule_depth;
+			if (pa.capture_index < (std::numeric_limits<unsigned int>::max)()) {
+				const syntax_range& cap = captures_[pa.capture_index];
+				capture_actions[pa.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
+			} else {
+				actions[pa.action_index](*this);
+			}
+		}
+		on_accept_end();
+		match_ = std::string_view{};
+		prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = 0;
+		prospective_actions_.clear();
+	}
+
+	void clear() {
+		match_ = std::string_view{};
+		prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = 0;
+		prospective_actions_.clear(), attributes_.clear();
+		on_clear();
+	}
+};
+
+template <class T>
+class semantic_variable
+{
+	semantics& semantics_;
+	std::unordered_map<unsigned short, T> state_;
+public:
+	semantic_variable(semantics& s) : semantics_{s} {}
+	T* operator->() { return &state_[semantics_.rule_depth()]; }
+	const T* operator->() const { return &state_[semantics_.rule_depth()]; }
+	T& operator*() { return state_[semantics_.rule_depth()]; }
+	const T& operator*() const { return state_[semantics_.rule_depth()]; }
 };
 
 class encoder
 {
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
-	virtual immediate do_add_syntax_action(syntax_action) { return immediate{0}; }
+	virtual immediate do_add_semantic_capture_action(semantic_capture_action) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
@@ -282,7 +313,7 @@ public:
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	encoder& encode(opcode op, syntax_action a) { return append(instruction{op, operands::none, do_add_syntax_action(std::move(a))}); }
+	encoder& encode(opcode op, semantic_capture_action a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
@@ -366,7 +397,7 @@ class program_encoder : public instruction_encoder
 	program& program_;
 	immediate do_add_semantic_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_syntax_action(syntax_action a) override { return add_item(program_.syntax_actions, std::move(a)); }
+	immediate do_add_semantic_capture_action(semantic_capture_action a) override { return add_item(program_.capture_actions, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item) {
@@ -502,6 +533,7 @@ namespace language
 {
 
 using semantics = lug::semantics; using syntax = const lug::syntax_view&;
+template <class T> using semantic_variable = lug::semantic_variable<T>;
 using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
@@ -533,7 +565,7 @@ template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
 		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, syntax_action{a}); };
+			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, semantic_capture_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
 		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics&>) {
@@ -551,9 +583,9 @@ inline auto operator<(const E& e, A a) {
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(T& v, const E& e) { return e < [&v](semantics& s, syntax x) { s.save_variable(v); v = T{x.capture}; }; }
+inline auto operator<<(semantic_variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(T& v, const E& e) { return e < [&v](semantics& s) { s.save_variable(v); v = s.pop_attribute<T>(); }; }
+inline auto operator%(semantic_variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(const E& e) { return !(!e); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(const E& e) { return e | empty_terminal{}; }
@@ -609,7 +641,7 @@ class parser
 	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
 	struct syntax_state { std::size_t index; syntax_position position; };
 	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
-	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_action> actions; std::size_t prec; };
+	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<prospective_action> actions; std::size_t prec; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 
 	const lug::grammar& grammar_;
@@ -651,7 +683,7 @@ class parser
 	}
 
 	void cut() {
-		semantics_.accept(input_);
+		semantics_.accept(grammar_, input_);
 		input_.erase(0, input_state_.index);
 		input_state_.index = 0, program_state_.action_counter = 0;
 		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
@@ -776,16 +808,14 @@ public:
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_action>{}, imm});
+						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<prospective_action>{}, imm});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac, pc});
 					}
-					ac = semantics_.push_action([](lug::semantics& s) { s.enter_frame(); });
 					pc += off;
 				} break;
 				case opcode::ret: {
-					ac = semantics_.push_action([](lug::semantics& s) { s.leave_frame(); });
 					if (stack_frames_.empty())
 						goto failure;
 					switch (stack_frames_.back()) {
@@ -799,7 +829,6 @@ public:
 								memo.sa = {ir, cr, lr};
 								memo.actions = semantics_.drop_actions_after(memo.acr);
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
-								ac = semantics_.push_action([](lug::semantics& s) { s.enter_frame(); });
 								continue;
 							}
 							load_registers(memo.sa, {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr}, ir, cr, lr, ac, pc);
@@ -857,7 +886,7 @@ public:
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
-					ac = semantics_.push_action(prog.actions[imm]);
+					ac = semantics_.push_action(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
@@ -872,8 +901,7 @@ public:
 					pop_stack_frame(capture_stack_, ir, cr, lr, ac, pc);
 					if (first > last)
 						goto failure;
-					ac = semantics_.push_action([sa = prog.syntax_actions[imm], f = first, l = last, s = start, e = end](lug::semantics& se) {
-						sa(se, {se.capture().substr(f, l - f), s, e}); });
+					ac = semantics_.push_capture_action(call_stack_.size() + lrmemo_stack_.size(), imm, syntax_range{first, last - first, start, end});
 				} break;
 				default: throw parser_error{"invalid opcode"};
 			}

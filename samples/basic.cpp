@@ -18,7 +18,7 @@
 class basic_interpreter
 {
 public:
-	basic_interpreter() : line_{lines_.end()}, stdin_tty_{isatty(fileno(stdin)) != 0}
+	basic_interpreter()
 	{
 		using namespace lug::language;
 
@@ -27,9 +27,9 @@ public:
 		rule _		= *"[ \t]"s;
 		rule S		= +"[ \t]"s;
 		rule CR		= "\n"s | "\r\n" | "\r";
-		rule Ident	= id_<< +"[A-Z]" > _                            <[this]{ return id_; };
-		rule Number	= sv_<< (+"[0-9]"s) > _                         <[this]{ return std::stoi(std::string{sv_}); };
-		rule String	= "\"" > sv_<< *"[^\"]"s > "\"" > _             <[this]{ return sv_; };
+		rule Ident	= id_<< +"[A-Z]" > _                            <[this]{ return *id_; };
+		rule Number	= sv_<< (+"[0-9]"s) > _                         <[this]{ return std::stoi(std::string{*sv_}); };
+		rule String	= "\"" > sv_<< *"[^\"]"s > "\"" > _             <[this]{ return *sv_; };
 
 		rule RelOp	= "=" > _                                       <[]() -> RelOpFn { return [](int x, int y) { return x == y; }; }
 					| ">=" > _                                      <[]() -> RelOpFn { return [](int x, int y) { return x >= y; }; }
@@ -38,36 +38,37 @@ public:
 					| "<>" > _                                      <[]() -> RelOpFn { return [](int x, int y) { return x != y; }; }
 					| "<" > _                                       <[]() -> RelOpFn { return [](int x, int y) { return x < y; }; };
 
-		rule Factor	= id_%Ident                                     <[this]{ return vars_[id_]; }
+		rule Factor	= id_%Ident                                     <[this]{ return vars_[*id_]; }
 					| Number
 					| "(" > _ > Expr > ")" > _;
 
 		rule Term	= n1_%Factor > *(
-					      "*" > _ > n2_%Factor                      <[this]{ n1_ *= n2_; }
-					    | "/" > _ > n2_%Factor                      <[this]{ n1_ /= n2_; }
-					)                                               <[this]{ return n1_; };
+					      "*" > _ > n2_%Factor                      <[this]{ *n1_ *= *n2_; }
+					    | "/" > _ > n2_%Factor                      <[this]{ *n1_ /= *n2_; }
+					)                                               <[this]{ return *n1_; };
 
 		     Expr	= (  ~ "+"s > _ > n1_%Term
-					     | "-"  > _ > n1_%Term                      <[this]{ n1_ = -n1_; }
-					) > *( "+"  > _ > n2_%Term                      <[this]{ n1_ += n2_; }
-					     | "-"  > _ > n2_%Term                      <[this]{ n1_ -= n2_; }
-					)                                               <[this]{ return n1_; };
+					     | "-"  > _ > n1_%Term                      <[this]{ *n1_ = -(*n1_); }
+					) > *( "+"  > _ > n2_%Term                      <[this]{ *n1_ += *n2_; }
+					     | "-"  > _ > n2_%Term                      <[this]{ *n1_ -= *n2_; }
+					)                                               <[this]{ return *n1_; };
 
-		rule InpLst	= id_%Ident                                     <[this]{ std::cin >> vars_[id_]; }
-					> *( "," > _ > id_%Ident                        <[this]{ std::cin >> vars_[id_]; } );
+		rule InpLst	= id_%Ident                                     <[this]{ std::cin >> vars_[*id_]; }
+					> *( "," > _ > id_%Ident                        <[this]{ std::cin >> vars_[*id_]; } );
 
-		rule PrtTok	= sv_%String                                    <[this]{ std::cout << sv_; }
-					| n1_%Expr                                      <[this]{ std::cout << n1_; };
+		rule PrtTok	= sv_%String                                    <[this]{ std::cout << *sv_; }
+					| n1_%Expr                                      <[this]{ std::cout << *n1_; };
 
 		rule Stmnt	= "PRINT" > S > ~PrtTok > *("," > _ > PrtTok)   <[this]{ std::cout << std::endl; }
-					| "IF" > S > n1_%Expr > rop_%RelOp > n2_%Expr   <[this]{ if (!rop_(n1_, n2_)) { /*SKIP STATEMENT*/ } } > "THEN" > S > Stmnt
-					| "GOTO" > S > n1_%Expr                         <[this]{ gotoline(n1_); }
+					| "IF" > S > n1_%Expr > rop_%RelOp > n2_%Expr   <[this]{ if (!(*rop_)(*n1_, *n2_)) { semantics_.escape(); } }
+					> "THEN" > S > Stmnt
+					| "GOTO" > S > n1_%Expr                         <[this]{ goto_line(*n1_); }
 					| "INPUT" > S > InpLst
-					| "LET" > S > id_%Ident > "=" > _ > n1_%Expr    <[this]{ vars_[id_] = n1_; }
-					| "GOSUB" > S > n1_%Expr                        <[this]{ gosub(n1_); }
+					| "LET" > S > id_%Ident > "=" > _ > n1_%Expr    <[this]{ vars_[*id_] = *n1_; }
+					| "GOSUB" > S > n1_%Expr                        <[this]{ gosub(*n1_); }
 					| "RETURN" > _                                  <[this]{ retsub(); }
 					| "CLEAR" > _                                   <[this]{ lines_.clear(); }
-					| "LIST" > _                                    <[this]{ prlines(); }
+					| "LIST" > _                                    <[this]{ listing(); }
 					| "RUN" > _                                     <[this]{ line_ = lines_.begin(); }
 					| "END" > _                                     <[this]{ line_ = lines_.end(); }
 					| "STOP" > _                                    <[this]{ std::exit(EXIT_SUCCESS); }
@@ -75,9 +76,9 @@ public:
 
 		rule Line	= _ > Stmnt > CR
 					| _ > n1_%Number
-					    > sv_<< (*(!CR > ".") > CR)                 <[this]{ updateline(n1_, sv_); }
+					    > sv_<< (*(!CR > ".") > CR)                 <[this]{ update_line(*n1_, *sv_); }
 					| _ > CR
-					| _ > (*(!CR > ".") > CR)                       <[this]{ prerror(line_, "syntax error"); }
+					| _ > (*(!CR > ".") > CR)                       <[this]{ print_error(line_, "syntax error"); }
 					| _ > !"."s                                     <[this]{ std::exit(EXIT_SUCCESS); };
 
 		grammar_ = start(Line);
@@ -85,8 +86,7 @@ public:
 
 	void repl()
 	{
-		lug::semantics sema;
-		lug::parser parser{grammar_, sema};
+		lug::parser parser{grammar_, semantics_};
 
 		parser.push_source( [this](std::string& out) {
 			if (line_ != lines_.end()) {
@@ -107,22 +107,23 @@ public:
 	}
 
 private:
-	void prerror(std::map<int, std::string>::iterator line, const char* message)
+	void print_error(std::map<int, std::string>::iterator line, const char* message)
 	{
+		std::cerr << "error: " << message << "\n";
 		if (line != lines_.end())
-			std::cerr << "\nline " << line->first << ": " << line->second << "\n";
-		std::cerr << message << std::endl;
+			std::cerr << "line " << line->first << ": " << line->second;
+		std::cerr.flush();
 		line_ = lines_.end();
 	}
 
-	void prlines()
+	void listing()
 	{
 		for (const auto&[n, l] : lines_)
-			std::cout << std::setw(6) << n << l << "\n";
+			std::cout << std::left << std::setw(8) << n << l;
 		std::cout.flush();
 	}
 
-	void updateline(int n, std::string_view s)
+	void update_line(int n, std::string_view s)
 	{
 		if (s.empty() || s.front() < ' ')
 			lines_.erase(n);
@@ -130,12 +131,12 @@ private:
 			lines_[n] = s;
 	}
 
-	bool gotoline(int n)
+	bool goto_line(int n)
 	{
 		auto prevline = line_;
 		line_ = lines_.find(n);
 		if (line_ == lines_.end()) {
-			prerror(prevline, "invalid line number");
+			print_error(prevline, "invalid line number");
 			return false;
 		}
 		return true;
@@ -144,7 +145,7 @@ private:
 	void gosub(int n)
 	{
 		auto prevline = line_;
-		if (gotoline(n))
+		if (goto_line(n))
 			stack_.push_back(prevline);
 	}
 
@@ -153,21 +154,22 @@ private:
 		if (!stack_.empty())
 			line_ = stack_.back(), stack_.pop_back();
 		else
-			prerror(line_, "missing stack frame");
+			print_error(line_, "missing stack frame");
 	}
 
 	using RelOpFn = bool(*)(int, int);
 
 	lug::grammar grammar_;
-	std::string id_;
-	std::string_view sv_;
-	int n1_, n2_;
-	RelOpFn rop_;
+	lug::semantics semantics_;
+	lug::semantic_variable<std::string> id_{semantics_};
+	lug::semantic_variable<std::string_view> sv_{semantics_};
+	lug::semantic_variable<int> n1_{semantics_}, n2_{semantics_};
+	lug::semantic_variable<RelOpFn> rop_{semantics_};
 	std::unordered_map<std::string, int> vars_;
 	std::map<int, std::string> lines_;
-	std::map<int, std::string>::iterator line_;
+	std::map<int, std::string>::iterator line_{lines_.end()};
 	std::vector<std::map<int, std::string>::iterator> stack_;
-	bool stdin_tty_;
+	const bool stdin_tty_{isatty(fileno(stdin)) != 0};
 };
 
 int main()
