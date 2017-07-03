@@ -10,9 +10,9 @@ namespace samples::calc
 	using namespace lug::language;
 
 	semantics Sema;
-	semantic_variable<std::string_view> m{Sema};
-	semantic_variable<double> e{Sema}, l{Sema}, n{Sema}, r{Sema}, s{Sema};
-	semantic_variable<int> i{Sema};
+	variable<std::string_view> m{Sema};
+	variable<double> e{Sema}, l{Sema}, n{Sema}, r{Sema}, s{Sema};
+	variable<int> i{Sema};
 	double variables[26];
 
 	rule _		= *"[ \t]"s;

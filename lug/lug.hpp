@@ -79,7 +79,7 @@ struct syntax_view { std::string_view capture; syntax_position start, end; };
 typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantics&)> semantic_action;
 typedef std::function<void(semantics&, const syntax_view&)> semantic_capture_action;
-struct prospective_action { unsigned short rule_depth, action_index; unsigned int capture_index; };
+struct prospective_action { unsigned short call_depth, action_index; unsigned int capture_index; };
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
@@ -210,7 +210,7 @@ class semantics
 {
 	friend class parser;
 	std::string_view match_;
-	unsigned short prune_depth_, rule_depth_;
+	unsigned short prune_depth_, call_depth_;
 	std::vector<prospective_action> prospective_actions_;
 	std::vector<syntax_range> captures_;
 	std::vector<std::any> attributes_;
@@ -248,8 +248,8 @@ class semantics
 public:
 	virtual ~semantics() {}
 	const std::string_view& match() const { return match_; }
-	void escape() { prune_depth_ = rule_depth_; }
-	unsigned short rule_depth() const { return rule_depth_; }
+	void escape() { prune_depth_ = call_depth_; }
+	unsigned short call_depth() const { return call_depth_; }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
@@ -260,9 +260,9 @@ public:
 		match_ = m;
 		on_accept_begin();
 		for (auto& pa : prospective_actions_) {
-			if (prune_depth_ <= pa.rule_depth)
+			if (prune_depth_ <= pa.call_depth)
 				continue;
-			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = pa.rule_depth;
+			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = pa.call_depth;
 			if (pa.capture_index < (std::numeric_limits<unsigned int>::max)()) {
 				const syntax_range& cap = captures_[pa.capture_index];
 				capture_actions[pa.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
@@ -271,30 +271,27 @@ public:
 			}
 		}
 		on_accept_end();
-		match_ = std::string_view{};
-		prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = 0;
-		prospective_actions_.clear();
+		clear();
 	}
 
 	void clear() {
-		match_ = std::string_view{};
-		prune_depth_ = (std::numeric_limits<unsigned short>::max)(), rule_depth_ = 0;
+		match_ = std::string_view{}, prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = 0;
 		prospective_actions_.clear(), attributes_.clear();
 		on_clear();
 	}
 };
 
 template <class T>
-class semantic_variable
+class variable
 {
 	semantics& semantics_;
 	std::unordered_map<unsigned short, T> state_;
 public:
-	semantic_variable(semantics& s) : semantics_{s} {}
-	T* operator->() { return &state_[semantics_.rule_depth()]; }
-	const T* operator->() const { return &state_[semantics_.rule_depth()]; }
-	T& operator*() { return state_[semantics_.rule_depth()]; }
-	const T& operator*() const { return state_[semantics_.rule_depth()]; }
+	variable(semantics& s) : semantics_{s} {}
+	T* operator->() { return &state_[semantics_.call_depth()]; }
+	const T* operator->() const { return &state_[semantics_.call_depth()]; }
+	T& operator*() { return state_[semantics_.call_depth()]; }
+	const T& operator*() const { return state_[semantics_.call_depth()]; }
 };
 
 class encoder
@@ -533,7 +530,7 @@ namespace language
 {
 
 using semantics = lug::semantics; using syntax = const lug::syntax_view&;
-template <class T> using semantic_variable = lug::semantic_variable<T>;
+template <class T> using variable = lug::variable<T>;
 using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
@@ -583,9 +580,9 @@ inline auto operator<(const E& e, A a) {
 }
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(semantic_variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
+inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(semantic_variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
+inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(const E& e) { return !(!e); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(const E& e) { return e | empty_terminal{}; }

@@ -161,10 +161,10 @@ private:
 
 	lug::grammar grammar_;
 	lug::semantics semantics_;
-	lug::semantic_variable<std::string> id_{semantics_};
-	lug::semantic_variable<std::string_view> sv_{semantics_};
-	lug::semantic_variable<int> n1_{semantics_}, n2_{semantics_};
-	lug::semantic_variable<RelOpFn> rop_{semantics_};
+	lug::variable<std::string> id_{semantics_};
+	lug::variable<std::string_view> sv_{semantics_};
+	lug::variable<int> n1_{semantics_}, n2_{semantics_};
+	lug::variable<RelOpFn> rop_{semantics_};
 	std::unordered_map<std::string, int> vars_;
 	std::map<int, std::string> lines_;
 	std::map<int, std::string>::iterator line_{lines_.end()};
