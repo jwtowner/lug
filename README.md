@@ -30,16 +30,17 @@ It is based on research introduced in the following papers:
 
 Building
 ---
-As a header only library, `lug` does not need to be be built.
-Just drop in the single `lug.hpp` header file into a directory of your choosing, ensure the directory is included in your include file path and go.
+As a header only library, lug does not need to be built.
+Just drop in the single `lug.hpp` header file into a directory of your choosing, ensure the directory is in your header include path and go.
+
 Make sure to set the language mode of your compiler to the C++17 Standard, as earlier versions of the C++ Standard are unsupported.
-The following baseline compiler versions are known to work with `lug`. Later versions should continue to work just as well.
+The following baseline compiler versions are known to work with lug. Later versions should continue to work just as well.
 
 | Compiler | Notes |
 | --- | --- |
-| Clang 4.0.0 (February 2017) | -std=c++1z (Must use libstdc++ 7.1 as standard library. As of July 2017, libc++ does not implement the is_invokable suite of type traits required by lug.) |
+| Clang 4.0.0 (February 2017) | -std=c++1z or -std=gnu++1z (Must use libstdc++ 7.1 as standard library. As of July 2017, libc++ does not implement the is_invokable suite of type traits required by lug.) |
 | GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
-| Microsoft Visual C++ 2017 15.3 Preview 2 (June 2017) | Platform Toolset: Visual Studio Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2017 15.3 Preview 2 (June 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 
 TODO
 ---
