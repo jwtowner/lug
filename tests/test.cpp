@@ -2,7 +2,7 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#include <lug/lug.hpp>
+#include <lug.hpp>
 #include <cassert>
 
 void test_any_terminal()

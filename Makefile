@@ -2,23 +2,28 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 1.0a
+VERSION = 0.1
 
 # paths
 PREFIX = /usr/local
 
 # toolchain
-CXX = clang++
-CXXSTD = -std=c++17 -stdlib=libc++
+CXX = g++
+CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
 # samples
-SAMPLES = calc test
+SAMPLES = basic calc json 
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
-all: options samples
+# tests
+TESTS = test
+TESTS_BIN = $(SAMPLES:%=tests/%)
+TESTS_OBJ = $(SAMPLES:%=tests/%.o)
+
+all: options samples tests
 
 .cpp.o:
 	@echo CXX $<
@@ -31,6 +36,14 @@ $(SAMPLES_BIN): $(SAMPLES_OBJ)
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
 samples: $(SAMPLES_BIN)
+
+$(TESTS_OBJ): lug.hpp
+
+$(TESTS_BIN): $(TESTS_OBJ)
+	@echo CXX -o $@
+	@$(CXX) -o $@ $@.o $(LDFLAGS)
+
+tests: $(TESTS_BIN)
 
 options:
 	@echo lug build options:
@@ -46,20 +59,19 @@ clean:
 dist: clean
 	@echo creating dist tarball
 	@mkdir -p lug-$(VERSION)
-	@cp -R README.md LICENSE.md Makefile lug.hpp lug.sln msvs/ $(SAMPLES_SRC) lug-$(VERSION)
+	@cp -R README.md LICENSE.md Makefile lug.hpp lug.sln msvs/ samples/ tests/ lug-$(VERSION)
 	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
 	@gzip lug-$(VERSION).tar
 	@rm -rf lug-$(VERSION)
 
 install: all
-	@echo installing header files to $(DESTDIR)$(PREFIX)/lug
-	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
-	@cp -f lug.hpp $(DESTDIR)$(PREFIX)/include/lug
-	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@echo installing header file to $(DESTDIR)$(PREFIX)/include
+	@mkdir -p $(DESTDIR)$(PREFIX)/include
+	@cp -f lug.hpp $(DESTDIR)$(PREFIX)/include
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug.hpp
 
 uninstall:
-	@echo removing header files from $(DESTDIR)$(PREFIX)/lug
-	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
-	@rm -f $(DESTDIR)$(PREFIX)/include/lug
+	@echo removing header file from $(DESTDIR)$(PREFIX)/include
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug.hpp
 
-.PHONY: all options samples clean dist install uninstall
+.PHONY: all options samples tests clean dist install uninstall

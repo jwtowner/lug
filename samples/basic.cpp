@@ -2,7 +2,7 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#include <lug/lug.hpp>
+#include <lug.hpp>
 #include <cstdlib>
 #include <iomanip>
 #include <map>
@@ -31,12 +31,12 @@ public:
 		rule Number	= sv_<< (+"[0-9]"s) > _                         <[this]{ return std::stoi(std::string{*sv_}); };
 		rule String	= "\"" > sv_<< *"[^\"]"s > "\"" > _             <[this]{ return *sv_; };
 
-		rule RelOp	= "=" > _                                       <[]() -> RelOpFn { return [](int x, int y) { return x == y; }; }
-					| ">=" > _                                      <[]() -> RelOpFn { return [](int x, int y) { return x >= y; }; }
-					| ">" > _                                       <[]() -> RelOpFn { return [](int x, int y) { return x > y; }; }
-					| "<=" > _                                      <[]() -> RelOpFn { return [](int x, int y) { return x <= y; }; }
-					| "<>" > _                                      <[]() -> RelOpFn { return [](int x, int y) { return x != y; }; }
-					| "<" > _                                       <[]() -> RelOpFn { return [](int x, int y) { return x < y; }; };
+		rule RelOp	= "=" > _                                       <[]()->RelOpFn{ return [](int x, int y) { return x == y; }; }
+					| ">=" > _                                      <[]()->RelOpFn{ return [](int x, int y) { return x >= y; }; }
+					| ">" > _                                       <[]()->RelOpFn{ return [](int x, int y) { return x > y; }; }
+					| "<=" > _                                      <[]()->RelOpFn{ return [](int x, int y) { return x <= y; }; }
+					| "<>" > _                                      <[]()->RelOpFn{ return [](int x, int y) { return x != y; }; }
+					| "<" > _                                       <[]()->RelOpFn{ return [](int x, int y) { return x < y; }; };
 
 		rule Factor	= id_%Ident                                     <[this]{ return vars_[*id_]; }
 					| Number
@@ -48,7 +48,7 @@ public:
 					)                                               <[this]{ return *n1_; };
 
 		     Expr	= (  ~ "+"s > _ > n1_%Term
-					     | "-"  > _ > n1_%Term                      <[this]{ *n1_ = -(*n1_); }
+					     | "-"  > _ > n1_%Term                      <[this]{ *n1_ = -*n1_; }
 					) > *( "+"  > _ > n2_%Term                      <[this]{ *n1_ += *n2_; }
 					     | "-"  > _ > n2_%Term                      <[this]{ *n1_ -= *n2_; }
 					)                                               <[this]{ return *n1_; };
@@ -88,7 +88,7 @@ public:
 	{
 		lug::parser parser{grammar_, semantics_};
 
-		parser.push_source( [this](std::string& out) {
+		parser.push_source([this](std::string& out) {
 			if (line_ != lines_.end()) {
 				out = (line_++)->second;
 			} else {
@@ -118,8 +118,8 @@ private:
 
 	void listing()
 	{
-		for (const auto&[n, l] : lines_)
-			std::cout << std::left << std::setw(8) << n << l;
+		for (const auto& [n, l] : lines_)
+			std::cout << std::left << std::setw(7) << n << " " << l;
 		std::cout.flush();
 	}
 
@@ -133,9 +133,7 @@ private:
 
 	bool goto_line(int n)
 	{
-		auto prevline = line_;
-		line_ = lines_.find(n);
-		if (line_ == lines_.end()) {
+		if (auto prevline = line_; (line_ = lines_.find(n)) == lines_.end()) {
 			print_error(prevline, "invalid line number");
 			return false;
 		}
@@ -158,7 +156,6 @@ private:
 	}
 
 	using RelOpFn = bool(*)(int, int);
-
 	lug::grammar grammar_;
 	lug::semantics semantics_;
 	lug::variable<std::string> id_{semantics_};

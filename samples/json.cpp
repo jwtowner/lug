@@ -2,9 +2,7 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#include <lug/lug.hpp>
-#include <fstream>
-#include <streambuf>
+#include <lug.hpp>
 
 class json_parser
 {
