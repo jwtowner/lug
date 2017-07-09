@@ -5,72 +5,6 @@
 #include <lug.hpp>
 #include <cassert>
 
-void test_any_terminal()
-{
-	using namespace lug::language;
-	rule S = lug::any_terminal{} > !lug::any_terminal{};
-	grammar G = start(S);
-	assert(lug::parse("a", G));
-	assert(lug::parse("2", G));
-	assert(lug::parse("z", G));
-	assert(!lug::parse("aa", G));
-	assert(!lug::parse("", G));
-}
-
-void test_char_terminal()
-{
-	using namespace lug::language;
-	rule S = lug::char_terminal{'a'} > !lug::any_terminal{};
-	grammar G = start(S);
-	assert(lug::parse("a", G));
-	assert(!lug::parse("2", G));
-	assert(!lug::parse("aa", G));
-	assert(!lug::parse("", G));
-	assert(!lug::parse("b", G));
-}
-
-void test_empty_terminal()
-{
-	using namespace lug::language;
-	rule S = lug::empty_terminal{} > !lug::any_terminal{};
-	grammar G = start(S);
-	assert(!lug::parse("a", G));
-	assert(!lug::parse("2", G));
-	assert(!lug::parse("z", G));
-	assert(!lug::parse("aa", G));
-	assert(lug::parse("", G));
-}
-
-void test_terminal_sequence()
-{
-	using namespace lug::language;
-	constexpr auto A = lug::any_terminal{};
-	using C = lug::char_terminal;
-	rule S = C{'a'} > A > C{'b'} > !A;
-	grammar G = start(S);
-	assert(!lug::parse("a", G));
-	assert(lug::parse("a2b", G));
-	assert(!lug::parse("aza", G));
-	assert(lug::parse("azb", G));
-	assert(!lug::parse("azb3", G));
-	assert(!lug::parse("", G));
-}
-
-void test_terminal_choice()
-{
-	using namespace lug::language;
-	constexpr auto A = lug::any_terminal{};
-	using C = lug::char_terminal;
-	rule S = (C{'a'} > A | C{'b'}) > !A;
-	grammar G = start(S);
-	assert(!lug::parse("a", G));
-	assert(lug::parse("a2", G));
-	assert(lug::parse("b", G));
-	assert(!lug::parse("azb", G));
-	assert(!lug::parse("b3", G));
-	assert(!lug::parse("", G));
-}
-
 void test_direct_left_recursion()
 {
 	using namespace lug::language;
@@ -140,11 +74,6 @@ void test_association_and_precedence()
 int main()
 {
 	try {
-		test_any_terminal();
-		test_char_terminal();
-		test_empty_terminal();
-		test_terminal_sequence();
-		test_terminal_choice();
 		test_direct_left_recursion();
 		test_indirect_left_recursion();
 		test_association_and_precedence();

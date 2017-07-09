@@ -46,10 +46,11 @@ For building the sample programs and unit tests, a makefile is provided for Linu
 TODO
 ---
 - parser error recovery
-- add an interactive processing mode flag to input sources
+- add an interactive processing mode flag to input sources?
 - handle exceptions thrown from semantic actions in semantics::accept?
-- symbol tables and parsing conditions
-- Adams' grammars and alignment elimination
+- feature: symbol tables and parsing conditions
+- feature: Adams' grammars and alignment elimination
+- feature: syntax to specify number range of allowed iteration
 - optimization: better detection of left-recursive rule calls to remove false-positives
 - optimization: tail recursion
 - optimization: rule inlining

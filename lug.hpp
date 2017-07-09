@@ -78,12 +78,13 @@ struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
 typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantics&)> semantic_action;
-typedef std::function<void(semantics&, const syntax_view&)> semantic_capture_action;
+typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
 struct prospective_action { unsigned short call_depth, action_index; unsigned int capture_index; };
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
+template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
 
 enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
@@ -141,7 +142,7 @@ struct program
 	std::vector<instruction> instructions;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
-	std::vector<semantic_capture_action> capture_actions;
+	std::vector<semantic_capture> capture_actions;
 
 	void concatenate(const program& src) {
 		instructions.reserve(instructions.size() + src.instructions.size());
@@ -298,7 +299,7 @@ class encoder
 {
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
-	virtual immediate do_add_semantic_capture_action(semantic_capture_action) { return immediate{0}; }
+	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
 	virtual void do_append(instruction) = 0;
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
@@ -310,7 +311,7 @@ public:
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	encoder& encode(opcode op, semantic_capture_action a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
+	encoder& encode(opcode op, semantic_capture a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
@@ -394,7 +395,7 @@ class program_encoder : public instruction_encoder
 	program& program_;
 	immediate do_add_semantic_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_semantic_capture_action(semantic_capture_action a) override { return add_item(program_.capture_actions, std::move(a)); }
+	immediate do_add_semantic_capture_action(semantic_capture a) override { return add_item(program_.capture_actions, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item) {
@@ -510,8 +511,12 @@ inline auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
 		return call_expression<T>{t, 0};
+	else if constexpr (std::is_invocable_r_v<bool, T, parser&>)
+		return [p = semantic_predicate{t}](encoder& d) { d.encode(opcode::predicate, p); };
+	else if constexpr (std::is_invocable_r_v<bool, T>)
+		return [p = semantic_predicate{[a = T{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<T>)
-		return string_expression{t};
+		return string_expression{ t };
 	else
 		return t;
 }
@@ -529,7 +534,7 @@ inline call_expression<rule> rule::operator()(unsigned short precedence) { retur
 namespace language
 {
 
-using semantics = lug::semantics; using syntax = const lug::syntax_view&;
+using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
 template <class T> using variable = lug::variable<T>;
 using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
@@ -555,27 +560,23 @@ inline auto operator|(const E1& e1, const E2& e2) {
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator>(const E1& e1, const E2& e2) {
-	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) { d.evaluate(x1).evaluate(x2); };
+	return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(e2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
-		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.encode(opcode::begin_capture).evaluate(x).encode(opcode::end_capture, semantic_capture_action{a}); };
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.encode(opcode::begin_capture).evaluate(e).encode(opcode::end_capture, semantic_capture{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
 		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics&>) {
-		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, semantic_action{a}); };
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
 		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
-		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, [a](semantics&) { a(); }); };
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
-		return [x = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(x).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); }); };
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); }); };
 	}
 }
 

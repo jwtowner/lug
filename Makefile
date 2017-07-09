@@ -14,12 +14,12 @@ CXXFLAGS = $(CXXSTD) -pedantic -Wall -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
 # samples
-SAMPLES = basic calc json 
+SAMPLES = basic calc json
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # tests
-TESTS = test
+TESTS = leftrecursion predicates terminals
 TESTS_BIN = $(SAMPLES:%=tests/%)
 TESTS_OBJ = $(SAMPLES:%=tests/%.o)
 
@@ -54,7 +54,7 @@ options:
 
 clean:
 	@echo cleaning
-	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) lug-$(VERSION).tar.gz
+	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) $(TESTS_BIN) $(TESTS_OBJ) lug-$(VERSION).tar.gz
 
 dist: clean
 	@echo creating dist tarball
