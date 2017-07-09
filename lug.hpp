@@ -23,8 +23,34 @@
 namespace lug
 {
 
+struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
+class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
+class program_limit_error : public lug_error { public: program_limit_error() : lug_error{"length or offset of program exceeds internal limit"} {} };
+class resource_limit_error : public lug_error { public: resource_limit_error() : lug_error{"number of resources exceeds internal limit"} {} };
+class reenterant_parse_error : public lug_error { public: reenterant_parse_error() : lug_error{"parsing is non-reenterant"} {} };
+class reenterant_read_error : public lug_error { public: reenterant_read_error() : lug_error{"attempted to read or modify input source while reading"} {} };
+class bad_string_expression : public lug_error { public: using lug_error::lug_error; bad_string_expression() : lug_error{"invalid string or bracket expression"} {} };
+class bad_character_class : public bad_string_expression { public: bad_character_class() : bad_string_expression{"invalid character class"} {} };
+class bad_grammar : public lug_error { public: bad_grammar() : lug_error{"invalid or empty grammar"} {} };
+class bad_opcode : public lug_error { public: bad_opcode() : lug_error{"invalid opcode"} {} };
+struct syntax_position { std::size_t column, line; };
+struct syntax_range { std::size_t index, size; syntax_position start, end; };
+struct syntax_view { std::string_view capture; syntax_position start, end; };
+struct prospective_action { unsigned short call_depth, action_index; unsigned int capture_index; };
+typedef std::function<bool(parser&)> semantic_predicate;
+typedef std::function<void(semantics&)> semantic_action;
+typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
+template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
+template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
+template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
+template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
+
 namespace detail
 {
+
+template <class Error, class T, class U, class V> inline void assure_in_range(T x, U minval, V maxval) { if (!(minval <= x && x <= maxval)) throw Error{}; }
+template <class Error, class T, class U> inline auto checked_add(T x, U y) { if ((std::numeric_limits<decltype(x + y)>::max)() - x < y) throw Error{}; return x + y; }
 
 template <class T>
 struct dynamic_cast_if_base_of
@@ -38,7 +64,7 @@ template <class Error>
 struct reentrancy_sentinel
 {
 	bool& value;
-	reentrancy_sentinel(bool& x, const char* msg) : value{x} { if (value) throw Error{msg}; value = true; }
+	reentrancy_sentinel(bool& x) : value{x} { if (value) throw Error{}; value = true; }
 	~reentrancy_sentinel() { value = false; }
 };
 
@@ -68,24 +94,6 @@ constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
 
 } // namespace utf8
 
-struct program; template <class Target> struct call_expression;
-class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
-class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
-class grammar_error : public lug_error { using lug_error::lug_error; };
-class parser_error : public lug_error { using lug_error::lug_error; };
-struct syntax_position { std::size_t column, line; };
-struct syntax_range { std::size_t index, size; syntax_position start, end; };
-struct syntax_view { std::string_view capture; syntax_position start, end; };
-typedef std::function<bool(parser&)> semantic_predicate;
-typedef std::function<void(semantics&)> semantic_action;
-typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
-struct prospective_action { unsigned short call_depth, action_index; unsigned int capture_index; };
-template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
-template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
-template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
-
 enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
 constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
@@ -107,7 +115,7 @@ union instruction
 	std::array<char, 4> str;
 
 	instruction(opcode op, operands aux, immediate imm) : pf{op, aux, static_cast<unsigned short>(imm)} {}
-	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw grammar_error{"offset exceeds allowable range"}; }
+	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_limit_error{}; }
 	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
 	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
@@ -142,23 +150,22 @@ struct program
 	std::vector<instruction> instructions;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
-	std::vector<semantic_capture> capture_actions;
+	std::vector<semantic_capture> captures;
 
 	void concatenate(const program& src) {
-		instructions.reserve(instructions.size() + src.instructions.size());
+		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
 		for (auto i = src.instructions.begin(), j = i, e = src.instructions.end(); i != e; i = j) {
 			instruction instr = *i;
 			std::size_t valoffset;
 			switch (instr.pf.op) {
 				case opcode::predicate: valoffset = predicates.size(); break;
 				case opcode::action: valoffset = actions.size(); break;
-				case opcode::end_capture: valoffset = capture_actions.size(); break;
+				case opcode::end_capture: valoffset = captures.size(); break;
 				default: valoffset = 0; break;
 			}
 			if (valoffset != 0) {
 				std::size_t val = instr.pf.val + valoffset;
-				if (val < valoffset || val > (std::numeric_limits<unsigned short>::max)())
-					throw grammar_error("immediate value exceeds 16-bit limit");
+				detail::assure_in_range<resource_limit_error>(val, valoffset, (std::numeric_limits<unsigned short>::max)());
 				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
@@ -167,22 +174,22 @@ struct program
 		}
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
-		capture_actions.insert(capture_actions.end(), src.capture_actions.begin(), src.capture_actions.end());
+		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
 	}
 
 	void swap(program& p) {
 		instructions.swap(p.instructions);
 		predicates.swap(p.predicates);
 		actions.swap(p.actions);
-		capture_actions.swap(p.capture_actions);
+		captures.swap(p.captures);
 	}
 };
 
 class rule
 {
-	friend class encoder;
-	friend class rule_encoder;
+	friend class encoder; friend class rule_encoder;
 	friend grammar start(const rule&);
+	bool encoding_{false};
 	lug::program program_;
 	std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t>> callees_;
 public:
@@ -193,7 +200,7 @@ public:
 	rule& operator=(const rule& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
 	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
-	call_expression<rule> operator()(unsigned short precedence);
+	auto operator[](unsigned short precedence) const noexcept;
 };
 
 class grammar
@@ -257,7 +264,7 @@ public:
 
 	void accept(const lug::grammar& grmr, std::string_view m) {
 		const auto& actions = grmr.program().actions;
-		const auto& capture_actions = grmr.program().capture_actions;
+		const auto& captures = grmr.program().captures;
 		match_ = m;
 		on_accept_begin();
 		for (auto& pa : prospective_actions_) {
@@ -266,7 +273,7 @@ public:
 			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = pa.call_depth;
 			if (pa.capture_index < (std::numeric_limits<unsigned int>::max)()) {
 				const syntax_range& cap = captures_[pa.capture_index];
-				capture_actions[pa.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
+				captures[pa.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
 			} else {
 				actions[pa.action_index](*this);
 			}
@@ -297,16 +304,20 @@ public:
 
 class encoder
 {
+	virtual void do_append(instruction) = 0;
+	virtual void do_append(const program&) = 0;
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
 	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
-	virtual void do_append(instruction) = 0;
+	virtual bool do_should_evaluate_length() const noexcept { return true; }
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
 	virtual ~encoder() {}
+	encoder& append(instruction instr) { do_append(instr); return *this; }
+	encoder& append(const program& p) { do_append(p); return *this; }
+	template <class InputIt> encoder& append(InputIt first, InputIt last) { for ( ; first != last; ++first) do_append(*first); return *this; }
 	encoder& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
-	encoder& call(const rule& r, unsigned short prec) { do_add_callee(&r, &r.program_, length()); return encode(opcode::call, 0, immediate{prec}); }
 	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
@@ -314,24 +325,23 @@ public:
 	encoder& encode(opcode op, semantic_capture a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
+	template <class E> auto evaluate_length(const E& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 
-	encoder& append(instruction instr) {
-		do_append(instr);
-		return *this;
-	}
-
-	template <class InputIt>
-	encoder& append(InputIt first, InputIt last) {
-		for ( ; first != last; ++first)
-			do_append(*first);
-		return *this;
+	encoder& call(const rule& r, unsigned short prec) {
+		if (auto& p = r.program_; prec <= 0 && !r.encoding_ && r.callees_.empty() && !p.instructions.empty() && p.instructions.size() <= 8 &&
+				p.predicates.size() <= 1 && p.actions.size() <= 1 && p.captures.size() <= 1) {
+			return append(r.program_);
+		} else {
+			do_add_callee(&r, &r.program_, length());
+			return encode(opcode::call, 0, immediate{prec});
+		}
 	}
 
 	encoder& encode(opcode op, std::size_t val, std::string_view subsequence) {
 		if (!subsequence.empty()) {
-			if (val == 0 || val > 256 || subsequence.size() > instruction::maxstrlen)
-				throw grammar_error{"invalid immediate value or subsequence exceeds allowed number of UTF8 octets"};
+			detail::assure_in_range<resource_limit_error>(val, 1u, instruction::maxstrlen);
+			detail::assure_in_range<resource_limit_error>(subsequence.size(), 1u, instruction::maxstrlen);
 			do_append(instruction{op, operands::str, static_cast<immediate>(((val - 1) << 8) | (subsequence.size() - 1))});
 			do {
 				do_append(instruction{subsequence});
@@ -360,32 +370,19 @@ public:
 
 class instruction_length_evaluator : public encoder
 {
-	std::ptrdiff_t length_ = 0;
+	std::ptrdiff_t length_{0};
+	void do_append(instruction) override { length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
+	void do_append(const program& p) override { length_ = detail::checked_add<program_limit_error>(length_, static_cast<std::ptrdiff_t>(p.instructions.size())); }
+	bool do_should_evaluate_length() const noexcept override { return false; }
 	std::ptrdiff_t do_length() const noexcept override { return length_; }
-
-	void do_append(instruction) override {
-		if (length_ >= (std::numeric_limits<std::ptrdiff_t>::max)())
-			throw grammar_error{"program length exceeds limits"};
-		++length_;
-	}
 };
-
-template <class E>
-std::ptrdiff_t instruction_length(const E& e) {
-	return instruction_length_evaluator{}.evaluate(e).length();
-}
 
 class instruction_encoder : public encoder
 {
 	std::vector<instruction>& instructions_;
 	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
-
-	void do_append(instruction instr) override {
-		if (instructions_.size() >= static_cast<std::size_t>((std::numeric_limits<std::ptrdiff_t>::max)()))
-			throw grammar_error{"program length exceeds limits"};
-		instructions_.push_back(instr);
-	}
-
+	void do_append(instruction instr) override { instructions_.push_back(instr); }
+	void do_append(const program&) override { throw bad_grammar{}; }
 public:
 	explicit instruction_encoder(std::vector<instruction>& i) : instructions_{i} {}
 };
@@ -393,14 +390,14 @@ public:
 class program_encoder : public instruction_encoder
 {
 	program& program_;
+	void do_append(const program& p) override { program_.concatenate(p); }
 	immediate do_add_semantic_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_semantic_capture_action(semantic_capture a) override { return add_item(program_.capture_actions, std::move(a)); }
+	immediate do_add_semantic_capture_action(semantic_capture a) override { return add_item(program_.captures, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item) {
-		if (items.size() >= (std::numeric_limits<unsigned short>::max)())
-			throw grammar_error{"number of objects exceeds internal limit"};
+		detail::assure_in_range<resource_limit_error>(items.size(), 0u, (std::numeric_limits<unsigned short>::max)() - 1u);
 		items.push_back(::std::forward<Item>(item));
 		return static_cast<immediate>(items.size() - 1);
 	}
@@ -414,7 +411,8 @@ class rule_encoder : public program_encoder
 	rule& rule_;
 	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n) override { rule_.callees_.emplace_back(r, p, n); }
 public:
-	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} {}
+	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} { rule_.encoding_ = true; }
+	~rule_encoder() override { rule_.encoding_ = false; }
 };
 
 struct cut_action { void operator()(encoder& v) const { v.encode(opcode::accept); } };
@@ -422,14 +420,6 @@ struct newline_action { void operator()(encoder& v) const { v.encode(opcode::new
 struct any_terminal { void operator()(encoder& v) const { v.encode(opcode::match_any); } };
 struct empty_terminal { void operator()(encoder& v) const { v.encode(opcode::match); } };
 struct char_terminal { char c; void operator()(encoder& v) const { v.match(std::string_view{&c, 1}); } };
-
-template <class Target>
-struct call_expression
-{
-	const Target& target;
-	unsigned short precedence;
-	void operator()(encoder& v) const { v.call(target, precedence); }
-};
 
 class string_expression
 {
@@ -451,8 +441,7 @@ class string_expression
 				{"digit", ct::digit}, {"graph", ct::graph}, {"lower", ct::lower}, {"print", ct::print},
 				{"punct", ct::punct}, {"space", ct::space}, {"upper", ct::upper}, {"xdigit", ct::xdigit}};
 			auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(x.first); });
-			if (c == std::end(m))
-				throw grammar_error{"invalid character class"};
+			if (c == std::end(m)) throw bad_character_class{};
 			classes |= static_cast<std::ctype_base::mask>(c->second);
 		}
 
@@ -503,20 +492,20 @@ class string_expression
 
 public:
 	string_expression(std::string_view sv) { compile(sv); }
-	void operator()(encoder& v) const { v.append(instructions_.begin(), instructions_.end()); }
+	void operator()(encoder& d) const { d.append(instructions_.cbegin(), instructions_.cend()); }
 };
 
 template <class T>
 inline auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
-		return call_expression<T>{t, 0};
+		return [&target = t](encoder& d){ d.call(target, 0); };
 	else if constexpr (std::is_invocable_r_v<bool, T, parser&>)
 		return [p = semantic_predicate{t}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (std::is_invocable_r_v<bool, T>)
 		return [p = semantic_predicate{[a = T{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<T>)
-		return string_expression{ t };
+		return string_expression{t};
 	else
 		return t;
 }
@@ -527,9 +516,14 @@ inline auto encoder::evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>
 	return *this;
 }
 
+template <class E>
+inline auto encoder::evaluate_length(const E& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t> {
+	return do_should_evaluate_length() ? instruction_length_evaluator{}.evaluate(e).length() : 0;
+}
+
 template <class E, class> inline rule::rule(const E& e) { rule_encoder{*this}.evaluate(e); }
-inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 0); }
-inline call_expression<rule> rule::operator()(unsigned short precedence) { return call_expression<rule>{*this, precedence}; }
+inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 1); }
+inline auto rule::operator[](unsigned short precedence) const noexcept { return [&target = *this, precedence](encoder& d){ d.call(target, precedence); }; }
 
 namespace language
 {
@@ -542,20 +536,20 @@ using namespace std::literals::string_literals;
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator!(const E& e) {
 	return [x = make_expression(e)](encoder& d) {
-		d.encode(opcode::choice, 3 + instruction_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
+		d.encode(opcode::choice, 3 + d.evaluate_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator*(const E& e) {
 	return [x = make_expression(e)](encoder& d) {
-		auto x_length = instruction_length(x);
+		auto x_length = d.evaluate_length(x);
 		d.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 inline auto operator|(const E1& e1, const E2& e2) {
 	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
-		d.encode(opcode::choice, 2 + instruction_length(x1)).evaluate(x1).encode(opcode::commit, instruction_length(x2)).evaluate(x2); };
+		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
@@ -627,8 +621,7 @@ inline grammar start(const rule& start_rule) {
 			iprefix.pf.val = recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
 		auto& ioffset = gp.instructions[instr_addr + 1];
 		std::ptrdiff_t reladdr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
-		if (reladdr < std::numeric_limits<int>::lowest() || (std::numeric_limits<int>::max)() < reladdr)
-			throw grammar_error("program offset exceeds addressable range");
+		detail::assure_in_range<program_limit_error>(reladdr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
 		ioffset.off = static_cast<int>(reladdr);
 	}
 	return grammar(std::move(gp));
@@ -669,7 +662,7 @@ class parser
 	}
 
 	bool read_more() {
-		detail::reentrancy_sentinel<parser_error> guard{reading_, "lug::parser::read_more is non-reenterant"};
+		detail::reentrancy_sentinel<reenterant_read_error> guard{reading_};
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
 			bool more = sources_.back()(text);
@@ -716,7 +709,7 @@ public:
 	bool available(std::size_t n) { available(n, input_state_.index); }
 
 	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = { ir, cr, lr }, program_state_ = { ac, pc };
+		input_state_ = {ir, cr, lr}, program_state_ = {ac, pc};
 	}
 
 	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
@@ -731,17 +724,15 @@ public:
 
 	template <class InputFunc>
 	parser& push_source(InputFunc&& func) {
-		if (reading_)
-			throw parser_error("new input source cannot be specified while reading from input sources");
+		if (reading_) throw reenterant_read_error{};
 		sources_.emplace_back(::std::forward<InputFunc>(func));
 		return *this;
 	}
 
 	bool parse() {
-		detail::reentrancy_sentinel<parser_error> guard{parsing_, "lug::parser::parse is non-reenterant"};
+		detail::reentrancy_sentinel<reenterant_parse_error> guard{parsing_};
 		const program& prog = grammar_.program();
-		if (prog.instructions.empty())
-			throw parser_error("unable to parse with empty grammar");
+		if (prog.instructions.empty()) throw bad_grammar{};
 		bool result = false, done = false;
 		std::size_t imm, ir, cr, lr, ac, fc = 0;
 		std::ptrdiff_t off, pc;
@@ -901,7 +892,7 @@ public:
 						goto failure;
 					ac = semantics_.push_capture_action(call_stack_.size() + lrmemo_stack_.size(), imm, syntax_range{first, last - first, start, end});
 				} break;
-				default: throw parser_error{"invalid opcode"};
+				default: throw bad_opcode{};
 			}
 		}
 		return result;
@@ -958,7 +949,7 @@ inline void string_expression::compile(std::string_view sv) {
 	static grammar grmr = make_grammar();
 	generator genr(*this);
 	if (!parse(sv, grmr, genr))
-		throw grammar_error{"invalid string or bracket expression"};
+		throw bad_string_expression{};
 }
 
 } // namespace lug

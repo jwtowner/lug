@@ -9,7 +9,7 @@ Features
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
-- Uses expression template functors for transforming grammar rules to bytecode
+- Uses expression template functors to implement the rules of the domain specific language
 - UTF-8 text parsing with support for matching Unicode character classes
 - Single header only library using C++17 language and library features
 - Relatively small with the intent to remain under 1000 lines of very terse code
@@ -53,7 +53,6 @@ TODO
 - feature: syntax to specify number range of allowed iteration
 - optimization: better detection of left-recursive rule calls to remove false-positives
 - optimization: tail recursion
-- optimization: rule inlining
 - optimization: additional instructions
 - more samples, testing, and bug fixing
 - increase compiler warning level and fix any issues

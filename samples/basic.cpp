@@ -172,7 +172,7 @@ private:
 	void print_error(const char* message)
 	{
 		std::cerr << message << "\n";
-		if (line_ != lines_.end())
+		if (lastline_ != lines_.end())
 			std::cerr << "LINE " << line_->first << ": " << line_->second;
 		std::cerr.flush();
 		line_ = lastline_ = lines_.end();

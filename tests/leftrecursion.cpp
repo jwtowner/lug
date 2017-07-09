@@ -50,8 +50,8 @@ void test_association_and_precedence()
 	using C = lug::char_terminal;
 	std::string out;
 	rule N	= C{'1'} | C{'2'} | C{'3'};
-	rule E	= E(1) > C{'+'} > E(2) < [&out]() { out += '+'; }
-			| E(2) > C{'*'} > E(3) < [&out]() { out += '*'; }
+	rule E	= E[1] > C{'+'} > E[2] < [&out]() { out += '+'; }
+			| E[2] > C{'*'} > E[3] < [&out]() { out += '*'; }
 			| N < [&out](semantics&, syntax x) { out += x.capture; };
 	grammar G = start(E > !A);
 	assert(!lug::parse("", G));

@@ -17,7 +17,7 @@ namespace samples::calc
 
 	rule _		= *"[ \t]"s;
 
-	rule EOL	= (("\n"s | "\r\n" | "\r") > lug::newline_action{}) | ";";
+	rule EOL	= "\n"s | "\r\n" | "\r" | ";";
 
 	rule ID		= m<< "[a-z]"s > _           <[]()->int{ return m->at(0) - 'a'; };
 
