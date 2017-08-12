@@ -1,11 +1,11 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
-
+//
 // Derived from BASIC, Dartmouth College Computation Center, October 1st 1964
 // http://www.bitsavers.org/pdf/dartmouth/BASIC_Oct64.pdf
 
-#include <lug.hpp>
+#include <lug/lug.hpp>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>

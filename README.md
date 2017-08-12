@@ -11,8 +11,8 @@ Features
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - Uses expression template functors to implement the rules of the domain specific language
 - UTF-8 text parsing with support for matching Unicode character classes
-- Single header only library using C++17 language and library features
-- Relatively small with the intent to remain under 1000 lines of very terse code
+- Header only library using C++17 language and library features
+- Relatively small with the intent of core to remain under 1000 lines of very terse code
 
 It is based on research introduced in the following papers:
 

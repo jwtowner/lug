@@ -2,7 +2,7 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#include <lug.hpp>
+#include <lug/lug.hpp>
 #include <cstdlib>
 
 namespace samples::calc

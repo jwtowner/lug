@@ -2,9 +2,10 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifndef LUG_HPP
-#define LUG_HPP
+#ifndef LUG_HPP__
+#define LUG_HPP__
 
+#include <lug/utf8.hpp>
 #include <any>
 #include <array>
 #include <algorithm>
@@ -69,30 +70,6 @@ struct reentrancy_sentinel
 };
 
 } // namespace detail
-
-namespace utf8
-{
-
-constexpr bool is_lead(char c) noexcept {
-	return (static_cast<unsigned char>(c) & 0xC0) != 0x80;
-}
-
-template <class InputIt>
-constexpr std::size_t count_runes(InputIt first, InputIt last) {
-	return ::std::accumulate(first, last, std::size_t{0}, [](std::size_t l, char c) { return l + is_lead(c); });
-}
-
-template <class InputIt>
-constexpr InputIt next_rune(InputIt first, InputIt last) {
-	return first != last ? ::std::find_if(::std::next(first), last, is_lead) : last;
-}
-
-template <class InputIt>
-constexpr std::size_t size_of_first_rune(InputIt first, InputIt last) {
-	return static_cast<std::size_t>(::std::distance(first, next_rune(first, last)));
-}
-
-} // namespace utf8
 
 enum class immediate : unsigned short {};
 enum class operands : unsigned char { none = 0, off = 1, str = 2 };
@@ -954,4 +931,4 @@ inline void string_expression::compile(std::string_view sv) {
 
 } // namespace lug
 
-#endif // LUG_HPP
+#endif
