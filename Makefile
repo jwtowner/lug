@@ -23,13 +23,16 @@ TESTS = leftrecursion predicates terminals
 TESTS_BIN = $(SAMPLES:%=tests/%)
 TESTS_OBJ = $(SAMPLES:%=tests/%.o)
 
+# dependencies
+DEPS = lug/lug.hpp lug/utf8.hpp
+
 all: options samples tests
 
 .cpp.o:
 	@echo CXX $<
 	@$(CXX) -c $(CXXFLAGS) -o $@ $<
 
-$(SAMPLES_OBJ): lug.hpp
+$(SAMPLES_OBJ): $(DEPS)
 
 $(SAMPLES_BIN): $(SAMPLES_OBJ)
 	@echo CXX -o $@
@@ -37,7 +40,7 @@ $(SAMPLES_BIN): $(SAMPLES_OBJ)
 
 samples: $(SAMPLES_BIN)
 
-$(TESTS_OBJ): lug.hpp
+$(TESTS_OBJ): $(DEPS)
 
 $(TESTS_BIN): $(TESTS_OBJ)
 	@echo CXX -o $@
@@ -59,19 +62,21 @@ clean:
 dist: clean
 	@echo creating dist tarball
 	@mkdir -p lug-$(VERSION)
-	@cp -R README.md LICENSE.md Makefile lug.hpp lug.sln msvs/ samples/ tests/ lug-$(VERSION)
+	@cp -R README.md LICENSE.md Makefile lug.sln lug/ msvs/ samples/ tests/ unicode/ lug-$(VERSION)
 	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
 	@gzip lug-$(VERSION).tar
 	@rm -rf lug-$(VERSION)
 
 install: all
-	@echo installing header file to $(DESTDIR)$(PREFIX)/include
-	@mkdir -p $(DESTDIR)$(PREFIX)/include
-	@cp -f lug.hpp $(DESTDIR)$(PREFIX)/include
-	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug.hpp
+	@echo installing header file to $(DESTDIR)$(PREFIX)/include/lug
+	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@cp -f lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 
 uninstall:
-	@echo removing header file from $(DESTDIR)$(PREFIX)/include
-	@rm -f $(DESTDIR)$(PREFIX)/include/lug.hpp
+	@echo removing header file from $(DESTDIR)$(PREFIX)/include/lug
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug
 
 .PHONY: all options samples tests clean dist install uninstall

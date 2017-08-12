@@ -10,6 +10,7 @@
 #ifndef LUG_UTF8_HPP__
 #define LUG_UTF8_HPP__
 
+#include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <utility>
@@ -67,7 +68,7 @@ inline std::pair<char32_t, InputIt> decode_rune(InputIt first, InputIt last) {
 		if (state == decode_accept)
 			return ::std::make_pair(rune, first);
 	}
-	return ::std::make_pair(U'\Ufffd', ::std::find_if(first, last, ::lug::utf8::is_lead));
+	return ::std::make_pair(U'\U0000fffd', ::std::find_if(first, last, ::lug::utf8::is_lead));
 }
 
 template <class InputIt>

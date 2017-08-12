@@ -6,14 +6,13 @@
 #define LUG_HPP__
 
 #include <lug/utf8.hpp>
+
 #include <any>
 #include <array>
-#include <algorithm>
 #include <functional>
 #include <iostream>
 #include <locale>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <string_view>
