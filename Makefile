@@ -24,7 +24,7 @@ TESTS_BIN = $(SAMPLES:%=tests/%)
 TESTS_OBJ = $(SAMPLES:%=tests/%.o)
 
 # dependencies
-DEPS = lug/lug.hpp lug/utf8.hpp
+DEPS = lug/lug.hpp lug/unicode.hpp lug/utf8.hpp
 
 all: options samples tests
 
@@ -72,11 +72,16 @@ install: all
 	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
 	@cp -f lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@cp -f lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@cp -f lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 
 uninstall:
-	@echo removing header file from $(DESTDIR)$(PREFIX)/include/lug
-	@rm -f $(DESTDIR)$(PREFIX)/include/lug
+	@echo removing header files from $(DESTDIR)$(PREFIX)/include/lug
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
+	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
 .PHONY: all options samples tests clean dist install uninstall
