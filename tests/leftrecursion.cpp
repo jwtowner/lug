@@ -10,8 +10,8 @@ namespace
 	void test_direct_left_recursion()
 	{
 		using namespace lug::language;
-		rule R = R >> lug::chr('a') | lug::chr('a');
-		rule S = R >> !lug::chr('a');
+		rule R = R > lug::chr('a') | lug::chr('a');
+		rule S = R > !lug::chr('a');
 		grammar G = start(S);
 		assert(lug::parse("a", G));
 		assert(lug::parse("aa", G));
@@ -28,9 +28,9 @@ namespace
 	{
 		using namespace lug::language;
 		rule Q, R, S;
-		Q = R >> lug::chr('a');
+		Q = R > lug::chr('a');
 		R = Q | lug::chr('a');
-		S = R >> !lug::chr('a');
+		S = R > !lug::chr('a');
 		grammar G = start(S);
 		assert(lug::parse("a", G));
 		assert(lug::parse("aa", G));
@@ -48,10 +48,10 @@ namespace
 		using namespace lug::language;
 		std::string out;
 		rule N	= lug::chr('1') | lug::chr('2') | lug::chr('3');
-		rule E	= E[1] >> lug::chr('+') >> E[2] <[&out]{ out += '+'; }
-				| E[2] >> lug::chr('*') >> E[3] <[&out]{ out += '*'; }
+		rule E	= E[1] > lug::chr('+') > E[2] <[&out]{ out += '+'; }
+				| E[2] > lug::chr('*') > E[3] <[&out]{ out += '*'; }
 				| N <[&out](semantics&, syntax x){ out += x.capture; };
-		rule S = E >> lug::eoi;
+		rule S = E > lug::eoi;
 		grammar G = start(S);
 		out.clear();
 		assert(lug::parse("1", G) && out == "1");

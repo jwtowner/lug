@@ -10,6 +10,7 @@
 #include <any>
 #include <functional>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -538,7 +539,7 @@ constexpr auto operator|(const E1& e1, const E2& e2) {
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator>>(const E1& e1, const E2& e2) {
+constexpr auto operator>(const E1& e1, const E2& e2) {
 	return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(e2); };
 }
 
@@ -564,10 +565,10 @@ inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&,
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator&(const E& e) { return !(!e); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator+(const E& e) { auto x = make_expression(e); return x >> *x; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator~(const E& e) { return e | eps; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e) { return cut >> e; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e >> cut; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e) { return cut > e; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e > cut; }
 
 } // namespace language
 
@@ -926,13 +927,13 @@ inline grammar string_expression::make_grammar() {
 	using namespace language;
 	rule Empty = eps                                                            <[](generator& g) { g.encoder.encode(opcode::match); };
 	rule Dot = chr('.')                                                         <[](generator& g) { g.encoder.encode(opcode::match_any); };
-	rule Element = any >> chr('-') >> !chr(']') >> any                          <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-		| chr('[') >> chr(':') >> +(!chr(':') >> any) >> chr(':') >> chr(']')   <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	rule Element = any > chr('-') > !chr(']') > any                             <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+		| chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')        <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
 		| any                                                                   <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
-	rule Bracket = chr('[') >> ~(chr('^')                                       <[](generator& g) { g.circumflex = true; })
-		>> Element >> *(!chr(']') >> Element) >> chr(']')                       <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(chr('.') | chr('[')) >> any)                            <[](generator& g, syntax x) { g.encoder.match(x.capture); };
-	return start((+(Dot | Bracket | Sequence) | Empty) >> eoi);
+	rule Bracket = chr('[') > ~(chr('^')                                        <[](generator& g) { g.circumflex = true; })
+		> Element > *(!chr(']') > Element) > chr(']')                           <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +(!(chr('.') | chr('[')) > any)                             <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
 
 inline void string_expression::compile(std::string_view sv) {
