@@ -10,7 +10,6 @@
 #include <any>
 #include <functional>
 #include <iostream>
-#include <locale>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -229,7 +228,7 @@ class semantics
 	}
 
 public:
-	virtual ~semantics() {}
+	virtual ~semantics() = default;
 	const std::string_view& match() const { return match_; }
 	void escape() { prune_depth_ = call_depth_; }
 	unsigned short call_depth() const { return call_depth_; }
@@ -288,7 +287,7 @@ class encoder
 	virtual bool do_should_evaluate_length() const noexcept { return true; }
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
 public:
-	virtual ~encoder() {}
+	virtual ~encoder() = default;
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(const program& p) { do_append(p); return *this; }
 	template <class InputIt> encoder& append(InputIt first, InputIt last) { for ( ; first != last; ++first) do_append(*first); return *this; }
@@ -390,12 +389,6 @@ public:
 	~rule_encoder() override { rule_.encoding_ = false; }
 };
 
-struct cut_action { void operator()(encoder& v) const { v.encode(opcode::accept); } };
-struct newline_action { void operator()(encoder& v) const { v.encode(opcode::newline); } };
-struct any_terminal { void operator()(encoder& v) const { v.encode(opcode::match_any); } };
-struct empty_terminal { void operator()(encoder& v) const { v.encode(opcode::match); } };
-struct char_terminal { char c; void operator()(encoder& v) const { v.match(std::string_view{&c, 1}); } };
-
 class string_expression
 {
 	std::vector<instruction> instructions_;
@@ -471,7 +464,7 @@ public:
 };
 
 template <class T>
-inline auto make_expression(const T& t) {
+constexpr auto make_expression(const T& t) {
 	static_assert(is_expression_v<T>, "T must be an expression type");
 	if constexpr (is_callable_v<T>)
 		return [&target = t](encoder& d){ d.call(target, 0); };
@@ -500,6 +493,26 @@ template <class E, class> inline rule::rule(const E& e) { rule_encoder{*this}.ev
 inline rule::rule(const rule& r) { rule_encoder{*this}.call(r, 1); }
 inline auto rule::operator[](unsigned short precedence) const noexcept { return [&target = *this, precedence](encoder& d){ d.call(target, precedence); }; }
 
+constexpr struct {
+	auto operator()(char c) const { return [c](encoder& d){ d.match(std::string_view{&c, 1}); }; }
+	auto operator()(char s, char e) const { return [s, e](encoder& d) { d.match_range(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
+} chr = {};
+
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_any); } } any = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::newline); } } ilr = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match); } } eps = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
+
+constexpr struct { void operator()(encoder& d) const {
+	d.encode(opcode::choice, 4).match("\n").encode(opcode::commit, 7).match("\r")
+	 .encode(opcode::choice, 3).match("\n").encode(opcode::commit).encode(opcode::newline); } } eol = {};
+
+constexpr struct { void operator()(encoder& d) const {
+	static const size_t eol_length = instruction_length_evaluator{}.evaluate(eol).length();
+	d.encode(opcode::choice, 4).match(" ").encode(opcode::commit, 6 + eol_length)
+	 .encode(opcode::choice, 2 + eol_length).evaluate(eol).encode(opcode::commit, 2).match_range("\t", "\r"); } } space = {};
+
 namespace language
 {
 
@@ -509,39 +522,36 @@ using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator!(const E& e) {
-	return [x = make_expression(e)](encoder& d) {
-		d.encode(opcode::choice, 3 + d.evaluate_length(x)).evaluate(x).encode(opcode::commit, 0).encode(opcode::fail); };
+constexpr auto operator!(const E& e) {
+	return [x = make_expression(e)](encoder& d) { d.encode(opcode::choice, 1 + d.evaluate_length(x)).evaluate(x).encode(opcode::fail, immediate{1}); };
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator*(const E& e) {
-	return [x = make_expression(e)](encoder& d) {
-		auto x_length = d.evaluate_length(x);
-		d.encode(opcode::choice, 2 + x_length).evaluate(x).encode(opcode::commit, -(x_length + 4)); };
+constexpr auto operator*(const E& e) {
+	return [x = make_expression(e)](encoder& d) { auto n = d.evaluate_length(x); d.encode(opcode::choice, 2 + n).evaluate(x).encode(opcode::commit, -(4 + n)); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-inline auto operator|(const E1& e1, const E2& e2) {
+constexpr auto operator|(const E1& e1, const E2& e2) {
 	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
 		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2); };
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-inline auto operator>(const E1& e1, const E2& e2) {
+constexpr auto operator>>(const E1& e1, const E2& e2) {
 	return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(e2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<(const E& e, A a) {
+constexpr auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.encode(opcode::begin_capture).evaluate(e).encode(opcode::end_capture, semantic_capture{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
-		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
+		return e <[a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics&>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
-		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
+		return e <[a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
@@ -553,11 +563,11 @@ template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator&(const E& e) { return !(!e); }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator~(const E& e) { return e | empty_terminal{}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(const E& e) { return cut_action{} > e; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> inline auto operator--(const E& e, int) { return e > cut_action{}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator&(const E& e) { return !(!e); }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator+(const E& e) { auto x = make_expression(e); return x >> *x; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator~(const E& e) { return e | eps; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e) { return cut >> e; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e >> cut; }
 
 } // namespace language
 
@@ -614,12 +624,11 @@ class parser
 	lug::semantics& semantics_;
 	std::locale locale_;
 	std::string input_;
-	syntax_state input_state_{0, 1, 1};
+	syntax_state input_state_{0, 1, 1}, max_input_state_{0, 1, 1};
 	program_state program_state_{0, 0};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
 	std::vector<std::function<bool(std::string&)>> sources_;
-	std::vector<bool> interactive_;
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
 	std::vector<program_state> call_stack_;
@@ -651,7 +660,7 @@ class parser
 	void cut() {
 		semantics_.accept(grammar_, input_);
 		input_.erase(0, input_state_.index);
-		input_state_.index = 0, program_state_.action_counter = 0;
+		input_state_.index = 0, max_input_state_.index = 0, program_state_.action_counter = 0;
 		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
 	}
 
@@ -680,11 +689,13 @@ public:
 	lug::semantics& semantics() const noexcept { return semantics_; }
 	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
 	const syntax_position& input_position() const noexcept { return input_state_.position; }
-	void input_position(const syntax_position& position) noexcept { input_state_.position = position; }
+	const syntax_position& max_input_position() const noexcept { return max_input_state_.position; }
 	bool available(std::size_t n) { available(n, input_state_.index); }
 
 	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
 		input_state_ = {ir, cr, lr}, program_state_ = {ac, pc};
+		if (ir > max_input_state_.index)
+			max_input_state_ = input_state_;
 	}
 
 	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
@@ -755,7 +766,13 @@ public:
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
-					pop_stack_frame(backtrack_stack_);
+					if (imm > 1) {
+						backtrack_stack_.back().second = input_state_;
+					} else if (imm <= 1) {
+						if (imm == 1)
+							input_state_ = backtrack_stack_.back().second;
+						pop_stack_frame(backtrack_stack_);
+					}
 				} [[fallthrough]];
 				case opcode::jump: {
 					pc += off;
@@ -907,17 +924,15 @@ inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 
 inline grammar string_expression::make_grammar() {
 	using namespace language;
-	constexpr auto A = any_terminal{};
-	using C = char_terminal;
-	rule Empty = empty_terminal{}                               <[](generator& g) { g.encoder.encode(opcode::match); };
-	rule Dot = C{'.'}                                           <[](generator& g) { g.encoder.encode(opcode::match_any); };
-	rule Element = A > C{'-'} > !C{']'} > A                     <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-		| C{'['} > C{':'} > +(!C{':'} > A) > C{':'} > C{']'}    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
-		| A                                                     <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
-	rule Bracket = C{'['} > ~(C{'^'}                            <[](generator& g) { g.circumflex = true; })
-		> Element > *(!C{']'} > Element) > C{']'}               <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(C{'.'} | C{'['}) > A)                   <[](generator& g, syntax x) { g.encoder.match(x.capture); };
-	return start((+(Dot | Bracket | Sequence) | Empty) > !A);
+	rule Empty = eps                                                            <[](generator& g) { g.encoder.encode(opcode::match); };
+	rule Dot = chr('.')                                                         <[](generator& g) { g.encoder.encode(opcode::match_any); };
+	rule Element = any >> chr('-') >> !chr(']') >> any                          <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+		| chr('[') >> chr(':') >> +(!chr(':') >> any) >> chr(':') >> chr(']')   <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+		| any                                                                   <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	rule Bracket = chr('[') >> ~(chr('^')                                       <[](generator& g) { g.circumflex = true; })
+		>> Element >> *(!chr(']') >> Element) >> chr(']')                       <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +(!(chr('.') | chr('[')) >> any)                            <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	return start((+(Dot | Bracket | Sequence) | Empty) >> eoi);
 }
 
 inline void string_expression::compile(std::string_view sv) {

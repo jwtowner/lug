@@ -4,7 +4,7 @@ An embedded domain specific language for expressing parsers as extended [parsing
 
 Features
 ---
-- Natural syntax more akin to external parser generator languages, unlike many other C++ parsing toolkits
+- Natural syntax more akin to external parser generator languages
 - Direct and indirect left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
