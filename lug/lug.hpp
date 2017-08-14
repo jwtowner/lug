@@ -5,10 +5,9 @@
 #ifndef LUG_HPP__
 #define LUG_HPP__
 
-#include <lug/utf8.hpp>
 #include <lug/unicode.hpp>
+#include <lug/utf8.hpp>
 #include <any>
-#include <array>
 #include <functional>
 #include <iostream>
 #include <locale>
