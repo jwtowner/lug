@@ -1,13 +1,14 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26730.0
+VisualStudioVersion = 15.0.26730.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{E698D93F-872B-4273-801C-07DDD9A0CB79}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "lug", "lug", "{8A96E111-2F01-4E18-A185-7C8BA3C6076D}"
 	ProjectSection(SolutionItems) = preProject
 		lug\lug.hpp = lug\lug.hpp
+		lug\unicode.hpp = lug\unicode.hpp
 		lug\utf8.hpp = lug\utf8.hpp
 	EndProjectSection
 EndProject

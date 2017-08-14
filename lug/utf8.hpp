@@ -10,23 +10,26 @@
 #ifndef LUG_UTF8_HPP__
 #define LUG_UTF8_HPP__
 
+#include <array>
 #include <algorithm>
-#include <cstddef>
 #include <iterator>
 #include <utility>
 
 namespace lug::utf8
 {
 
-constexpr bool is_lead(char octet) noexcept {
-	return (static_cast<unsigned char>(octet) & 0xc0) != 0x80;
-}
-
 constexpr unsigned int decode_accept = 0;
 constexpr unsigned int decode_reject = 12;
 
-inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state) {
-	static constexpr unsigned char dfa_class[256] = {
+constexpr bool is_lead(char octet) noexcept
+{
+	return (static_cast<unsigned char>(octet) & 0xc0) != 0x80;
+}
+
+inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state)
+{
+	static constexpr std::array<unsigned char, 256> dfa_class
+	{
 		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -42,16 +45,19 @@ inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int s
 		 8, 8, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
 		 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
 		10, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 3, 3,
-		11, 6, 6, 6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };
+		11, 6, 6, 6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8
+	};
 
-	static constexpr unsigned char dfa_transition[108] = {
+	static constexpr std::array<unsigned char, 108> dfa_transition
+	{
 		 0,12,24,36,60,96,84,12,12,12,48,72,12,12,12,12,
 		12,12,12,12,12,12,12,12,12, 0,12,12,12,12,12, 0,
 		12, 0,12,12,12,24,12,12,12,12,12,24,12,24,12,12,
 		12,12,12,12,12,12,12,24,12,12,12,12,12,24,12,12,
 		12,12,12,12,12,24,12,12,12,12,12,12,12,12,12,36,
 		12,36,12,12,12,36,12,12,12,12,12,36,12,36,12,12,
-		12,36,12,12,12,12,12,12,12,12,12,12 };
+		12,36,12,12,12,12,12,12,12,12,12,12
+	};
 
 	const unsigned int uo = static_cast<unsigned char>(octet);
 	const unsigned int cc = dfa_class[uo];
@@ -60,7 +66,8 @@ inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int s
 }
 
 template <class InputIt>
-inline std::pair<char32_t, InputIt> decode_rune(InputIt first, InputIt last) {
+inline std::pair<char32_t, InputIt> decode_rune(InputIt first, InputIt last)
+{
 	char32_t rune = U'\0';
 	unsigned int state = decode_accept;
 	while (first != last && state != decode_reject) {
@@ -72,17 +79,20 @@ inline std::pair<char32_t, InputIt> decode_rune(InputIt first, InputIt last) {
 }
 
 template <class InputIt>
-inline InputIt next_rune(InputIt first, InputIt last) {
+inline InputIt next_rune(InputIt first, InputIt last)
+{
 	return ::lug::utf8::decode_rune(first, last).second;
 }
 
 template <class InputIt>
-inline std::size_t size_of_first_rune(InputIt first, InputIt last) {
+inline std::size_t size_of_first_rune(InputIt first, InputIt last)
+{
 	return static_cast<std::size_t>(::std::distance(first, ::lug::utf8::next_rune(first, last)));
 }
 
 template <class InputIt>
-inline std::size_t count_runes(InputIt first, InputIt last) {
+inline std::size_t count_runes(InputIt first, InputIt last)
+{
 	std::size_t count = 0;
 	for ( ; first != last; ++count)
 		first = ::lug::utf8::next_rune(first, last);

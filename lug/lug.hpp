@@ -6,7 +6,7 @@
 #define LUG_HPP__
 
 #include <lug/utf8.hpp>
-
+#include <lug/unicode.hpp>
 #include <any>
 #include <array>
 #include <functional>
