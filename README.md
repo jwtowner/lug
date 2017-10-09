@@ -37,9 +37,9 @@ As a baseline, the following compiler versions are known to work with lug.
 
 | Compiler | Language Mode |
 | --- | --- |
-| Clang 4.0.0 (February 2017) | -std=c++1z or -std=gnu++1z (Must use libstdc++ 7.1 as standard library. As of July 2017, libc++ does not implement the is_invokable suite of type traits required by lug.) |
+| Clang 5.0.0 (September 2017) | -std=c++17 or -std=gnu++17 |
 | GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
-| Microsoft Visual C++ 2017 15.3 Preview 2 (June 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2017 15.3 (August 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 
 For building the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
 
