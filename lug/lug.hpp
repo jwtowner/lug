@@ -428,12 +428,11 @@ class string_expression
 			if (!ranges.empty()) {
 				std::vector<std::pair<std::string_view, std::string_view>> merged;
 				std::sort_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
-				for (auto curr = merged.end(), next = ranges.begin(), last = ranges.end(); next != last; ++next) {
+				for (auto curr = merged.end(), next = ranges.begin(), last = ranges.end(); next != last; ++next)
 					if (curr == merged.end() || next->first < curr->first || curr->second < next->first)
 						curr = merged.insert(merged.end(), *next); 
 					else
 						curr->second = curr->second < next->second ? next->second : curr->second;
-				}
 				if (auto curr = merged.crbegin(), last = merged.crend(); curr != last) {
 					instruction_encoder{matches}.match_range(curr->first, curr->second);
 					for (++curr; curr != last; ++curr) {
@@ -703,7 +702,7 @@ public:
 		load_registers(input_state_, program_state_, ir, cr, lr, ac, pc);
 	}
 
-	template <class InputIt>
+	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last) {
 		input_.insert(input_.end(), first, last);
 		return *this;
@@ -892,12 +891,12 @@ public:
 	}
 };
 
-template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
+template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, const grammar& grmr, semantics& sema) {
 	return parser{grmr, sema}.enqueue(first, last).parse();
 }
 
-template <class InputIt, class = typename std::enable_if<std::is_same<char, typename std::iterator_traits<InputIt>::value_type>::value>::type>
+template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, const grammar& grmr) {
 	semantics sema;
 	return parse(first, last, grmr, sema);
