@@ -10,8 +10,6 @@
 #include <any>
 #include <functional>
 #include <iostream>
-#include <locale>
-#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -70,7 +68,7 @@ struct reentrancy_sentinel
 } // namespace detail
 
 enum class immediate : unsigned short {};
-enum class operands : unsigned char { none = 0, off = 1, str = 2 };
+enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, altcode = 0x3f };
 constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
 constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
 
@@ -80,6 +78,13 @@ enum class opcode : unsigned char
 	choice,         commit,         jump,           call,
 	ret,            fail,           accept,         newline,
 	predicate,      action,         begin_capture,  end_capture
+};
+
+enum class altcode : unsigned char
+{
+	accept_final = 1,
+	commit_back = 1,                commit_partial = 2,
+	match_class_ptype = 1,          match_class_gctype = 2,         match_class_sctype = 3
 };
 
 union instruction
@@ -93,32 +98,38 @@ union instruction
 	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_limit_error{}; }
 	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
-	static opcode decode(const std::vector<instruction>& code, std::ptrdiff_t& pc, std::size_t& imm, std::ptrdiff_t& off, std::string_view& str) {
+	static auto decode(const std::vector<instruction>& code, std::ptrdiff_t& pc) {
 		const prefix pf = code[pc++].pf;
-		imm = pf.val, off = (pf.aux & operands::off) == operands::off ? code[pc++].off : 0;
-		if ((pf.aux & operands::str) == operands::str) {
-			str = std::string_view{code[pc].str.data(), (imm & 0xFF) + 1};
-			pc += ((imm & 0xFF) + 4) >> 2;
+		std::size_t imm = pf.val;
+		std::ptrdiff_t off = (pf.aux & operands::off) != operands::none ? code[pc++].off : 0;
+		std::string_view str;
+		if ((pf.aux & operands::str) != operands::none) {
+			str = std::string_view{code[pc].str.data(), (imm & 0xff) + 1};
+			pc += ((imm & 0xff) + 4) >> 2;
 			imm = (imm >> 8) + 1;
-		} else {
-			str = std::string_view{};
 		}
-		return pf.op;
+		return std::make_tuple(pf.op, static_cast<altcode>(pf.aux & operands::altcode), imm, off, str);
 	}
 
-	static std::ptrdiff_t length(prefix p) noexcept {
+	template <class Integral>
+	static Integral decode_constant(std::string_view s) {
+		if (s.size() < sizeof(Integral)) throw bad_opcode{};
+		return *static_cast<Integral const*>(static_cast<void const*>(s.data()));
+	}
+
+	static std::ptrdiff_t length(prefix pf) noexcept {
 		std::ptrdiff_t len = 1;
-		if ((p.aux & operands::off) == operands::off)
-			len++;
-		if ((p.aux & operands::str) == operands::str)
-			len += static_cast<std::ptrdiff_t>(((p.val & 0xff) >> 2) + 1);
+		if ((pf.aux & operands::off) != operands::none)
+			++len;
+		if ((pf.aux & operands::str) != operands::none)
+			len += static_cast<std::ptrdiff_t>(((pf.val & 0xff) >> 2) + 1);
 		return len;
 	}
 };
 
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
-static_assert(sizeof(std::ctype_base::mask) <= sizeof(immediate), "immediate must be large enough to hold std::ctype::mask");
+static_assert(sizeof(unicode::ctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::ctype");
 
 struct program
 {
@@ -295,6 +306,7 @@ public:
 	encoder& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
 	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
+	encoder& encode(opcode op, altcode alt, immediate imm = immediate{0}) { return append(instruction{op, static_cast<operands>(alt) & operands::altcode, imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, semantic_capture a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
@@ -547,11 +559,11 @@ constexpr auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.encode(opcode::begin_capture).evaluate(e).encode(opcode::end_capture, semantic_capture{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
-		return e <[a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
+		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
 	} else if constexpr (std::is_invocable_v<A, semantics&>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, semantic_action{a}); };
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
-		return e <[a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
+		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); }); };
 	} else if constexpr (std::is_invocable_v<A>) {
@@ -577,7 +589,7 @@ inline grammar start(const rule& start_rule) {
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
 	std::unordered_set<const program*> recursive;
 	std::vector<std::pair<std::vector<const rule*>, const program*>> unprocessed;
-	program_encoder{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, immediate{1});
+	program_encoder{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, altcode::accept_final);
 	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
@@ -622,7 +634,6 @@ class parser
 
 	const lug::grammar& grammar_;
 	lug::semantics& semantics_;
-	std::locale locale_;
 	std::string input_;
 	syntax_state input_state_{0, 1, 1}, max_input_state_{0, 1, 1};
 	program_state program_state_{0, 0};
@@ -720,15 +731,14 @@ public:
 		const program& prog = grammar_.program();
 		if (prog.instructions.empty()) throw bad_grammar{};
 		bool result = false, done = false;
-		std::size_t imm, ir, cr, lr, ac, fc = 0;
-		std::ptrdiff_t off, pc;
-		std::string_view str;
+		std::size_t ir, cr, lr, ac, fc = 0;
+		std::ptrdiff_t pc;
 		semantics_.clear();
 		program_state_ = {0, 0};
 		cut_deferred_ = false;
 		load_registers(ir, cr, lr, ac, pc);
 		while (!done) {
-			switch (instruction::decode(prog.instructions, pc, imm, off, str)) {
+			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
 					if (!str.empty()) {
 						if (!available(str.size(), ir) || input_.compare(ir, str.size(), str) != 0)
@@ -742,13 +752,21 @@ public:
 					ir += utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend()), ++cr;
 				} break;
 				case opcode::match_class: {
-					auto sz = utf8::size_of_first_rune(input_.cbegin() + ir, input_.cend());
-					const auto& codecvt = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t>>(locale_);
-					std::wstring_convert<std::codecvt<wchar_t, char, std::mbstate_t>, wchar_t> cvt(&codecvt);
-					auto wc = cvt.from_bytes(input_.data() + ir, input_.data() + ir + sz);
-					if (wc.empty() || !std::use_facet<std::ctype<wchar_t>>(locale_).is(static_cast<short>(imm), wc[0]))
+					if (!available(1, ir))
 						goto failure;
-					ir += sz, ++cr;
+					auto first = input_.cbegin() + ir;
+					auto [rune, next] = utf8::decode_rune(first, input_.cend());
+					auto record = unicode::query(rune);
+					bool match;
+					switch (alt) {
+						case altcode::match_class_ptype: match = record.any_of(instruction::decode_constant<unicode::ptype>(str)); break;
+						case altcode::match_class_gctype: match = record.any_of(instruction::decode_constant<unicode::gctype>(str)); break;
+						case altcode::match_class_sctype: match = record.script() == static_cast<unicode::sctype>(imm); break;
+						default: match = record.any_of(static_cast<unicode::ctype>(imm)); break;
+					}
+					if (match)
+						goto failure;
+					ir += std::distance(first, next), ++cr;
 				} break;
 				case opcode::match_range: {
 					std::string_view first = str.substr(0, imm), last = str.substr(imm);
@@ -766,12 +784,10 @@ public:
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
-					if (imm > 1) {
-						backtrack_stack_.back().second = input_state_;
-					} else if (imm <= 1) {
-						if (imm == 1)
-							input_state_ = backtrack_stack_.back().second;
-						pop_stack_frame(backtrack_stack_);
+					switch (alt) {
+						case altcode::commit_partial: backtrack_stack_.back().second = input_state_; break;
+						case altcode::commit_back: input_state_ = backtrack_stack_.back().second; [[fallthrough]];
+						default: pop_stack_frame(backtrack_stack_); break;
 					}
 				} [[fallthrough]];
 				case opcode::jump: {
@@ -853,7 +869,7 @@ public:
 				case opcode::accept: {
 					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
 						cut(ir, cr, lr, ac, pc);
-						if (result = done = imm != 0; done)
+						if (result = done = alt == altcode::accept_final; done)
 							break;
 					}
 				} break;
