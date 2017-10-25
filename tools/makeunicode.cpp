@@ -178,12 +178,12 @@ static auto const compatability_properties = build_namemap<enum_type::bitfield, 
 
 static std::vector<std::string> const script_names =
 {
-	"Arabic", "Armenian", "Bengali", "Bopomofo", "Braille", "Buginese", "Buhid", "Canadian_Aboriginal", "Cherokee",
-	"Common", "Coptic", "Cypriot", "Cyrillic", "Deseret", "Devanagari", "Ethiopic", "Georgian", "Glagolitic", "Gothic",
-	"Greek", "Gujarati", "Gurmukhi", "Han", "Hangul", "Hanunoo", "Hebrew", "Hiragana", "Inherited", "Kannada", "Katakana",
-	"Kharoshthi", "Khmer", "Lao", "Latin", "Limbu", "Linear_B", "Malayalam", "Mongolian", "Myanmar", "New_Tai_Lue",
-	"Ogham", "Old_Italic", "Old_Persian", "Oriya", "Osmanya", "Runic", "Shavian", "Sinhala", "Syloti_Nagri", "Syriac",
-	"Tagalog", "Tagbanwa", "Tai_Le", "Tamil", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Ugaritic", "Yi",
+	"Unknown", "Common", "Inherited", "Arabic", "Armenian", "Bengali", "Bopomofo", "Braille", "Buginese", "Buhid",
+	"Canadian_Aboriginal", "Cherokee", "Coptic", "Cypriot", "Cyrillic", "Deseret", "Devanagari", "Ethiopic", "Georgian",
+	"Glagolitic", "Gothic", "Greek", "Gujarati", "Gurmukhi", "Han", "Hangul", "Hanunoo", "Hebrew", "Hiragana", "Kannada",
+	"Katakana", "Kharoshthi", "Khmer", "Lao", "Latin", "Limbu", "Linear_B", "Malayalam", "Mongolian", "Myanmar",
+	"New_Tai_Lue", "Ogham", "Old_Italic", "Old_Persian", "Oriya", "Osmanya", "Runic", "Shavian", "Sinhala", "Syloti_Nagri",
+	"Syriac", "Tagalog", "Tagbanwa", "Tai_Le", "Tamil", "Telugu", "Thaana", "Thai", "Tibetan", "Tifinagh", "Ugaritic", "Yi",
 	// Unicode 5.0
 	"Balinese", "Cuneiform", "Nko", "Phags_Pa", "Phoenician",
 	// Unicode 5.1
@@ -335,7 +335,8 @@ void read_and_build_tables()
 			});
 		});
 
-		// setup compatability filter maps while reading tables
+		// setup compatability filter maps while reading tables, see Unicode TR#18,
+		// Annex C: Compatibility Properties
 		using compat_filter_map = std::unordered_map<std::string, std::vector<compat_filter>>;
 
 		compat_filter_map compat_prop_includes = {
@@ -401,7 +402,7 @@ void read_and_build_tables()
 
 	// load in the scripts table
 	auto pending_scversion = std::async(std::launch::async, [] {
-		std::fill(std::execution::par_unseq, sctable.begin(), sctable.end(), scripts.find("Common")->second);
+		std::fill(std::execution::par_unseq, sctable.begin(), sctable.end(), scripts.find("Unknown")->second);
 		return read_ucd_array("Scripts.txt", [](auto start, auto end, auto const& value) {
 			if (auto script = scripts.find(value); script != scripts.end())
 				std::fill(std::execution::par_unseq, sctable.begin() + start, sctable.begin() + end + 1, script->second);
@@ -505,7 +506,7 @@ void combine_records()
 {
 	for (std::size_t i = 0, n = ptable.size(); i < n; ++i)
 		recordtable[i] = combine_record({ptable[i], ctable[i], gctable[i], sctable[i]});
-	ucd_record invalidrecord{binary_properties.find("Any")->second, 0, general_categories.find("Cn")->second, scripts.find("Common")->second};
+	ucd_record invalidrecord{binary_properties.find("Any")->second, 0, general_categories.find("Cn")->second, scripts.find("Unknown")->second};
 	invalidrecordindex = combine_record(invalidrecord);
 }
 
