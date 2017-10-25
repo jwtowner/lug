@@ -2,7 +2,12 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
+#ifdef _MSC_VER
+#define _SILENCE_PARALLEL_ALGORITHMS_EXPERIMENTAL_WARNING
+#endif
+
 #include <cassert>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
@@ -91,19 +96,19 @@ class makeunicode_error : public std::runtime_error
 	using std::runtime_error::runtime_error;
 };
 
-enum class namemap_type { bitfield, index };
+enum class enum_type { bitfield, index };
 
-template <namemap_type type, class Integral, class List>
+template <enum_type type, class Integral, class List>
 auto build_namemap(List const& namelist)
 {
-	if constexpr (type == namemap_type::bitfield)
+	if constexpr (type == enum_type::bitfield)
 		assert(namelist.size() <= std::numeric_limits<Integral>::digits);
 	else
 		assert(namelist.size() <= (std::numeric_limits<Integral>::max)());
 	std::unordered_map<std::string, Integral> namemap;
 	namemap.reserve(namelist.size());
 	for (std::size_t i = 0, n = namelist.size(); i < n; ++i) {
-		if constexpr (type == namemap_type::bitfield)
+		if constexpr (type == enum_type::bitfield)
 			namemap.emplace(namelist[i], static_cast<Integral>(Integral{1} << i));
 		else
 			namemap.emplace(namelist[i], static_cast<Integral>(i));
@@ -130,7 +135,7 @@ static std::vector<std::string> const binary_property_names =
 	"XID_Start", "XID_Continue"
 };
 
-static auto const binary_properties = build_namemap<namemap_type::bitfield, std::uint_least64_t>(binary_property_names);
+static auto const binary_properties = build_namemap<enum_type::bitfield, std::uint_least64_t>(binary_property_names);
 
 static std::vector<std::string> const general_category_names =
 {
@@ -162,14 +167,14 @@ static std::map<std::string, std::pair<std::string_view, std::vector<std::string
 	{ "C", { "Other", { "Cc", "Cf", "Cn", "Co", "Cs" } } }
 };
 
-static auto const general_categories = build_namemap<namemap_type::index, std::uint_least8_t>(general_category_names);
+static auto const general_categories = build_namemap<enum_type::index, std::uint_least8_t>(general_category_names);
 
 static std::vector<std::string> const compatability_property_names =
 {
 	"alpha", "lower", "upper", "punct", "digit", "xdigit", "alnum", "space", "blank", "cntrl", "graph", "print", "word"
 };
 
-static auto const compatability_properties = build_namemap<namemap_type::bitfield, std::uint_least16_t>(compatability_property_names);
+static auto const compatability_properties = build_namemap<enum_type::bitfield, std::uint_least16_t>(compatability_property_names);
 
 static std::vector<std::string> const script_names =
 {
@@ -200,7 +205,7 @@ static std::vector<std::string> const script_names =
 	"Adlam", "Bhaiksuki", "Marchen", "Newa", "Osage", "Tangut", "Masaram_Gondi", "Nushu", "Soyombo", "Zanabazar_Square"
 };
 
-static auto const scripts = build_namemap<namemap_type::index, std::uint_least8_t>(script_names);
+static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
 
 template <class T> using ucd_array = std::array<T, 0x110000>;
 static ucd_array<std::uint_least64_t> ptable; // Binary Properties table
@@ -410,49 +415,12 @@ void read_and_build_tables()
 		throw makeunicode_error("unicode version mismatch between input files");
 }
 
-struct ucd_record
-{
-	std::uint_least64_t pflags;
-	std::uint_least16_t cflags;
-	std::uint_least8_t gcindex;
-	std::uint_least8_t scindex;
-};
-
-constexpr bool operator==(ucd_record const& x, ucd_record const& y) noexcept
-{
-	return x.pflags == y.pflags && x.cflags == y.cflags && x.gcindex == y.gcindex && x.scindex == y.scindex;
-}
-
-constexpr bool operator!=(ucd_record const& x, ucd_record const& y) noexcept
-{
-	return !(x == y);
-}
-
-struct ucd_record_hash
-{
-	std::size_t operator()(ucd_record const& record) const noexcept {
-		return hash_combine(
-			std::hash<std::uint_least64_t>{}(record.pflags), std::hash<std::uint_least16_t>{}(record.cflags),
-			std::hash<std::uint_least8_t>{}(record.gcindex), std::hash<std::uint_least8_t>{}(record.scindex));
-	}
-};
-
 struct ucd_type_info
 {
 	std::string_view name;
 	std::string_view cmacro;
 	unsigned int szbytes = 0;
 	unsigned int digits10 = 0;
-};
-
-struct ucd_record_stage_table
-{
-	std::vector<std::size_t> stage1;
-	std::vector<std::size_t> stage2;
-	ucd_type_info typeinfo1;
-	ucd_type_info typeinfo2;
-	std::size_t block_size = 0;
-	std::size_t table_size = 0;
 };
 
 #define make_unsigned_types_entry(T, C) { (std::numeric_limits<T>::max)(), { #T, C, static_cast<unsigned int>(sizeof(T)) } }
@@ -482,8 +450,45 @@ inline auto get_type_info()
 	return get_maxval_type_info((std::numeric_limits<T>::max)());
 }
 
-static std::unordered_map<ucd_record, std::size_t, ucd_record_hash> recordindices;
+struct ucd_record
+{
+	std::uint_least64_t pflags;
+	std::uint_least16_t cflags;
+	std::uint_least8_t gcindex;
+	std::uint_least8_t scindex;
+};
+
+constexpr bool operator==(ucd_record const& x, ucd_record const& y) noexcept
+{
+	return x.pflags == y.pflags && x.cflags == y.cflags && x.gcindex == y.gcindex && x.scindex == y.scindex;
+}
+
+constexpr bool operator!=(ucd_record const& x, ucd_record const& y) noexcept
+{
+	return !(x == y);
+}
+
+struct ucd_record_hash
+{
+	std::size_t operator()(ucd_record const& record) const noexcept {
+		return hash_combine(
+			std::hash<std::uint_least64_t>{}(record.pflags), std::hash<std::uint_least16_t>{}(record.cflags),
+			std::hash<std::uint_least8_t>{}(record.gcindex), std::hash<std::uint_least8_t>{}(record.scindex));
+	}
+};
+
+struct ucd_record_stage_table
+{
+	std::vector<std::size_t> stage1;
+	std::vector<std::size_t> stage2;
+	ucd_type_info typeinfo1;
+	ucd_type_info typeinfo2;
+	std::size_t block_size = 0;
+	std::size_t table_size = 0;
+};
+
 static std::size_t invalidrecordindex;
+static std::unordered_map<ucd_record, std::size_t, ucd_record_hash> recordindices;
 static std::vector<ucd_record> recordvalues;
 static ucd_array<std::size_t> recordtable;
 static ucd_record_stage_table recordstagetable;
@@ -589,6 +594,143 @@ inline int align_padding(Integral value) noexcept
 	return ((static_cast<int>(value) + 3) / 4) * 4;
 }
 
+template <class IndexMap, class ValueSequence, class Value>
+auto intern_value(IndexMap& indices, ValueSequence& values, Value value)
+{
+	using index_type = typename IndexMap::mapped_type;
+	auto emplacement = indices.try_emplace(value, static_cast<index_type>(values.size()));
+	if (emplacement.second) {
+		assert(values.size() < (std::numeric_limits<index_type>::max)());
+		values.push_back(value);
+	}
+	return emplacement.first;
+}
+
+auto normalize_property_label(std::string_view id)
+{
+	std::string normid;
+	for (char c : id)
+		if (c != ' ' && c != '\t' && c != '_' && c != '-')
+			normid.push_back(static_cast<char>(std::tolower(c)));
+	return normid;
+}
+
+template <class ValueSequence>
+std::ostream& print_table(std::ostream& out, std::string_view name, std::string_view type, std::string_view cmacro,
+		ValueSequence const& values, std::size_t columnlen, const char* indent, const char* endline)
+{
+	out << indent << "static constexpr std::array<" << type << ", " << std::dec << values.size() << "> " << name << " =\n";
+	out << indent << "{" << endline;
+	std::size_t linelen = 0;
+	for (auto first = values.begin(), last = values.end(); first != last; ++first) {
+		auto segment = std::to_string(*first);
+		if (!cmacro.empty())
+			segment = std::string{cmacro} + "(" + segment + ")";
+		out << segment;
+		if (first != last - 1)
+			out << ',' << ((linelen += segment.size() + 2) > columnlen ? linelen = 0, endline : " ");
+	}
+	return out << "\n" << indent << "};\n";
+}
+
+class enum_printer
+{
+	enum_type enum_type_;
+	std::string_view name_;
+	std::string_view type_;
+	std::string_view comment_;
+	std::function<void(std::ostream&)> body_;
+
+	enum_printer const& unary(std::ostream& out, std::string_view op) const {
+		out << "constexpr " << name_ << " operator" << op << "(" << name_ <<
+			" x) noexcept { return static_cast<" << name_ << ">(" << op << "static_cast<" << type_ << ">(x)); }\n";
+		return *this;
+	}
+
+	enum_printer const& binary(std::ostream& out, std::string_view op) const {
+		out << "constexpr " << name_ << " operator" << op << "(" << name_ << " x, " << name_ <<
+			" y) noexcept { return static_cast<" << name_ << ">(static_cast<" << type_ << ">(x) " <<
+			op << " static_cast<" << type_ << ">(y)); }\n";
+		return *this;
+	}
+
+	enum_printer const& assign(std::ostream& out, std::string_view op) const {
+		out << "inline " << name_ << " operator" << op << "=(" << name_ << "& x, " << name_ <<
+			" y) noexcept { return (x = x " << op << " y); }\n";
+		return *this;
+	}
+
+public:
+	template <class BodyPrinter>
+	enum_printer(enum_type etype, std::string_view name, std::string_view type, std::string_view comment, BodyPrinter body)
+		: enum_type_{etype}, name_{name}, type_{type}, comment_{comment}, body_{std::move(body)} {}
+
+	friend std::ostream& operator<<(std::ostream& out, enum_printer const& p) {
+		out << "// " << p.comment_ << "\nenum class " << p.name_ << " : " << p.type_ << "\n{\n";
+		p.body_(out);
+		out << "};\n";
+		if (p.enum_type_ == enum_type::bitfield) {
+			out << "\n";
+			p.unary(out, "~").binary(out, "&").binary(out, "|").binary(out, "^").assign(out, "&").assign(out, "|").assign(out, "^");
+		}
+		return out;
+	}
+};
+
+class enum_parser_printer
+{
+	std::string_view name_;
+	std::string_view abbr_;
+	std::function<std::vector<std::pair<std::string, std::string>>()> label_source_;
+
+public:
+	template <class LabelSource>
+	enum_parser_printer(std::string_view name, std::string_view abbr, LabelSource label_source)
+		: name_{name}, abbr_{abbr}, label_source_{std::move(label_source)} {}
+
+	friend std::ostream& operator<<(std::ostream& out, enum_parser_printer const& p)
+	{
+		auto labels = p.label_source_();
+		std::sort(labels.begin(), labels.end(), [](auto const& x, auto const& y) { return x.first < y.first; });
+
+		out << "// Convert from text to " << p.name_ << " property\n"
+			<< "inline std::optional<" << p.name_ << "> sto" << p.name_ << "(std::string_view s)\n"
+			<< "{\n"
+			<< "\tusing namespace std::string_view_literals;\n"
+			<< "\tusing " << p.abbr_ << " = " << p.name_ << ";\n\n"
+			<< "\tstatic constexpr std::array<std::pair<std::string_view, " << p.name_ << ">, " << std::dec << labels.size() << "> labels =\n"
+			<< "\t{ {\n";
+
+		std::string line, segment;
+		line.reserve(150);
+		segment.reserve(80);
+
+		for (std::size_t i = 0, n = labels.size(); i < n; ++i) {
+			segment = "{ \"" + labels[i].first + "\"sv, ";
+			segment.append(p.abbr_.data(), p.abbr_.size());
+			segment += "::" + labels[i].second + " }";
+			if (i < n - 1) {
+				segment += ',';
+				if (segment.size() + line.size() > 120) {
+					out << "\t\t" << line << "\n";
+					line = segment;
+					continue;
+				}
+			}
+			if (i > 0)
+				line += ' ';
+			line += segment;
+		}
+
+		return out << "\t\t" << line << "\n"
+			<< "\t} };\n\n"
+			<< "\tauto l = detail::normalize_property_label(s);\n"
+			<< "\tauto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });\n"
+			<< "\treturn c != labels.end() && c->first == l ? std::optional<" << p.name_ << ">{static_cast<" << p.name_ << ">(c->second)} : std::nullopt;\n"
+			<< "}\n";
+	}
+};
+
 class rle_stage_table_printer
 {
 	std::string_view name_;
@@ -599,37 +741,44 @@ public:
 	rle_stage_table_printer(std::string_view name, std::vector<std::size_t> const& table, ucd_type_info const& typeinfo)
 		: name_{name}, table_{table}, typeinfo_{typeinfo} {}
 
-	friend std::ostream& operator<<(std::ostream& out, rle_stage_table_printer const& p)
-	{
-		auto const rletable = run_length_encode(p.table_, p.typeinfo_);
-		std::string line;
+	friend std::ostream& operator<<(std::ostream& out, rle_stage_table_printer const& p) {
+		return print_table(out, p.name_, p.typeinfo_.name, "", run_length_encode(p.table_, p.typeinfo_), 120, "\t", "\n\t\t");
+	}
+};
 
-		out << "\tstatic constexpr std::array<" << p.typeinfo_.name << ", "
-			<< std::dec << rletable.size() << "> " << p.name_ << " =\n\t{\n";
+class record_flyweight_printer
+{
+	std::vector<ucd_record> const& records_;
 
-		auto first = rletable.begin(), last = rletable.end();
-		while (first != last) {
-			line += std::to_string(*first++);
-			if (first != last) {
-				line += ',';
-				if (line.size() > 120) {
-					out << "\t\t" << line << "\n";
-					line.clear();
-				}
-				else {
-					line += ' ';
-				}
-			}
+public:
+	explicit record_flyweight_printer(std::vector<ucd_record> const& records)
+		: records_{records} {}
+
+	friend std::ostream& operator<<(std::ostream& out, record_flyweight_printer const& p) {
+		std::unordered_map<std::uint_least64_t, std::uint_least8_t> pflag_indices;
+		std::unordered_map<std::uint_least16_t, std::uint_least8_t> cflag_indices;
+		std::vector<std::uint_least64_t> pflag_values;
+		std::vector<std::uint_least16_t> cflag_values;
+		std::vector<std::uint_least8_t> flyweights;
+
+		for (auto const& record : p.records_) {
+			flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
+			flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
+			flyweights.push_back(record.gcindex);
+			flyweights.push_back(record.scindex);
 		}
 
-		return out << "\t\t" << line << "\n\t};";
+		print_table(out, "flyweights", "std::uint_least8_t", "", flyweights, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", pflag_values, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "cflags", "std::uint_least16_t", "", cflag_values, 120, "\t", "\n\t\t");
+		return out;
 	}
 };
 
 void print_unicode_header()
 {
 double log2_block_size = std::ceil(std::log2(static_cast<double>(recordstagetable.block_size)));
-std::size_t const block_shift = static_cast<unsigned int>(std::lrint(log2_block_size));
+std::size_t const block_shift = static_cast<std::size_t>(std::lrint(log2_block_size));
 std::size_t const block_mask = (1u << block_shift) - 1;
 
 std::cout <<
@@ -644,102 +793,73 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #ifndef LUG_UNICODE_HPP__
 #define LUG_UNICODE_HPP__
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 #include <array>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace lug::unicode
 {
-
-// POSIX compatability properties
-enum class ctype : std::uint_least16_t
-{
-)c++";
-auto const& cnames = compatability_property_names;
-auto const cpad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
-for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
-	std::cout << "\t" << std::left << std::setw(cpad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
-std::cout << "\t" << std::left << std::setw(cpad) << "none" << R"c++( = 0
-};
-
-constexpr ctype operator~(ctype x) noexcept { return static_cast<ctype>(~static_cast<std::uint_least16_t>(x)); }
-constexpr ctype operator&(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) & static_cast<std::uint_least16_t>(y)); }
-constexpr ctype operator|(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) | static_cast<std::uint_least16_t>(y)); }
-constexpr ctype operator^(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) ^ static_cast<std::uint_least16_t>(y)); }
-inline ctype operator&=(ctype& x, ctype y) noexcept { return (x = x & y); }
-inline ctype operator|=(ctype& x, ctype y) noexcept { return (x = x | y); }
-inline ctype operator^=(ctype& x, ctype y) noexcept { return (x = x ^ y); }
-
-// Unicode binary properties
-enum class ptype : std::uint_least64_t
-{
-)c++";
-auto const& pnames = binary_property_names;
-auto const ppad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
-for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
-	std::cout << "\t" << std::left << std::setw(ppad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
-std::cout << "\t" << std::left << std::setw(ppad) << "None" << R"c++( = 0
-};
-
-constexpr ptype operator~(ptype x) noexcept { return static_cast<ptype>(~static_cast<std::uint_least64_t>(x)); }
-constexpr ptype operator&(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) & static_cast<std::uint_least64_t>(y)); }
-constexpr ptype operator|(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) | static_cast<std::uint_least64_t>(y)); }
-constexpr ptype operator^(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) ^ static_cast<std::uint_least64_t>(y)); }
-inline ptype operator&=(ptype& x, ptype y) noexcept { return (x = x & y); }
-inline ptype operator|=(ptype& x, ptype y) noexcept { return (x = x | y); }
-inline ptype operator^=(ptype& x, ptype y) noexcept { return (x = x ^ y); }
-
-// Unicode general categories
-enum class gctype : std::uint_least32_t
-{
-)c++";
-auto const& gcnames = general_category_names;
-auto const& gclnames = general_category_long_names;
-auto const gclpad = align_padding(max_element_size(gclnames.cbegin(), gclnames.cend()));
-for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
-	std::cout << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    // " << gclnames[i] << "\n";
-for (auto const& compound : compound_general_categories) {
-	std::cout << "\t" << std::left << std::setw(2) << compound.first << " = ";
-	auto const& components = compound.second.second;
-	int padcount = 0;
-	for (std::size_t i = 0, n = components.size(); i < n; ++i) {
-		std::cout << components[i];
-		padcount += static_cast<int>(components[i].size());
-		if (i < n - 1) {
-			std::cout << "|";
-			++padcount;
+)c++"
+<< "\n"
+<< enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatability properties", [](std::ostream& out) {
+	auto const& cnames = compatability_property_names;
+	auto const cpad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
+	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(cpad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
+	out << "\t" << std::left << std::setw(cpad) << "none" << " = 0\n";
+})
+<< "\n"
+<< enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Unicode binary properties", [](std::ostream& out) {
+	auto const& pnames = binary_property_names;
+	auto const ppad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
+	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(ppad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
+	out << "\t" << std::left << std::setw(ppad) << "None" << " = 0\n";
+})
+<< "\n"
+<< enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "Unicode general categories", [](std::ostream& out) {
+	auto const& gcnames = general_category_names;
+	auto const& gclnames = general_category_long_names;
+	auto const gclpad = align_padding(max_element_size(gclnames.cbegin(), gclnames.cend()));
+	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
+		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    // " << gclnames[i] << "\n";
+	for (auto const& compound : compound_general_categories) {
+		out << "\t" << std::left << std::setw(2) << compound.first << " = ";
+		auto const& components = compound.second.second;
+		int padcount = 0;
+		for (std::size_t i = 0, n = components.size(); i < n; ++i) {
+			out << components[i];
+			padcount += static_cast<int>(components[i].size());
+			if (i < n - 1) {
+				out << "|";
+				++padcount;
+			}
 		}
+		out << "," << std::right << std::setw(24 - padcount) << " // " << compound.second.first << "\n";
 	}
-	std::cout << "," << std::right << std::setw(24 - padcount) << " // " << compound.second.first << "\n";
-}
-for (std::size_t i = 0, n = gclnames.size(); i < n; ++i)
-	std::cout << "\t" << std::left << std::setw(gclpad) << gclnames[i] << " = " << gcnames[i] << ",\n";
-for (auto const& compound : compound_general_categories)
-	std::cout << "\t" << std::left << std::setw(gclpad) << compound.second.first << " = " << compound.first << ",\n";
-std::cout << "\t" << std::left << std::setw(gclpad) << "None" << R"c++( = 0
-};
-
-constexpr gctype operator~(gctype x) noexcept { return static_cast<gctype>(~static_cast<std::uint_least32_t>(x)); }
-constexpr gctype operator&(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) & static_cast<std::uint_least32_t>(y)); }
-constexpr gctype operator|(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) | static_cast<std::uint_least32_t>(y)); }
-constexpr gctype operator^(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) ^ static_cast<std::uint_least32_t>(y)); }
-inline gctype operator&=(gctype& x, gctype y) noexcept { return (x = x & y); }
-inline gctype operator|=(gctype& x, gctype y) noexcept { return (x = x | y); }
-inline gctype operator^=(gctype& x, gctype y) noexcept { return (x = x ^ y); }
-
-// Unicode scripts
-enum class sctype : std::uint_least8_t
-{
-)c++";
-auto const& scnames = script_names;
-auto const scpad = align_padding(max_element_size(scnames.cbegin(), scnames.cend()));
-for (std::size_t i = 0, n = scnames.size(); i < n; ++i)
-	std::cout << "\t" << std::left << std::setw(scpad) << scnames[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
-std::cout << R"c++(};
-
+	for (std::size_t i = 0, n = gclnames.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(gclpad) << gclnames[i] << " = " << gcnames[i] << ",\n";
+	for (auto const& compound : compound_general_categories)
+		out << "\t" << std::left << std::setw(gclpad) << compound.second.first << " = " << compound.first << ",\n";
+	out << "\t" << std::left << std::setw(gclpad) << "None" << " = 0\n";
+})
+<< "\n"
+<< enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Unicode scripts", [](std::ostream& out) {
+	auto const& scnames = script_names;
+	auto const scpad = align_padding(max_element_size(scnames.cbegin(), scnames.cend()));
+	for (std::size_t i = 0, n = scnames.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(scpad) << scnames[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+})
+<< R"c++(
 // Unicode Character Database (UCD) record
 class ucd_record
 {
@@ -762,15 +882,9 @@ public:
 	ptype properties() const noexcept { return static_cast<ptype>(record_->pflags); }
 	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << record_->gcindex); }
 	sctype script() const noexcept { return static_cast<sctype>(record_->scindex); }
-	bool all_of(ctype c) const noexcept { return (compatability() & c) == c; }
-	bool all_of(ptype p) const noexcept { return (properties() & p) == p; }
-	bool all_of(gctype gc) const noexcept { return (general_category() & gc) == gc; }
 	bool any_of(ctype c) const noexcept { return (compatability() & c) != ctype::none; }
 	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
 	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
-	bool none_of(ctype c) const noexcept { return (compatability() & c) == ctype::none; }
-	bool none_of(ptype p) const noexcept { return (properties() & p) == ptype::None; }
-	bool none_of(gctype gc) const noexcept { return (general_category() & gc) == gctype::None; }
 };
 
 // Retrieves the UCD record for the given Unicode codepoint
@@ -785,6 +899,38 @@ inline ucd_record query(char32_t r)
 	return ucd_record{table->records.data() + index};
 }
 
+namespace detail
+{
+
+inline std::string normalize_property_label(std::string_view id)
+{
+	std::string normid;
+	for (char c : id)
+		if (c != ' ' && c != '\t' && c != '_' && c != '-')
+			normid.push_back(static_cast<char>(std::tolower(c)));
+	return normid;
+}
+
+} // namespace detail
+
+)c++" << enum_parser_printer("ctype", "ct", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	labels.reserve(compatability_property_names.size());
+	std::transform(compatability_property_names.begin(), compatability_property_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("ptype", "pt", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	labels.reserve(binary_property_names.size());
+	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
+	return labels;
+})
+<< R"c++(
 namespace detail
 {
 
@@ -807,17 +953,26 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_table()
 {
 )c++"
-	<< rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n\n"
+	<< rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n"
 
-	<< rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << R"c++(
+	<< rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << "\n"
 
-	std::unique_ptr<raw_record_table> table;
+	<< record_flyweight_printer(recordvalues)
+<< R"c++(
+	auto table = std::make_unique<raw_record_table>();
 	detail::run_length_decode(rlestage1.begin(), rlestage1.end(), table->stage1.begin());
 	detail::run_length_decode(rlestage2.begin(), rlestage2.end(), table->stage2.begin());
+	auto& records = table->records;
+	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 4) {
+		records[r].pflags = pflags[flyweights[f + 0]];
+		records[r].cflags = cflags[flyweights[f + 1]];
+		records[r].gcindex = flyweights[f + 2];
+		records[r].scindex = flyweights[f + 3];
+	}
 	return table;
 }
 
-} // namespace lug::unicode"
+} // namespace lug::unicode
 
 #endif
 )c++";

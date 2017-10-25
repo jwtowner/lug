@@ -11,8 +11,6 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -411,19 +409,17 @@ class string_expression
 	struct generator : semantics
 	{
 		instruction_encoder encoder;
-		bool circumflex;
-		std::ctype_base::mask classes;
 		std::vector<std::pair<std::string_view, std::string_view>> ranges;
-		generator(string_expression& se) : encoder{se.instructions_}, circumflex{false}, classes{0} {}
+		unicode::ctype classes = unicode::ctype::none;
+		bool circumflex = false;
+
+		generator(string_expression& se) : encoder{se.instructions_} {}
 
 		void bracket_class(std::string_view s) {
-			using ct = std::ctype_base; static constexpr std::pair<const char* const, int> m[12] = {
-				{"alnum", ct::alnum}, {"alpha", ct::alpha}, {"blank", ct::blank}, {"cntrl", ct::cntrl},
-				{"digit", ct::digit}, {"graph", ct::graph}, {"lower", ct::lower}, {"print", ct::print},
-				{"punct", ct::punct}, {"space", ct::space}, {"upper", ct::upper}, {"xdigit", ct::xdigit}};
-			auto c = std::find_if(std::begin(m), std::end(m), [s](auto& x) { return !s.compare(x.first); });
-			if (c == std::end(m)) throw bad_character_class{};
-			classes |= static_cast<std::ctype_base::mask>(c->second);
+			if (auto c = unicode::stoctype(s); c.has_value())
+				classes |= c.value();
+			else
+				throw bad_character_class{};
 		}
 
 		void bracket_range(std::string_view s) {
@@ -458,15 +454,15 @@ class string_expression
 				}
 			}
 			if (circumflex)
-				encoder.encode(opcode::choice, 3 + matches.size() + (classes ? 1 : 0));
+				encoder.encode(opcode::choice, 3 + matches.size() + (classes != unicode::ctype::none ? 1 : 0));
 			encoder.append(matches.begin(), matches.end());
-			if (classes)
+			if (classes != unicode::ctype::none)
 				encoder.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
 				encoder.encode(opcode::commit, 0).encode(opcode::fail).encode(opcode::match_any);
-			circumflex = false;
-			classes = 0;
 			ranges.clear();
+			classes = unicode::ctype::none;
+			circumflex = false;
 		}
 	};
 
