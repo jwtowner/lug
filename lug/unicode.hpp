@@ -121,83 +121,45 @@ inline ptype operator^=(ptype& x, ptype y) noexcept { return (x = x ^ y); }
 // Unicode general categories
 enum class gctype : std::uint_least32_t
 {
-	Ll = UINT32_C(1) <<  0,    // Lowercase_Letter
-	Lm = UINT32_C(1) <<  1,    // Modifier_Letter
-	Lo = UINT32_C(1) <<  2,    // Other_Letter
-	Lt = UINT32_C(1) <<  3,    // Titlecase_Letter
-	Lu = UINT32_C(1) <<  4,    // Uppercase_Letter
-	Mc = UINT32_C(1) <<  5,    // Spacing_Mark
-	Me = UINT32_C(1) <<  6,    // Enclosing_Mark
-	Mn = UINT32_C(1) <<  7,    // Nonspacing_Mark
-	Nd = UINT32_C(1) <<  8,    // Decimal_Number
-	Nl = UINT32_C(1) <<  9,    // Letter_Number
-	No = UINT32_C(1) << 10,    // Other_Number
-	Pc = UINT32_C(1) << 11,    // Connector_Punctuation
-	Pd = UINT32_C(1) << 12,    // Dash_Punctuation
-	Pe = UINT32_C(1) << 13,    // Close_Punctuation
-	Pf = UINT32_C(1) << 14,    // Final_Punctuation
-	Pi = UINT32_C(1) << 15,    // Initial_Punctuation
-	Po = UINT32_C(1) << 16,    // Other_Punctuation
-	Ps = UINT32_C(1) << 17,    // Open_Punctuation
-	Sc = UINT32_C(1) << 18,    // Currency_Symbol
-	Sk = UINT32_C(1) << 19,    // Modifier_Symbol
-	Sm = UINT32_C(1) << 20,    // Mathematical_Symbol
-	So = UINT32_C(1) << 21,    // Other_Symbol
-	Zl = UINT32_C(1) << 22,    // Line_Separator
-	Zp = UINT32_C(1) << 23,    // Paragraph_Separator
-	Zs = UINT32_C(1) << 24,    // Space_Separator
-	Cc = UINT32_C(1) << 25,    // Control
-	Cf = UINT32_C(1) << 26,    // Format
-	Cn = UINT32_C(1) << 27,    // Unassigned
-	Co = UINT32_C(1) << 28,    // Private_Use
-	Cs = UINT32_C(1) << 29,    // Surrogate
-	C  = Cc|Cf|Cn|Co|Cs,       // Other
-	L  = Lu|Ll|Lt|Lm|Lo,       // Letter
-	LC = Lu|Ll|Lt,             // Cased_Letter
-	M  = Mc|Me|Mn,             // Mark
-	N  = Nd|Nl|No,             // Number
-	P  = Pc|Pd|Pe|Pf|Pi|Po|Ps, // Punctuation
-	S  = Sc|Sm|Sk|So,          // Symbol
-	Z  = Zl|Zp|Zs,             // Separator
-	Lowercase_Letter         = Ll,
-	Modifier_Letter          = Lm,
-	Other_Letter             = Lo,
-	Titlecase_Letter         = Lt,
-	Uppercase_Letter         = Lu,
-	Spacing_Mark             = Mc,
-	Enclosing_Mark           = Me,
-	Nonspacing_Mark          = Mn,
-	Decimal_Number           = Nd,
-	Letter_Number            = Nl,
-	Other_Number             = No,
-	Connector_Punctuation    = Pc,
-	Dash_Punctuation         = Pd,
-	Close_Punctuation        = Pe,
-	Final_Punctuation        = Pf,
-	Initial_Punctuation      = Pi,
-	Other_Punctuation        = Po,
-	Open_Punctuation         = Ps,
-	Currency_Symbol          = Sc,
-	Modifier_Symbol          = Sk,
-	Mathematical_Symbol      = Sm,
-	Other_Symbol             = So,
-	Line_Separator           = Zl,
-	Paragraph_Separator      = Zp,
-	Space_Separator          = Zs,
-	Control                  = Cc,
-	Format                   = Cf,
-	Unassigned               = Cn,
-	Private_Use              = Co,
-	Surrogate                = Cs,
-	Other                    = C,
-	Letter                   = L,
-	Cased_Letter             = LC,
-	Mark                     = M,
-	Number                   = N,
-	Punctuation              = P,
-	Symbol                   = S,
-	Separator                = Z,
-	None                     = 0
+	Ll = UINT32_C(1) <<  0,    Lowercase_Letter = Ll,
+	Lm = UINT32_C(1) <<  1,    Modifier_Letter = Lm,
+	Lo = UINT32_C(1) <<  2,    Other_Letter = Lo,
+	Lt = UINT32_C(1) <<  3,    Titlecase_Letter = Lt,
+	Lu = UINT32_C(1) <<  4,    Uppercase_Letter = Lu,
+	Mc = UINT32_C(1) <<  5,    Spacing_Mark = Mc,
+	Me = UINT32_C(1) <<  6,    Enclosing_Mark = Me,
+	Mn = UINT32_C(1) <<  7,    Nonspacing_Mark = Mn,
+	Nd = UINT32_C(1) <<  8,    Decimal_Number = Nd,
+	Nl = UINT32_C(1) <<  9,    Letter_Number = Nl,
+	No = UINT32_C(1) << 10,    Other_Number = No,
+	Pc = UINT32_C(1) << 11,    Connector_Punctuation = Pc,
+	Pd = UINT32_C(1) << 12,    Dash_Punctuation = Pd,
+	Pe = UINT32_C(1) << 13,    Close_Punctuation = Pe,
+	Pf = UINT32_C(1) << 14,    Final_Punctuation = Pf,
+	Pi = UINT32_C(1) << 15,    Initial_Punctuation = Pi,
+	Po = UINT32_C(1) << 16,    Other_Punctuation = Po,
+	Ps = UINT32_C(1) << 17,    Open_Punctuation = Ps,
+	Sc = UINT32_C(1) << 18,    Currency_Symbol = Sc,
+	Sk = UINT32_C(1) << 19,    Modifier_Symbol = Sk,
+	Sm = UINT32_C(1) << 20,    Mathematical_Symbol = Sm,
+	So = UINT32_C(1) << 21,    Other_Symbol = So,
+	Zl = UINT32_C(1) << 22,    Line_Separator = Zl,
+	Zp = UINT32_C(1) << 23,    Paragraph_Separator = Zp,
+	Zs = UINT32_C(1) << 24,    Space_Separator = Zs,
+	Cc = UINT32_C(1) << 25,    Control = Cc,
+	Cf = UINT32_C(1) << 26,    Format = Cf,
+	Cn = UINT32_C(1) << 27,    Unassigned = Cn,
+	Co = UINT32_C(1) << 28,    Private_Use = Co,
+	Cs = UINT32_C(1) << 29,    Surrogate = Cs,
+	C  = Cc|Cf|Cn|Co|Cs,       Other = C,
+	L  = Lu|Ll|Lt|Lm|Lo,       Letter = L,
+	LC = Lu|Ll|Lt,             Cased_Letter = LC,
+	M  = Mc|Me|Mn,             Mark = M,
+	N  = Nd|Nl|No,             Number = N,
+	P  = Pc|Pd|Pe|Pf|Pi|Po|Ps, Punctuation = P,
+	S  = Sc|Sm|Sk|So,          Symbol = S,
+	Z  = Zl|Zp|Zs,             Separator = Z,
+	None = 0
 };
 
 constexpr gctype operator~(gctype x) noexcept { return static_cast<gctype>(~static_cast<std::uint_least32_t>(x)); }
@@ -462,6 +424,95 @@ inline std::optional<ptype> stoptype(std::string_view s)
 	auto l = detail::normalize_property_label(s);
 	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<ptype>{static_cast<ptype>(c->second)} : std::nullopt;
+}
+
+// Convert from text to gctype property
+inline std::optional<gctype> stogctype(std::string_view s)
+{
+	using namespace std::string_view_literals;
+	using gc = gctype;
+
+	static constexpr std::array<std::pair<std::string_view, gctype>, 60> labels =
+	{ {
+		{ "cc"sv, gc::Cc }, { "cf"sv, gc::Cf }, { "closepunctuation"sv, gc::Pe }, { "cn"sv, gc::Cn }, { "co"sv, gc::Co },
+		{ "connectorpunctuation"sv, gc::Pc }, { "control"sv, gc::Cc }, { "cs"sv, gc::Cs }, { "currencysymbol"sv, gc::Sc },
+		{ "dashpunctuation"sv, gc::Pd }, { "decimalnumber"sv, gc::Nd }, { "enclosingmark"sv, gc::Me },
+		{ "finalpunctuation"sv, gc::Pf }, { "format"sv, gc::Cf }, { "initialpunctuation"sv, gc::Pi },
+		{ "letternumber"sv, gc::Nl }, { "lineseparator"sv, gc::Zl }, { "ll"sv, gc::Ll }, { "lm"sv, gc::Lm }, { "lo"sv, gc::Lo },
+		{ "lowercaseletter"sv, gc::Ll }, { "lt"sv, gc::Lt }, { "lu"sv, gc::Lu }, { "mathematicalsymbol"sv, gc::Sm },
+		{ "mc"sv, gc::Mc }, { "me"sv, gc::Me }, { "mn"sv, gc::Mn }, { "modifierletter"sv, gc::Lm },
+		{ "modifiersymbol"sv, gc::Sk }, { "nd"sv, gc::Nd }, { "nl"sv, gc::Nl }, { "no"sv, gc::No },
+		{ "nonspacingmark"sv, gc::Mn }, { "openpunctuation"sv, gc::Ps }, { "otherletter"sv, gc::Lo },
+		{ "othernumber"sv, gc::No }, { "otherpunctuation"sv, gc::Po }, { "othersymbol"sv, gc::So },
+		{ "paragraphseparator"sv, gc::Zp }, { "pc"sv, gc::Pc }, { "pd"sv, gc::Pd }, { "pe"sv, gc::Pe }, { "pf"sv, gc::Pf },
+		{ "pi"sv, gc::Pi }, { "po"sv, gc::Po }, { "privateuse"sv, gc::Co }, { "ps"sv, gc::Ps }, { "sc"sv, gc::Sc },
+		{ "sk"sv, gc::Sk }, { "sm"sv, gc::Sm }, { "so"sv, gc::So }, { "spaceseparator"sv, gc::Zs }, { "spacingmark"sv, gc::Mc },
+		{ "surrogate"sv, gc::Cs }, { "titlecaseletter"sv, gc::Lt }, { "unassigned"sv, gc::Cn }, { "uppercaseletter"sv, gc::Lu },
+		{ "zl"sv, gc::Zl }, { "zp"sv, gc::Zp }, { "zs"sv, gc::Zs }
+	} };
+
+	auto l = detail::normalize_property_label(s);
+	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	return c != labels.end() && c->first == l ? std::optional<gctype>{static_cast<gctype>(c->second)} : std::nullopt;
+}
+
+// Convert from text to sctype property
+inline std::optional<sctype> stosctype(std::string_view s)
+{
+	using namespace std::string_view_literals;
+	using sc = sctype;
+
+	static constexpr std::array<std::pair<std::string_view, sctype>, 142> labels =
+	{ {
+		{ "adlam"sv, sc::Adlam }, { "ahom"sv, sc::Ahom }, { "anatolianhieroglyphs"sv, sc::Anatolian_Hieroglyphs },
+		{ "arabic"sv, sc::Arabic }, { "armenian"sv, sc::Armenian }, { "avestan"sv, sc::Avestan }, { "balinese"sv, sc::Balinese },
+		{ "bamum"sv, sc::Bamum }, { "bassavah"sv, sc::Bassa_Vah }, { "batak"sv, sc::Batak }, { "bengali"sv, sc::Bengali },
+		{ "bhaiksuki"sv, sc::Bhaiksuki }, { "bopomofo"sv, sc::Bopomofo }, { "brahmi"sv, sc::Brahmi },
+		{ "braille"sv, sc::Braille }, { "buginese"sv, sc::Buginese }, { "buhid"sv, sc::Buhid },
+		{ "canadianaboriginal"sv, sc::Canadian_Aboriginal }, { "carian"sv, sc::Carian },
+		{ "caucasianalbanian"sv, sc::Caucasian_Albanian }, { "chakma"sv, sc::Chakma }, { "cham"sv, sc::Cham },
+		{ "cherokee"sv, sc::Cherokee }, { "common"sv, sc::Common }, { "coptic"sv, sc::Coptic }, { "cuneiform"sv, sc::Cuneiform },
+		{ "cypriot"sv, sc::Cypriot }, { "cyrillic"sv, sc::Cyrillic }, { "deseret"sv, sc::Deseret },
+		{ "devanagari"sv, sc::Devanagari }, { "duployan"sv, sc::Duployan },
+		{ "egyptianhieroglyphs"sv, sc::Egyptian_Hieroglyphs }, { "elbasan"sv, sc::Elbasan }, { "ethiopic"sv, sc::Ethiopic },
+		{ "georgian"sv, sc::Georgian }, { "glagolitic"sv, sc::Glagolitic }, { "gothic"sv, sc::Gothic },
+		{ "grantha"sv, sc::Grantha }, { "greek"sv, sc::Greek }, { "gujarati"sv, sc::Gujarati }, { "gurmukhi"sv, sc::Gurmukhi },
+		{ "han"sv, sc::Han }, { "hangul"sv, sc::Hangul }, { "hanunoo"sv, sc::Hanunoo }, { "hatran"sv, sc::Hatran },
+		{ "hebrew"sv, sc::Hebrew }, { "hiragana"sv, sc::Hiragana }, { "imperialaramaic"sv, sc::Imperial_Aramaic },
+		{ "inherited"sv, sc::Inherited }, { "inscriptionalpahlavi"sv, sc::Inscriptional_Pahlavi },
+		{ "inscriptionalparthian"sv, sc::Inscriptional_Parthian }, { "javanese"sv, sc::Javanese }, { "kaithi"sv, sc::Kaithi },
+		{ "kannada"sv, sc::Kannada }, { "katakana"sv, sc::Katakana }, { "kayahli"sv, sc::Kayah_Li },
+		{ "kharoshthi"sv, sc::Kharoshthi }, { "khmer"sv, sc::Khmer }, { "khojki"sv, sc::Khojki },
+		{ "khudawadi"sv, sc::Khudawadi }, { "lao"sv, sc::Lao }, { "latin"sv, sc::Latin }, { "lepcha"sv, sc::Lepcha },
+		{ "limbu"sv, sc::Limbu }, { "lineara"sv, sc::Linear_A }, { "linearb"sv, sc::Linear_B }, { "lisu"sv, sc::Lisu },
+		{ "lycian"sv, sc::Lycian }, { "lydian"sv, sc::Lydian }, { "mahajani"sv, sc::Mahajani }, { "malayalam"sv, sc::Malayalam },
+		{ "mandaic"sv, sc::Mandaic }, { "manichaean"sv, sc::Manichaean }, { "marchen"sv, sc::Marchen },
+		{ "masaramgondi"sv, sc::Masaram_Gondi }, { "meeteimayek"sv, sc::Meetei_Mayek }, { "mendekikakui"sv, sc::Mende_Kikakui },
+		{ "meroiticcursive"sv, sc::Meroitic_Cursive }, { "meroitichieroglyphs"sv, sc::Meroitic_Hieroglyphs },
+		{ "miao"sv, sc::Miao }, { "modi"sv, sc::Modi }, { "mongolian"sv, sc::Mongolian }, { "mro"sv, sc::Mro },
+		{ "multani"sv, sc::Multani }, { "myanmar"sv, sc::Myanmar }, { "nabataean"sv, sc::Nabataean }, { "newa"sv, sc::Newa },
+		{ "newtailue"sv, sc::New_Tai_Lue }, { "nko"sv, sc::Nko }, { "nushu"sv, sc::Nushu }, { "ogham"sv, sc::Ogham },
+		{ "olchiki"sv, sc::Ol_Chiki }, { "oldhungarian"sv, sc::Old_Hungarian }, { "olditalic"sv, sc::Old_Italic },
+		{ "oldnortharabian"sv, sc::Old_North_Arabian }, { "oldpermic"sv, sc::Old_Permic }, { "oldpersian"sv, sc::Old_Persian },
+		{ "oldsoutharabian"sv, sc::Old_South_Arabian }, { "oldturkic"sv, sc::Old_Turkic }, { "oriya"sv, sc::Oriya },
+		{ "osage"sv, sc::Osage }, { "osmanya"sv, sc::Osmanya }, { "pahawhhmong"sv, sc::Pahawh_Hmong },
+		{ "palmyrene"sv, sc::Palmyrene }, { "paucinhau"sv, sc::Pau_Cin_Hau }, { "phagspa"sv, sc::Phags_Pa },
+		{ "phoenician"sv, sc::Phoenician }, { "psalterpahlavi"sv, sc::Psalter_Pahlavi }, { "rejang"sv, sc::Rejang },
+		{ "runic"sv, sc::Runic }, { "samaritan"sv, sc::Samaritan }, { "saurashtra"sv, sc::Saurashtra },
+		{ "sharada"sv, sc::Sharada }, { "shavian"sv, sc::Shavian }, { "siddham"sv, sc::Siddham },
+		{ "signwriting"sv, sc::SignWriting }, { "sinhala"sv, sc::Sinhala }, { "sorasompeng"sv, sc::Sora_Sompeng },
+		{ "soyombo"sv, sc::Soyombo }, { "sundanese"sv, sc::Sundanese }, { "sylotinagri"sv, sc::Syloti_Nagri },
+		{ "syriac"sv, sc::Syriac }, { "tagalog"sv, sc::Tagalog }, { "tagbanwa"sv, sc::Tagbanwa }, { "taile"sv, sc::Tai_Le },
+		{ "taitham"sv, sc::Tai_Tham }, { "taiviet"sv, sc::Tai_Viet }, { "takri"sv, sc::Takri }, { "tamil"sv, sc::Tamil },
+		{ "tangut"sv, sc::Tangut }, { "telugu"sv, sc::Telugu }, { "thaana"sv, sc::Thaana }, { "thai"sv, sc::Thai },
+		{ "tibetan"sv, sc::Tibetan }, { "tifinagh"sv, sc::Tifinagh }, { "tirhuta"sv, sc::Tirhuta },
+		{ "ugaritic"sv, sc::Ugaritic }, { "unknown"sv, sc::Unknown }, { "vai"sv, sc::Vai }, { "warangciti"sv, sc::Warang_Citi },
+		{ "yi"sv, sc::Yi }, { "zanabazarsquare"sv, sc::Zanabazar_Square }
+	} };
+
+	auto l = detail::normalize_property_label(s);
+	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	return c != labels.end() && c->first == l ? std::optional<sctype>{static_cast<sctype>(c->second)} : std::nullopt;
 }
 
 namespace detail

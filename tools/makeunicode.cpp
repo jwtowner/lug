@@ -832,7 +832,7 @@ namespace lug::unicode
 	auto const& gclnames = general_category_long_names;
 	auto const gclpad = align_padding(max_element_size(gclnames.cbegin(), gclnames.cend()));
 	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
-		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    // " << gclnames[i] << "\n";
+		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    " << gclnames[i] << " = " << gcnames[i] << ",\n";
 	for (auto const& compound : compound_general_categories) {
 		out << "\t" << std::left << std::setw(2) << compound.first << " = ";
 		auto const& components = compound.second.second;
@@ -845,13 +845,9 @@ namespace lug::unicode
 				++padcount;
 			}
 		}
-		out << "," << std::right << std::setw(24 - padcount) << " // " << compound.second.first << "\n";
+		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << ",\n";
 	}
-	for (std::size_t i = 0, n = gclnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(gclpad) << gclnames[i] << " = " << gcnames[i] << ",\n";
-	for (auto const& compound : compound_general_categories)
-		out << "\t" << std::left << std::setw(gclpad) << compound.second.first << " = " << compound.first << ",\n";
-	out << "\t" << std::left << std::setw(gclpad) << "None" << " = 0\n";
+	out << "\t" << "None = 0\n";
 })
 << "\n"
 << enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Unicode scripts", [](std::ostream& out) {
@@ -917,18 +913,34 @@ inline std::string normalize_property_label(std::string_view id)
 )c++" << enum_parser_printer("ctype", "ct", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
 	labels.reserve(compatibility_property_names.size());
-	std::transform(compatibility_property_names.begin(), compatibility_property_names.end(), std::back_inserter(labels), [](auto& label) {
-		return std::make_pair(normalize_property_label(label), label);
-	});
+	std::transform(compatibility_property_names.begin(), compatibility_property_names.end(), std::back_inserter(labels),
+			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
 	return labels;
 })
 << "\n"
 << enum_parser_printer("ptype", "pt", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
 	labels.reserve(binary_property_names.size());
-	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels), [](auto& label) {
-		return std::make_pair(normalize_property_label(label), label);
-	});
+	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels),
+			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("gctype", "gc", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	labels.reserve(general_category_names.size());
+	for (std::size_t i = 0, n = general_category_names.size(); i < n; ++i) {
+		labels.emplace_back(normalize_property_label(general_category_names[i]), general_category_names[i]);
+		labels.emplace_back(normalize_property_label(general_category_long_names[i]), general_category_names[i]);
+	}
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("sctype", "sc", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	labels.reserve(script_names.size());
+	std::transform(script_names.begin(), script_names.end(), std::back_inserter(labels),
+			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
 	return labels;
 })
 << R"c++(
