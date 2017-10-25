@@ -122,7 +122,7 @@ static std::vector<std::string> const binary_property_names =
 	"Any", "Ascii", "Assigned",
 	// PropList.txt
 	"White_Space", "Bidi_Control", "Join_Control", "Dash", "Quotation_Mark", "Terminal_Punctuation",
-	"Other_Math", "Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
+	"Other_Math", "Hex_Digit", "ASCII_Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
 	"Other_Lowercase", "Other_Uppercase", "Noncharacter_Code_Point", "Other_Grapheme_Extend",
 	"IDS_Binary_Operator", "IDS_Ternary_Operator", "Radical", "Unified_Ideograph",
 	"Other_Default_Ignorable_Code_Point", "Soft_Dotted", "Logical_Order_Exception", "Other_ID_Start",
@@ -210,7 +210,7 @@ static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(
 template <class T> using ucd_array = std::array<T, 0x110000>;
 static ucd_array<std::uint_least64_t> ptable; // Binary Properties table
 static ucd_array<std::uint_least16_t> ctable; // POSIX Compatibility table
-static ucd_array<std::uint_least8_t> gctable; // GeneralCategory table
+static ucd_array<std::uint_least8_t> gctable; // General Category table
 static ucd_array<std::uint_least8_t> sctable; // Script table
 
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
@@ -912,7 +912,6 @@ inline std::string normalize_property_label(std::string_view id)
 
 )c++" << enum_parser_printer("ctype", "ct", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	labels.reserve(compatibility_property_names.size());
 	std::transform(compatibility_property_names.begin(), compatibility_property_names.end(), std::back_inserter(labels),
 			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
 	return labels;
@@ -920,7 +919,6 @@ inline std::string normalize_property_label(std::string_view id)
 << "\n"
 << enum_parser_printer("ptype", "pt", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	labels.reserve(binary_property_names.size());
 	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels),
 			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
 	return labels;
@@ -928,7 +926,6 @@ inline std::string normalize_property_label(std::string_view id)
 << "\n"
 << enum_parser_printer("gctype", "gc", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	labels.reserve(general_category_names.size());
 	for (std::size_t i = 0, n = general_category_names.size(); i < n; ++i) {
 		labels.emplace_back(normalize_property_label(general_category_names[i]), general_category_names[i]);
 		labels.emplace_back(normalize_property_label(general_category_long_names[i]), general_category_names[i]);
@@ -938,7 +935,6 @@ inline std::string normalize_property_label(std::string_view id)
 << "\n"
 << enum_parser_printer("sctype", "sc", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	labels.reserve(script_names.size());
 	std::transform(script_names.begin(), script_names.end(), std::back_inserter(labels),
 			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
 	return labels;

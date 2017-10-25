@@ -1,7 +1,7 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
-//
+
 // Based on the Flexible and Economical UTF-8 Decoder by Bjoern Hoehrmann
 // Copyright (c) 2008-2010 Bjoern Hoehrmann <bjoern@hoehrmann.de>
 // See LICENSE.md file or http://bjoern.hoehrmann.de/utf-8/decoder/dfa/
