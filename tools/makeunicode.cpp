@@ -169,12 +169,12 @@ static std::map<std::string, std::pair<std::string_view, std::vector<std::string
 
 static auto const general_categories = build_namemap<enum_type::index, std::uint_least8_t>(general_category_names);
 
-static std::vector<std::string> const compatability_property_names =
+static std::vector<std::string> const compatibility_property_names =
 {
 	"alpha", "lower", "upper", "punct", "digit", "xdigit", "alnum", "space", "blank", "cntrl", "graph", "print", "word"
 };
 
-static auto const compatability_properties = build_namemap<enum_type::bitfield, std::uint_least16_t>(compatability_property_names);
+static auto const compatibility_properties = build_namemap<enum_type::bitfield, std::uint_least16_t>(compatibility_property_names);
 
 static std::vector<std::string> const script_names =
 {
@@ -209,7 +209,7 @@ static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(
 
 template <class T> using ucd_array = std::array<T, 0x110000>;
 static ucd_array<std::uint_least64_t> ptable; // Binary Properties table
-static ucd_array<std::uint_least16_t> ctable; // POSIX Compatability table
+static ucd_array<std::uint_least16_t> ctable; // POSIX Compatibility table
 static ucd_array<std::uint_least8_t> gctable; // GeneralCategory table
 static ucd_array<std::uint_least8_t> sctable; // Script table
 
@@ -280,7 +280,7 @@ compat_filter make_bitfield_compat_filter(NameMap const& namemap, std::initializ
 
 compat_filter make_compat_filter(std::initializer_list<std::string> names)
 {
-	return make_bitfield_compat_filter<compat_filter_arg::cflags>(compatability_properties, std::move(names));
+	return make_bitfield_compat_filter<compat_filter_arg::cflags>(compatibility_properties, std::move(names));
 }
 
 compat_filter make_binary_prop_compat_filter(std::initializer_list<std::string> names)
@@ -335,7 +335,7 @@ void read_and_build_tables()
 			});
 		});
 
-		// setup compatability filter maps while reading tables, see Unicode TR#18,
+		// setup compatibility filter maps while reading tables, see Unicode TR#18,
 		// Annex C: Compatibility Properties
 		using compat_filter_map = std::unordered_map<std::string, std::vector<compat_filter>>;
 
@@ -362,7 +362,7 @@ void read_and_build_tables()
 		};
 
 		// make sure reading of ptable and gctable is complete, as they're
-		// needed to build the compatability property table
+		// needed to build the compatibility property table
 		auto prop_versions = pending_prop_versions.get();
 		prop_versions.push_back(pending_gcversion.get());
 
@@ -374,7 +374,7 @@ void read_and_build_tables()
 				ptable[i] |= passignedflag;
 
 		// manually set extra properties for tab character
-		ctable[0x09] = compatability_properties.find("blank")->second | compatability_properties.find("print")->second;
+		ctable[0x09] = compatibility_properties.find("blank")->second | compatibility_properties.find("print")->second;
 
 		// derive compatibility table by filtering through ptable and gctable
 		std::for_each(
@@ -383,8 +383,8 @@ void read_and_build_tables()
 			make_integer_iterator(ctable.size()),
 			[&](auto i) {
 				auto args = std::make_tuple(ctable[i], ptable[i], gctable[i]);
-				for (std::size_t j = 0, n = compatability_property_names.size(); j < n; ++j) {
-					auto cname = compatability_property_names[j];
+				for (std::size_t j = 0, n = compatibility_property_names.size(); j < n; ++j) {
+					auto cname = compatibility_property_names[j];
 					auto cflag = std::uint_least16_t{1} << j;
 					for (auto const& include : compat_prop_includes[cname])
 						if (include(args))
@@ -811,8 +811,8 @@ namespace lug::unicode
 {
 )c++"
 << "\n"
-<< enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatability properties", [](std::ostream& out) {
-	auto const& cnames = compatability_property_names;
+<< enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatibility properties", [](std::ostream& out) {
+	auto const& cnames = compatibility_property_names;
 	auto const cpad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
 	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
 		out << "\t" << std::left << std::setw(cpad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
@@ -879,11 +879,11 @@ class ucd_record
 	static std::unique_ptr<raw_record_table> decompress_table();
 	friend ucd_record query(char32_t r);
 public:
-	ctype compatability() const noexcept { return static_cast<ctype>(record_->cflags); }
+	ctype compatibility() const noexcept { return static_cast<ctype>(record_->cflags); }
 	ptype properties() const noexcept { return static_cast<ptype>(record_->pflags); }
 	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << record_->gcindex); }
 	sctype script() const noexcept { return static_cast<sctype>(record_->scindex); }
-	bool any_of(ctype c) const noexcept { return (compatability() & c) != ctype::none; }
+	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
 	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
 	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
 };
@@ -916,8 +916,8 @@ inline std::string normalize_property_label(std::string_view id)
 
 )c++" << enum_parser_printer("ctype", "ct", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	labels.reserve(compatability_property_names.size());
-	std::transform(compatability_property_names.begin(), compatability_property_names.end(), std::back_inserter(labels), [](auto& label) {
+	labels.reserve(compatibility_property_names.size());
+	std::transform(compatibility_property_names.begin(), compatibility_property_names.end(), std::back_inserter(labels), [](auto& label) {
 		return std::make_pair(normalize_property_label(label), label);
 	});
 	return labels;

@@ -25,7 +25,7 @@
 namespace lug::unicode
 {
 
-// POSIX compatability properties
+// POSIX compatibility properties
 enum class ctype : std::uint_least16_t
 {
 	alpha    = UINT16_C(1) <<  0,
@@ -373,11 +373,11 @@ class ucd_record
 	static std::unique_ptr<raw_record_table> decompress_table();
 	friend ucd_record query(char32_t r);
 public:
-	ctype compatability() const noexcept { return static_cast<ctype>(record_->cflags); }
+	ctype compatibility() const noexcept { return static_cast<ctype>(record_->cflags); }
 	ptype properties() const noexcept { return static_cast<ptype>(record_->pflags); }
 	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << record_->gcindex); }
 	sctype script() const noexcept { return static_cast<sctype>(record_->scindex); }
-	bool any_of(ctype c) const noexcept { return (compatability() & c) != ctype::none; }
+	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
 	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
 	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
 };
