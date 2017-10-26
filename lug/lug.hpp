@@ -65,11 +65,6 @@ struct reentrancy_sentinel
 
 } // namespace detail
 
-enum class immediate : unsigned short {};
-enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, altcode = 0x3f };
-constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
-constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
-
 enum class opcode : unsigned char
 {
 	match,          match_any,      match_class,    match_range,
@@ -84,6 +79,12 @@ enum class altcode : unsigned char
 	commit_back = 1,                commit_partial = 2,
 	match_class_ptype = 1,          match_class_gctype = 2,         match_class_sctype = 3
 };
+
+enum class immediate : unsigned short {};
+enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, altcode = 0x3f };
+constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
+constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
+constexpr operands to_operands(altcode alt) noexcept { return static_cast<operands>(alt) & operands::altcode; }
 
 union instruction
 {
@@ -304,7 +305,7 @@ public:
 	encoder& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
 	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
-	encoder& encode(opcode op, altcode alt, immediate imm = immediate{0}) { return append(instruction{op, static_cast<operands>(alt) & operands::altcode, imm}); }
+	encoder& encode(opcode op, altcode alt, immediate imm = immediate{0}) { return append(instruction{op, to_operands(alt), imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, semantic_capture a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
@@ -321,6 +322,10 @@ public:
 			do_add_callee(&r, &r.program_, length());
 			return encode(opcode::call, 0, immediate{prec});
 		}
+	}
+
+	encoder& encode(opcode op, altcode alt, std::ptrdiff_t off, immediate imm = immediate{0}) {
+		return append(instruction{op, operands::off | to_operands(alt), imm}).append(instruction{off});
 	}
 
 	encoder& encode(opcode op, std::size_t val, std::string_view subsequence) {
@@ -530,52 +535,45 @@ using lug::grammar; using lug::rule; using lug::start;
 using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator!(const E& e) {
-	return [x = make_expression(e)](encoder& d) { d.encode(opcode::choice, 1 + d.evaluate_length(x)).evaluate(x).encode(opcode::fail, immediate{1}); };
-}
-
+constexpr auto operator!(const E& e) { return [x = make_expression(e)](encoder& d) {
+		d.encode(opcode::choice, 1 + d.evaluate_length(x)).evaluate(x).encode(opcode::fail, immediate{1}); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator*(const E& e) {
-	return [x = make_expression(e)](encoder& d) { auto n = d.evaluate_length(x); d.encode(opcode::choice, 2 + n).evaluate(x).encode(opcode::commit, -(4 + n)); };
-}
-
+constexpr auto operator&(const E& e) { return [x = make_expression(e)](encoder& d) {
+		d.encode(opcode::choice, 2 + d.evaluate_length(x)).evaluate(x).encode(opcode::commit, altcode::commit_back, 1).encode(opcode::fail); }; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>>
+constexpr auto operator*(const E& e) { return [x = make_expression(e)](encoder& d) { auto n = d.evaluate_length(x);
+		d.encode(opcode::choice, 2 + n).evaluate(x).encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator|(const E1& e1, const E2& e2) {
-	return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
-		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2); };
-}
-
+constexpr auto operator|(const E1& e1, const E2& e2) { return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
+		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator>(const E1& e1, const E2& e2) {
-	return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(e2); };
-}
+constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) {
+		d.evaluate(e1).evaluate(e2); }; }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(const E& e, A a) {
-	if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
+	if constexpr (std::is_invocable_v<A, semantics&, syntax>)
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.encode(opcode::begin_capture).evaluate(e).encode(opcode::end_capture, semantic_capture{a}); };
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
+	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>)
 		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
-	} else if constexpr (std::is_invocable_v<A, semantics&>) {
+	else if constexpr (std::is_invocable_v<A, semantics&>)
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, semantic_action{a}); };
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
+	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>)
 		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
-	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
+	else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>)
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); }); };
-	} else if constexpr (std::is_invocable_v<A>) {
+	else if constexpr (std::is_invocable_v<A>)
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); }); };
-	}
 }
 
-template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
-template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator&(const E& e) { return !(!e); }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator+(const E& e) { auto x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator~(const E& e) { return e | eps; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e) { return cut > e; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e > cut; }
+template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
+template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
+inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
 
 } // namespace language
 
@@ -781,8 +779,13 @@ public:
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
 					switch (alt) {
-						case altcode::commit_partial: backtrack_stack_.back().second = input_state_; break;
-						case altcode::commit_back: input_state_ = backtrack_stack_.back().second; [[fallthrough]];
+						case altcode::commit_partial: {
+							backtrack_stack_.back().second = {ir, cr, lr};
+						} break;
+						case altcode::commit_back: {
+							auto const& instate = backtrack_stack_.back().second;
+							ir = instate.index, cr = instate.position.column, lr = instate.position.line;
+						} [[fallthrough]];
 						default: pop_stack_frame(backtrack_stack_); break;
 					}
 				} [[fallthrough]];

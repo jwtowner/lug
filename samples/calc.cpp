@@ -15,36 +15,35 @@ namespace samples::calc
 	variable<int> i{Sema};
 	double variables[26];
 
-	rule _		= *"[ \t]"s;
+	rule EOL	= lexeme[ "\n"s | "\r\n" | "\r" | ";" ];
 
-	rule EOL	= "\n"s | "\r\n" | "\r" | ";";
+	rule ID		= lexeme[ m<< "[a-z]"s       <[]() -> int { return m->at(0) - 'a'; } ];
 
-	rule ID		= m<< "[a-z]"s > _           <[]()->int{ return m->at(0) - 'a'; };
-
-	rule NUMBER = m<< (~"[-+]"s > +"[0-9]"s
-				> ~("[.]"s > +"[0-9]"s)) > _ <[]{ return std::stod(std::string{*m}); };
+	rule NUMBER = lexeme[
+				m<< (~"[-+]"s > +"[0-9]"s
+				> ~("[.]"s > +"[0-9]"s))     <[]{ return std::stod(std::string{*m}); } ];
 
 	extern rule Expr;
 
 	rule Value	= n%NUMBER                   <[]{ return *n; }
-				| i%ID > !( "=" > _ )        <[]{ return variables[*i]; }
-				| "(" > _ > e%Expr > ")" > _ <[]{ return *e; };
+				| i%ID > !"="s               <[]{ return variables[*i]; }
+				| "(" > e%Expr > ")"         <[]{ return *e; };
 
 	rule Prod	= l%Value > *(
-				      "*" > _ > r%Value      <[]{ *l *= *r; }
-				    | "/" > _ > r%Value      <[]{ *l /= *r; }
+				      "*" > r%Value          <[]{ *l *= *r; }
+				    | "/" > r%Value          <[]{ *l /= *r; }
 				)                            <[]{ return *l; };
 
 	rule Sum	= l%Prod > *(
-				      "+" > _ > r%Prod       <[]{ *l += *r; }
-				    | "-" > _ > r%Prod       <[]{ *l -= *r; }
+				      "+" > r%Prod           <[]{ *l += *r; }
+				    | "-" > r%Prod           <[]{ *l -= *r; }
 				)                            <[]{ return *l; };
 
-	rule Expr	= i%ID > "=" > _ > s%Sum     <[]{ return variables[*i] = *s; }
+	rule Expr	= i%ID > "=" > s%Sum         <[]{ return variables[*i] = *s; }
 				| s%Sum                      <[]{ return *s; };
 	
-	rule Stmt	= _ > (
-				      "quit" > _             <[]{ std::exit(EXIT_SUCCESS); }
+	rule Stmt	= (
+				      "quit"                 <[]{ std::exit(EXIT_SUCCESS); }
 				    | e%Expr                 <[]{ std::cout << *e << std::endl; }
 				) > EOL
 				| *( !EOL > "." ) > EOL      <[]{ std::cerr << "syntax error" << std::endl; };
