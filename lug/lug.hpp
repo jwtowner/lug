@@ -732,6 +732,7 @@ public:
 		cut_deferred_ = false;
 		load_registers(ir, cr, lr, ac, pc);
 		while (!done) {
+		restart:
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
 					if (!str.empty()) {
@@ -780,11 +781,12 @@ public:
 						goto failure;
 					switch (alt) {
 						case altcode::commit_partial: {
-							backtrack_stack_.back().second = {ir, cr, lr};
+							auto& frame = backtrack_stack_.back();
+							frame.first.action_counter = ac, frame.second = {ir, cr, lr};
 						} break;
 						case altcode::commit_back: {
-							auto const& instate = backtrack_stack_.back().second;
-							ir = instate.index, cr = instate.position.column, lr = instate.position.line;
+							auto const& frame = backtrack_stack_.back();
+							ir = frame.second.index, cr = frame.second.position.column, lr = frame.second.position.line;
 						} [[fallthrough]];
 						default: pop_stack_frame(backtrack_stack_); break;
 					}
@@ -794,14 +796,14 @@ public:
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						if (auto memo = std::find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
-									[pca = pc + off, ir](auto& x) { return pca == x.pca && ir == x.sr.index; });
-								memo != lrmemo_stack_.crend()) {
-							if (memo->sa.index == lrfailcode || imm < memo->prec)
-								goto failure;
-							ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
-							ac = semantics_.restore_actions_after(ac, memo->actions);
-							continue;
+						for (auto memo = lrmemo_stack_.crbegin(), memolast = lrmemo_stack_.crend(); memo != memolast && memo->sr.index >= ir; ++memo) {
+							if (memo->sr.index == ir && memo->pca == pc + off) {
+								if (memo->sa.index == lrfailcode || imm < memo->prec)
+									goto failure;
+								ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
+								ac = semantics_.restore_actions_after(ac, memo->actions);
+								goto restart;
+							}
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
 						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<prospective_action>{}, imm});
