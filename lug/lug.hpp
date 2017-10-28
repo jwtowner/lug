@@ -578,44 +578,44 @@ inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s
 } // namespace language
 
 inline grammar start(const rule& start_rule) {
-	program gp;
+	program grprogram;
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
 	std::unordered_set<const program*> recursive;
 	std::vector<std::pair<std::vector<const rule*>, const program*>> unprocessed;
-	program_encoder{gp}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, altcode::accept_final);
+	program_encoder{grprogram}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, altcode::accept_final);
 	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
-		auto [rules, subprogram] = unprocessed.back();
+		auto [callstack, subprogram] = unprocessed.back();
 		unprocessed.pop_back();
-		auto address = static_cast<std::ptrdiff_t>(gp.instructions.size());
+		auto address = static_cast<std::ptrdiff_t>(grprogram.instructions.size());
 		if (addresses.emplace(subprogram, address).second) {
-			gp.concatenate(*subprogram);
-			gp.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
-			if (auto r = rules.back(); r) {
-				for (auto [cr, cp, instr_offset] : r->callees_) {
-					calls.emplace_back(cp, address + instr_offset);
-					if (std::find(rules.crbegin(), rules.crend(), cr) != rules.crend()) {
-						recursive.insert(cp);
+			grprogram.concatenate(*subprogram);
+			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
+			if (auto top = callstack.back(); top) {
+				for (auto [callee_rule, callee_program, instr_offset] : top->callees_) {
+					calls.emplace_back(callee_program, address + instr_offset);
+					if (std::find(callstack.crbegin(), callstack.crend(), callee_rule) != callstack.crend()) {
+						recursive.insert(callee_program);
 					} else {
-						rules.push_back(cr);
-						unprocessed.emplace_back(rules, cp);
-						rules.pop_back();
+						callstack.push_back(callee_rule);
+						unprocessed.emplace_back(callstack, callee_program);
+						callstack.pop_back();
 					}
 				}
 			}
 		}
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
-		if (auto& iprefix = gp.instructions[instr_addr]; iprefix.pf.op == opcode::call)
+		if (auto& iprefix = grprogram.instructions[instr_addr]; iprefix.pf.op == opcode::call)
 			iprefix.pf.val = recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
-		auto& ioffset = gp.instructions[instr_addr + 1];
-		std::ptrdiff_t reladdr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
-		detail::assure_in_range<program_limit_error>(reladdr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
-		ioffset.off = static_cast<int>(reladdr);
+		auto& ioffset = grprogram.instructions[instr_addr + 1];
+		auto rel_addr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
+		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
+		ioffset.off = static_cast<int>(rel_addr);
 	}
-	return grammar(std::move(gp));
+	return grammar(std::move(grprogram));
 }
 
 class parser
