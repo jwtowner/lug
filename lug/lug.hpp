@@ -63,6 +63,11 @@ struct reentrancy_sentinel
 	~reentrancy_sentinel() { value = false; }
 };
 
+template <std::size_t... Indices, class Tuple>
+constexpr auto make_tuple_view(Tuple&& t) noexcept {
+	return ::std::forward_as_tuple(::std::get<Indices>(::std::forward<Tuple>(t))...);
+}
+
 } // namespace detail
 
 enum class opcode : unsigned char
@@ -620,27 +625,31 @@ inline grammar start(const rule& start_rule) {
 	return grammar{std::move(grprogram)};
 }
 
+struct parser_registers {
+	std::size_t ir, cr, lr, rc; std::ptrdiff_t pc; std::size_t fc;
+	auto as_tuple() noexcept { return std::forward_as_tuple(ir, cr, lr, rc, pc, fc); }
+	auto as_tuple() const noexcept { return std::forward_as_tuple(ir, cr, lr, rc, pc, fc); }
+};
+
 class parser
 {
 	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
-	struct syntax_state { std::size_t index; syntax_position position; };
-	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
-	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_response> responses; std::size_t prec; };
+	struct subject { std::size_t ir, cr, lr; subject() = default; subject(std::size_t i, std::size_t c, std::size_t l) : ir{i}, cr{c}, lr{l} {} };
+	struct lrmemo { subject sr, sa; std::size_t rcr; std::ptrdiff_t pcr, pca; std::vector<semantic_response> responses; std::size_t prec; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-
 	const lug::grammar& grammar_;
 	lug::semantics& semantics_;
 	std::string input_;
-	syntax_state input_state_{0, 1, 1}, max_input_state_{0, 1, 1};
-	program_state program_state_{0, 0};
+	parser_registers registers_{0, 1, 1, 0, 0, 0};
+	subject max_input_{0, 1, 1};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::vector<stack_frame_type> stack_frames_;
-	std::vector<std::pair<program_state, syntax_state>> backtrack_stack_;
-	std::vector<program_state> call_stack_;
-	std::vector<syntax_state> capture_stack_;
-	std::vector<lrmemo_state> lrmemo_stack_;
+	std::vector<std::tuple<std::size_t, std::size_t, std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // ir, cr, lr, rc, pc
+	std::vector<std::ptrdiff_t> call_stack_; // pc
+	std::vector<subject> capture_stack_;
+	std::vector<lrmemo> lrmemo_stack_;
 
 	bool available(std::size_t n, std::size_t ir) {
 		do {
@@ -664,50 +673,34 @@ class parser
 		return !text.empty();
 	}
 
-	void cut() {
+	void cut(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& rc, std::ptrdiff_t& pc) {
+		registers_ = {ir, cr, lr, rc, pc, 0};
 		semantics_.accept(grammar_, input_);
-		input_.erase(0, input_state_.index);
-		input_state_.index = 0, max_input_state_.index = 0, program_state_.action_counter = 0;
+		input_.erase(0, ir);
+		registers_.ir = 0, registers_.rc = 0, max_input_.ir = 0;
 		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
-	}
-
-	void cut(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		save_registers(ir, cr, lr, ac, pc); cut(); load_registers(ir, cr, lr, ac, pc);
+		std::tie(ir, cr, lr, rc, pc, std::ignore) = registers_.as_tuple();
 	}
 
 	template <class Stack, class... Args>
 	void pop_stack_frame(Stack& stack, Args&... args) {
 		stack.pop_back(), stack_frames_.pop_back();
 		cut_frame_ = (std::min)(cut_frame_, stack_frames_.size());
-		if constexpr (std::is_same_v<typename Stack::value_type, syntax_state> || std::is_same_v<typename Stack::value_type, lrmemo_state>) {
+		if constexpr (std::is_same_v<typename Stack::value_type, subject> || std::is_same_v<typename Stack::value_type, lrmemo>)
 			if (cut_deferred_ && capture_stack_.empty() && lrmemo_stack_.empty())
 				cut(args...);
-		}
-	}
-
-	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		ir = ss.index, cr = ss.position.column, lr = ss.position.line, ac = ps.action_counter, pc = ps.program_counter;
-		semantics_.pop_responses_after(ac);
 	}
 
 public:
 	parser(const lug::grammar& g, lug::semantics& s) : grammar_{g}, semantics_{s} {}
 	const lug::grammar& grammar() const noexcept { return grammar_; }
 	lug::semantics& semantics() const noexcept { return semantics_; }
-	std::string_view input_view() const noexcept { return std::string_view{input_.data() + input_state_.index, input_.size() - input_state_.index}; }
-	const syntax_position& input_position() const noexcept { return input_state_.position; }
-	const syntax_position& max_input_position() const noexcept { return max_input_state_.position; }
-	bool available(std::size_t n) { available(n, input_state_.index); }
-
-	void save_registers(std::size_t ir, std::size_t cr, std::size_t lr, std::size_t ac, std::ptrdiff_t pc) {
-		input_state_ = {ir, cr, lr}, program_state_ = {ac, pc};
-		if (ir > max_input_state_.index)
-			max_input_state_ = input_state_;
-	}
-
-	void load_registers(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
-		load_registers(input_state_, program_state_, ir, cr, lr, ac, pc);
-	}
+	std::string_view input_view() const noexcept { return {input_.data() + registers_.ir, input_.size() - registers_.ir}; }
+	syntax_position input_position() const noexcept { return {registers_.cr, registers_.lr}; }
+	syntax_position max_input_position() const noexcept { return {max_input_.cr, max_input_.lr}; }
+	parser_registers& registers() noexcept { return registers_; }
+	const parser_registers& registers() const noexcept { return registers_; }
+	bool available(std::size_t n) { available(n, registers_.ir); }
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last) {
@@ -726,13 +719,10 @@ public:
 		detail::reentrancy_sentinel<reenterant_parse_error> guard{parsing_};
 		const program& prog = grammar_.program();
 		if (prog.instructions.empty()) throw bad_grammar{};
+		auto [ir, cr, lr, rc, pc, fc] = registers_;
 		bool result = false, done = false;
-		std::size_t ir, cr, lr, ac, fc = 0;
-		std::ptrdiff_t pc;
+		rc = 0, pc = 0, fc = 0, cut_deferred_ = false;
 		semantics_.clear();
-		program_state_ = {0, 0};
-		cut_deferred_ = false;
-		load_registers(ir, cr, lr, ac, pc);
 		while (!done) {
 		restart:
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
@@ -776,20 +766,14 @@ public:
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.push_back({{ac, pc + off}, {ir - (imm & 255), cr - (imm >> 8), lr}});
+					backtrack_stack_.emplace_back(ir - (imm & 255), cr - (imm >> 8), lr, rc, pc + off);
 				} break;
 				case opcode::commit: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
 					switch (alt) {
-						case altcode::commit_partial: {
-							auto& frame = backtrack_stack_.back();
-							frame.first.action_counter = ac, frame.second = {ir, cr, lr};
-						} break;
-						case altcode::commit_back: {
-							auto const& frame = backtrack_stack_.back();
-							ir = frame.second.index, cr = frame.second.position.column, lr = frame.second.position.line;
-						} [[fallthrough]];
+						case altcode::commit_partial: { detail::make_tuple_view<0, 1, 2, 3>(backtrack_stack_.back()) = {ir, cr, lr, rc}; } break;
+						case altcode::commit_back: { std::tie(ir, cr, lr) = detail::make_tuple_view<0, 1, 2>(backtrack_stack_.back()); } [[fallthrough]];
 						default: pop_stack_frame(backtrack_stack_); break;
 					}
 				} [[fallthrough]];
@@ -798,20 +782,20 @@ public:
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						for (auto memo = lrmemo_stack_.crbegin(), memolast = lrmemo_stack_.crend(); memo != memolast && memo->sr.index >= ir; ++memo) {
-							if (memo->sr.index == ir && memo->pca == pc + off) {
-								if (memo->sa.index == lrfailcode || imm < memo->prec)
+						for (auto memo = lrmemo_stack_.crbegin(), memolast = lrmemo_stack_.crend(); memo != memolast && memo->sr.ir >= ir; ++memo) {
+							if (memo->sr.ir == ir && memo->pca == pc + off) {
+								if (memo->sa.ir == lrfailcode || imm < memo->prec)
 									goto failure;
-								ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
-								ac = semantics_.restore_responses_after(ac, memo->responses);
+								ir = memo->sa.ir, cr = memo->sa.cr, lr = memo->sa.lr;
+								rc = semantics_.restore_responses_after(rc, memo->responses);
 								goto restart;
 							}
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_response>{}, imm});
+						lrmemo_stack_.push_back({{ir, cr, lr}, {lrfailcode, 0, 0}, rc, pc, pc + off, std::vector<semantic_response>{}, imm});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
-						call_stack_.push_back({ac, pc});
+						call_stack_.push_back(pc);
 					}
 					pc += off;
 				} break;
@@ -820,19 +804,20 @@ public:
 						goto failure;
 					switch (stack_frames_.back()) {
 						case stack_frame_type::call: {
-							pc = call_stack_.back().program_counter;
+							pc = call_stack_.back();
 							pop_stack_frame(call_stack_);
 						} break;
 						case stack_frame_type::lrcall: {
 							auto& memo = lrmemo_stack_.back();
-							if (memo.sa.index == lrfailcode || ir > memo.sa.index) {
+							if (memo.sa.ir == lrfailcode || ir > memo.sa.ir) {
 								memo.sa = {ir, cr, lr};
-								memo.responses = semantics_.drop_responses_after(memo.acr);
-								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
+								memo.responses = semantics_.drop_responses_after(memo.rcr);
+								ir = memo.sr.ir, cr = memo.sr.cr, lr = memo.sr.lr, rc = memo.rcr, pc = memo.pca;
 								continue;
 							}
-							load_registers(memo.sa, {semantics_.restore_responses_after(memo.acr, memo.responses), memo.pcr}, ir, cr, lr, ac, pc);
-							pop_stack_frame(lrmemo_stack_, ir, cr, lr, ac, pc);
+							ir = memo.sa.ir, cr = memo.sa.cr, lr = memo.sa.lr, pc = memo.pcr;
+							rc = semantics_.restore_responses_after(memo.rcr, memo.responses);
+							pop_stack_frame(lrmemo_stack_, ir, cr, lr, rc, pc);
 						} break;
 						default: goto failure;
 					}
@@ -840,38 +825,39 @@ public:
 				case opcode::fail: {
 					fc = imm;
 				failure:
-					save_registers(ir, cr, lr, ac, pc);
+					if (ir > max_input_.ir)
+						max_input_ = {ir, cr, lr};
 					for (++fc; fc > 0; --fc) {
 						if (done = cut_frame_ >= stack_frames_.size(); done)
 							break;
 						stack_frame_type type = stack_frames_.back();
 						switch (type) {
 							case stack_frame_type::backtrack: {
-								std::tie(program_state_, input_state_) = backtrack_stack_.back();
+								std::tie(ir, cr, lr, rc, pc) = backtrack_stack_.back();
 								pop_stack_frame(backtrack_stack_);
 							} break;
 							case stack_frame_type::call: {
 								pop_stack_frame(call_stack_), ++fc;
 							} break;
 							case stack_frame_type::capture: {
-								pop_stack_frame(capture_stack_), ++fc;
+								pop_stack_frame(capture_stack_, ir, cr, lr, rc, pc), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
 								auto& memo = lrmemo_stack_.back();
-								if (memo.sa.index != lrfailcode) {
-									program_state_ = {semantics_.restore_responses_after(memo.acr, memo.responses), memo.pcr};
-									input_state_ = memo.sa;
+								if (memo.sa.ir != lrfailcode) {
+									ir = memo.sa.ir, cr = memo.sa.cr, lr = memo.sa.lr, pc = memo.pcr;
+									rc = semantics_.restore_responses_after(memo.rcr, memo.responses);
 								} else ++fc;
-								pop_stack_frame(lrmemo_stack_);
+								pop_stack_frame(lrmemo_stack_, ir, cr, lr, rc, pc);
 							} break;
 							default: break;
 						}
 					}
-					load_registers(ir, cr, lr, ac, pc);
+					semantics_.pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
 					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
-						cut(ir, cr, lr, ac, pc);
+						cut(ir, cr, lr, rc, pc);
 						if (result = done = alt == altcode::accept_final; done)
 							break;
 					}
@@ -880,30 +866,33 @@ public:
 					cr = 1, lr += 1;
 				} break;
 				case opcode::predicate: {
-					save_registers(ir, cr, lr, ac, pc);
-					if (!prog.predicates[imm](*this))
+					registers_ = {ir, cr, lr, rc, pc, 0};
+					if (ir > max_input_.ir)
+						max_input_ = {ir, cr, lr};
+					bool accepted = prog.predicates[imm](*this);
+					std::tie(ir, cr, lr, rc, pc, fc) = registers_.as_tuple();
+					semantics_.pop_responses_after(rc);
+					if (!accepted)
 						goto failure;
-					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
-					ac = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
+					rc = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
-					capture_stack_.push_back({ir, cr, lr});
+					capture_stack_.emplace_back(ir, cr, lr);
 				} break;
 				case opcode::end_capture: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
-					auto last = ir;
-					auto end = syntax_position{cr, lr};
-					auto [first, start] = capture_stack_.back();
-					pop_stack_frame(capture_stack_, ir, cr, lr, ac, pc);
-					if (first > last)
+					auto [ir0, cr0, lr0] = capture_stack_.back();
+					auto ir1 = ir, cr1 = cr, lr1 = lr;
+					pop_stack_frame(capture_stack_, ir, cr, lr, rc, pc);
+					if (ir0 > ir1)
 						goto failure;
-					ac = semantics_.push_capture_response(call_stack_.size() + lrmemo_stack_.size(), imm, syntax_range{first, last - first, start, end});
+					rc = semantics_.push_capture_response(call_stack_.size() + lrmemo_stack_.size(), imm, {ir0, ir1 - ir0, {cr0, lr0}, {cr1, lr1}});
 				} break;
-				default: throw bad_opcode{};
+				default: registers_ = {ir, cr, lr, rc, pc, 0}; throw bad_opcode{};
 			}
 		}
 		return result;
