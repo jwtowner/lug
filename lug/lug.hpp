@@ -673,7 +673,7 @@ class parser
 		return !text.empty();
 	}
 
-	void cut(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& rc, std::ptrdiff_t& pc) {
+	void accept(std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& rc, std::ptrdiff_t& pc) {
 		registers_ = {ir, cr, lr, rc, pc, 0};
 		semantics_.accept(grammar_, input_);
 		input_.erase(0, ir);
@@ -688,7 +688,7 @@ class parser
 		cut_frame_ = (std::min)(cut_frame_, stack_frames_.size());
 		if constexpr (std::is_same_v<typename Stack::value_type, subject> || std::is_same_v<typename Stack::value_type, lrmemo>)
 			if (cut_deferred_ && capture_stack_.empty() && lrmemo_stack_.empty())
-				cut(args...);
+				accept(args...);
 	}
 
 public:
@@ -856,7 +856,7 @@ public:
 				} break;
 				case opcode::accept: {
 					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
-						cut(ir, cr, lr, rc, pc);
+						accept(ir, cr, lr, rc, pc);
 						if (result = done = alt == altcode::accept_final; done)
 							break;
 					}
