@@ -721,7 +721,7 @@ public:
 		if (prog.instructions.empty()) throw bad_grammar{};
 		auto [ir, cr, lr, rc, pc, fc] = registers_;
 		bool result = false, done = false;
-		rc = 0, pc = 0, fc = 0, cut_deferred_ = false;
+		rc = 0, pc = 0, fc = 0, cut_deferred_ = false, cut_frame_ = 0;
 		semantics_.clear();
 		while (!done) {
 		restart:
@@ -830,8 +830,7 @@ public:
 					for (++fc; fc > 0; --fc) {
 						if (done = cut_frame_ >= stack_frames_.size(); done)
 							break;
-						stack_frame_type type = stack_frames_.back();
-						switch (type) {
+						switch (stack_frames_.back()) {
 							case stack_frame_type::backtrack: {
 								std::tie(ir, cr, lr, rc, pc) = backtrack_stack_.back();
 								pop_stack_frame(backtrack_stack_);
