@@ -773,8 +773,8 @@ public:
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 						goto failure;
 					switch (alt) {
-						case altcode::commit_partial: { detail::make_tuple_view<0, 1, 2, 3>(backtrack_stack_.back()) = {ir, cr, lr, rc}; } break;
-						case altcode::commit_back: { std::tie(ir, cr, lr) = detail::make_tuple_view<0, 1, 2>(backtrack_stack_.back()); } [[fallthrough]];
+						case altcode::commit_partial: detail::make_tuple_view<0, 1, 2, 3>(backtrack_stack_.back()) = {ir, cr, lr, rc}; break;
+						case altcode::commit_back: std::tie(ir, cr, lr) = detail::make_tuple_view<0, 1, 2>(backtrack_stack_.back()); [[fallthrough]];
 						default: pop_stack_frame(backtrack_stack_); break;
 					}
 				} [[fallthrough]];
