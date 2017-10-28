@@ -31,10 +31,10 @@ class bad_opcode : public lug_error { public: bad_opcode() : lug_error{"invalid 
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
-struct prospective_action { unsigned short call_depth, action_index; unsigned int capture_index; };
 typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantics&)> semantic_action;
 typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
+struct semantic_response { unsigned short call_depth, action_index; unsigned int capture_index; };
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
@@ -204,38 +204,41 @@ class semantics
 	friend class parser;
 	std::string_view match_;
 	unsigned short prune_depth_, call_depth_;
-	std::vector<prospective_action> prospective_actions_;
+	std::vector<semantic_response> responses_;
 	std::vector<syntax_range> captures_;
 	std::vector<std::any> attributes_;
 	virtual void on_accept_begin() {}
 	virtual void on_accept_end() {}
 	virtual void on_clear() {}
-	std::size_t action_count() const noexcept { return prospective_actions_.size(); }
-	void pop_actions_after(std::size_t n) { if (n < prospective_actions_.size()) prospective_actions_.resize(n); }
 
-	auto drop_actions_after(std::size_t n) {
-		std::vector<prospective_action> dropped;
-		if (n < prospective_actions_.size()) {
-			dropped.assign(prospective_actions_.begin() + n, prospective_actions_.end());
-			prospective_actions_.resize(n);
+	void pop_responses_after(std::size_t n) {
+		if (n < responses_.size())
+			responses_.resize(n);
+	}
+
+	auto drop_responses_after(std::size_t n) {
+		std::vector<semantic_response> dropped;
+		if (n < responses_.size()) {
+			dropped.assign(responses_.begin() + n, responses_.end());
+			responses_.resize(n);
 		}
 		return dropped;
 	}
 
-	auto restore_actions_after(std::size_t n, const std::vector<prospective_action>& a) {
-		pop_actions_after(n);
-		prospective_actions_.insert(prospective_actions_.end(), a.begin(), a.end());
-		return action_count();
+	auto restore_responses_after(std::size_t n, const std::vector<semantic_response>& restore) {
+		pop_responses_after(n);
+		responses_.insert(responses_.end(), restore.begin(), restore.end());
+		return responses_.size();
 	}
 
-	auto push_action(std::size_t depth, std::size_t action_index, unsigned int capture_index = (std::numeric_limits<unsigned int>::max)()) {
-		prospective_actions_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), capture_index});
-		return action_count();
+	auto push_response(std::size_t depth, std::size_t action_index, unsigned int capture_index = (std::numeric_limits<unsigned int>::max)()) {
+		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), capture_index});
+		return responses_.size();
 	}
 
-	auto push_capture_action(std::size_t depth, std::size_t action_index, const syntax_range& range) {
+	auto push_capture_response(std::size_t depth, std::size_t action_index, const syntax_range& range) {
 		captures_.push_back(range);
-		return push_action(depth, action_index, static_cast<unsigned int>(captures_.size() - 1));
+		return push_response(depth, action_index, static_cast<unsigned int>(captures_.size() - 1));
 	}
 
 public:
@@ -247,20 +250,19 @@ public:
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
 	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
 
-	void accept(const lug::grammar& grmr, std::string_view m) {
-		const auto& actions = grmr.program().actions;
-		const auto& captures = grmr.program().captures;
+	void accept(const grammar& grmr, std::string_view m) {
+		const auto& [actions, captures] = std::forward_as_tuple(grmr.program().actions, grmr.program().captures);
 		match_ = m;
 		on_accept_begin();
-		for (auto& pa : prospective_actions_) {
-			if (prune_depth_ <= pa.call_depth)
+		for (auto& response : responses_) {
+			if (prune_depth_ <= response.call_depth)
 				continue;
-			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = pa.call_depth;
-			if (pa.capture_index < (std::numeric_limits<unsigned int>::max)()) {
-				const syntax_range& cap = captures_[pa.capture_index];
-				captures[pa.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
+			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = response.call_depth;
+			if (response.capture_index < (std::numeric_limits<unsigned int>::max)()) {
+				const syntax_range& cap = captures_[response.capture_index];
+				captures[response.action_index](*this, {match_.substr(cap.index, cap.size), cap.start, cap.end});
 			} else {
-				actions[pa.action_index](*this);
+				actions[response.action_index](*this);
 			}
 		}
 		on_accept_end();
@@ -269,7 +271,7 @@ public:
 
 	void clear() {
 		match_ = std::string_view{}, prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = 0;
-		prospective_actions_.clear(), attributes_.clear();
+		responses_.clear(), attributes_.clear();
 		on_clear();
 	}
 };
@@ -615,7 +617,7 @@ inline grammar start(const rule& start_rule) {
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
 		ioffset.off = static_cast<int>(rel_addr);
 	}
-	return grammar(std::move(grprogram));
+	return grammar{std::move(grprogram)};
 }
 
 class parser
@@ -623,7 +625,7 @@ class parser
 	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
 	struct syntax_state { std::size_t index; syntax_position position; };
 	struct program_state { std::size_t action_counter; std::ptrdiff_t program_counter; };
-	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<prospective_action> actions; std::size_t prec; };
+	struct lrmemo_state { std::size_t acr; std::ptrdiff_t pcr, pca; syntax_state sr, sa; std::vector<semantic_response> responses; std::size_t prec; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 
 	const lug::grammar& grammar_;
@@ -685,7 +687,7 @@ class parser
 
 	void load_registers(const syntax_state& ss, const program_state& ps, std::size_t& ir, std::size_t& cr, std::size_t& lr, std::size_t& ac, std::ptrdiff_t& pc) {
 		ir = ss.index, cr = ss.position.column, lr = ss.position.line, ac = ps.action_counter, pc = ps.program_counter;
-		semantics_.pop_actions_after(ac);
+		semantics_.pop_responses_after(ac);
 	}
 
 public:
@@ -801,12 +803,12 @@ public:
 								if (memo->sa.index == lrfailcode || imm < memo->prec)
 									goto failure;
 								ir = memo->sa.index, cr = memo->sa.position.column, lr = memo->sa.position.line;
-								ac = semantics_.restore_actions_after(ac, memo->actions);
+								ac = semantics_.restore_responses_after(ac, memo->responses);
 								goto restart;
 							}
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<prospective_action>{}, imm});
+						lrmemo_stack_.push_back({ac, pc, pc + off, {ir, cr, lr}, {lrfailcode, 0, 0}, std::vector<semantic_response>{}, imm});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back({ac, pc});
@@ -825,11 +827,11 @@ public:
 							auto& memo = lrmemo_stack_.back();
 							if (memo.sa.index == lrfailcode || ir > memo.sa.index) {
 								memo.sa = {ir, cr, lr};
-								memo.actions = semantics_.drop_actions_after(memo.acr);
+								memo.responses = semantics_.drop_responses_after(memo.acr);
 								load_registers(memo.sr, {memo.acr, memo.pca}, ir, cr, lr, ac, pc);
 								continue;
 							}
-							load_registers(memo.sa, {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr}, ir, cr, lr, ac, pc);
+							load_registers(memo.sa, {semantics_.restore_responses_after(memo.acr, memo.responses), memo.pcr}, ir, cr, lr, ac, pc);
 							pop_stack_frame(lrmemo_stack_, ir, cr, lr, ac, pc);
 						} break;
 						default: goto failure;
@@ -857,7 +859,7 @@ public:
 							case stack_frame_type::lrcall: {
 								auto& memo = lrmemo_stack_.back();
 								if (memo.sa.index != lrfailcode) {
-									program_state_ = {semantics_.restore_actions_after(memo.acr, memo.actions), memo.pcr};
+									program_state_ = {semantics_.restore_responses_after(memo.acr, memo.responses), memo.pcr};
 									input_state_ = memo.sa;
 								} else ++fc;
 								pop_stack_frame(lrmemo_stack_);
@@ -884,7 +886,7 @@ public:
 					load_registers(ir, cr, lr, ac, pc);
 				} break;
 				case opcode::action: {
-					ac = semantics_.push_action(call_stack_.size() + lrmemo_stack_.size(), imm);
+					ac = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
 				case opcode::begin_capture: {
 					stack_frames_.push_back(stack_frame_type::capture);
@@ -899,7 +901,7 @@ public:
 					pop_stack_frame(capture_stack_, ir, cr, lr, ac, pc);
 					if (first > last)
 						goto failure;
-					ac = semantics_.push_capture_action(call_stack_.size() + lrmemo_stack_.size(), imm, syntax_range{first, last - first, start, end});
+					ac = semantics_.push_capture_response(call_stack_.size() + lrmemo_stack_.size(), imm, syntax_range{first, last - first, start, end});
 				} break;
 				default: throw bad_opcode{};
 			}
