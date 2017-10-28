@@ -594,21 +594,21 @@ inline grammar start(const rule& start_rule) {
 	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
 	do {
-		auto [callstack, subprogram] = unprocessed.back();
+		auto [callstack, subprogram] = std::move(unprocessed.back());
 		unprocessed.pop_back();
-		auto address = static_cast<std::ptrdiff_t>(grprogram.instructions.size());
+		const auto address = static_cast<std::ptrdiff_t>(grprogram.instructions.size());
 		if (addresses.emplace(subprogram, address).second) {
 			grprogram.concatenate(*subprogram);
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
-			if (auto top = callstack.back(); top) {
-				for (auto [callee_rule, callee_program, instr_offset] : top->callees_) {
+			if (auto top_rule = callstack.back(); top_rule) {
+				for (auto [callee_rule, callee_program, instr_offset] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
-					if (std::find(callstack.crbegin(), callstack.crend(), callee_rule) != callstack.crend()) {
+					if (callee_rule && std::find(callstack.crbegin(), callstack.crend(), callee_rule) != callstack.crend()) {
 						recursive.insert(callee_program);
 					} else {
-						callstack.push_back(callee_rule);
-						unprocessed.emplace_back(callstack, callee_program);
-						callstack.pop_back();
+						auto callee_callstack = callstack;
+						callee_callstack.push_back(callee_rule);
+						unprocessed.emplace_back(std::move(callee_callstack), callee_program);
 					}
 				}
 			}
@@ -625,7 +625,8 @@ inline grammar start(const rule& start_rule) {
 	return grammar{std::move(grprogram)};
 }
 
-struct parser_registers {
+struct parser_registers
+{
 	std::size_t ir, cr, lr, rc; std::ptrdiff_t pc; std::size_t fc;
 	auto as_tuple() noexcept { return std::forward_as_tuple(ir, cr, lr, rc, pc, fc); }
 	auto as_tuple() const noexcept { return std::forward_as_tuple(ir, cr, lr, rc, pc, fc); }
@@ -633,7 +634,7 @@ struct parser_registers {
 
 class parser
 {
-	enum class stack_frame_type : unsigned char { backtrack, call, lrcall, capture };
+	enum class stack_frame_type : unsigned char { backtrack, call, capture, lrcall };
 	struct subject { std::size_t ir, cr, lr; subject() = default; subject(std::size_t i, std::size_t c, std::size_t l) : ir{i}, cr{c}, lr{l} {} };
 	struct lrmemo { subject sr, sa; std::size_t rcr; std::ptrdiff_t pcr, pca; std::vector<semantic_response> responses; std::size_t prec; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
