@@ -9,9 +9,9 @@ Features
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
-- Uses expression template functors to implement the rules of the domain specific language
-- UTF-8 text parsing with support for matching Unicode character classes
+- UTF-8 text parsing with near-complete Level 1 support of the UTS #18 Unicode Regular Expressions technical standard
 - Header only library using C++17 language and library features
+- Uses expression template functors to implement the rules of the domain specific language
 - Relatively small with the intent of core to remain under 1000 lines of very terse code
 
 It is based on research introduced in the following papers:
@@ -31,7 +31,7 @@ It is based on research introduced in the following papers:
 Building
 ---
 As a header only library, lug itself does not need to be built.
-Just drop in the single `lug.hpp` header file into a directory that is in your header include path and you're good to go.
+Simply ensure the `lug` header directory is in your header include path and you're good to go.
 
 As a baseline, the following compiler versions are known to work with lug.
 
@@ -39,7 +39,7 @@ As a baseline, the following compiler versions are known to work with lug.
 | --- | --- |
 | Clang 5.0.0 (September 2017) | -std=c++17 or -std=gnu++17 |
 | GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
-| Microsoft Visual C++ 2017 15.3 (August 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2017 15.5 Preview 2.0 (October 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 
 For building the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
 
@@ -48,12 +48,14 @@ TODO
 - parser error recovery
 - add an interactive processing mode flag to input sources?
 - handle exceptions thrown from semantic actions in semantics::accept?
+- feature: separation of syntatic and lexical rules, with implicit whitespace skipping and built-in line and column number tracking
+- feature: case insensitive matching
 - feature: symbol tables and parsing conditions
 - feature: Adams' grammars and alignment elimination
 - feature: syntax to specify number range of allowed iteration
-- optimization: better detection of left-recursive rule calls to remove false-positives
 - optimization: tail recursion
-- optimization: additional instructions
+- optimization: reduce number of left-recursive calls even further by lazily evaluating rule::matches_eps
+- optimization: additional instructions (test_char, test_any, test_range, test_class)
 - more samples, testing, and bug fixing
 - increase compiler warning level and fix any issues
 - documentation
