@@ -5,13 +5,14 @@
 #ifndef LUG_HPP__
 #define LUG_HPP__
 
+#include <lug/detail.hpp>
+#include <lug/error.hpp>
 #include <lug/unicode.hpp>
 #include <lug/utf8.hpp>
 #include <any>
 #include <functional>
 #include <iostream>
 #include <numeric>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -20,15 +21,6 @@ namespace lug
 {
 
 struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
-class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
-class program_limit_error : public lug_error { public: program_limit_error() : lug_error{"length or offset of program exceeds internal limit"} {} };
-class resource_limit_error : public lug_error { public: resource_limit_error() : lug_error{"number of resources exceeds internal limit"} {} };
-class reenterant_parse_error : public lug_error { public: reenterant_parse_error() : lug_error{"parsing is non-reenterant"} {} };
-class reenterant_read_error : public lug_error { public: reenterant_read_error() : lug_error{"attempted to read or modify input source while reading"} {} };
-class bad_string_expression : public lug_error { public: using lug_error::lug_error; bad_string_expression() : lug_error{"invalid string or bracket expression"} {} };
-class bad_character_class : public bad_string_expression { public: bad_character_class() : bad_string_expression{"invalid character class"} {} };
-class bad_grammar : public lug_error { public: bad_grammar() : lug_error{"invalid or empty grammar"} {} };
-class bad_opcode : public lug_error { public: bad_opcode() : lug_error{"invalid opcode"} {} };
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
@@ -41,35 +33,6 @@ template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
-
-namespace detail
-{
-
-template <class Error, class T, class U, class V> inline void assure_in_range(T x, U minval, V maxval) { if (!(minval <= x && x <= maxval)) throw Error{}; }
-template <class Error, class T, class U> inline auto checked_add(T x, U y) { if ((std::numeric_limits<decltype(x + y)>::max)() - x < y) throw Error{}; return x + y; }
-
-template <class T>
-struct dynamic_cast_if_base_of
-{
-	std::remove_reference_t<T>& b;
-	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
-	operator U&() const volatile { return dynamic_cast<std::remove_reference_t<U>&>(b); }
-};
-
-template <class Error>
-struct reentrancy_sentinel
-{
-	bool& value;
-	reentrancy_sentinel(bool& x) : value{x} { if (value) throw Error{}; value = true; }
-	~reentrancy_sentinel() { value = false; }
-};
-
-template <std::size_t... Indices, class Tuple>
-constexpr auto make_tuple_view(Tuple&& t) noexcept {
-	return ::std::forward_as_tuple(::std::get<Indices>(::std::forward<Tuple>(t))...);
-}
-
-} // namespace detail
 
 enum class opcode : unsigned char
 {
@@ -257,7 +220,7 @@ public:
 	unsigned short call_depth() const { return call_depth_; }
 	template <class T> void push_attribute(T&& x) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x)); }
 	template <class T, class... Args> void push_attribute(Args&&... args) { attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...); }
-	template <class T> T pop_attribute() { T r{::std::any_cast<T>(attributes_.back())}; attributes_.pop_back(); return r; }
+	template <class T> T pop_attribute() { T r{::std::any_cast<T>(detail::pop_back(attributes_))}; return r; }
 
 	void accept(const grammar& grmr, std::string_view m) {
 		const auto& [actions, captures] = std::forward_as_tuple(grmr.program().actions, grmr.program().captures);
@@ -311,15 +274,13 @@ class encoder
 protected:
 	std::vector<bool> zero_length_{true};
 	encoder& add_callee(const rule* r, const program* p, std::ptrdiff_t n) {
-		const bool left_most = zero_length_.back();
-		zero_length_.back() = left_most && p->matches_eps;
-		do_add_callee(r, p, n, left_most);
+		do_add_callee(r, p, n, detail::reduce_back(zero_length_, p->matches_eps, std::logical_and<>{}));
 		return *this;
 	}
 public:
 	virtual ~encoder() = default;
 	encoder& zclr(bool c = true) { if (c) { zero_length_.back() = false; } return *this; }
-	encoder& zpop() { zero_length_.pop_back(); return *this; }
+	encoder& zpop(bool a = false) { bool z = detail::pop_back(zero_length_); if (a) { zero_length_.back() = zero_length_.back() && z; } return *this; }
 	encoder& zpsh(unsigned int n = 1) { zero_length_.push_back(zero_length_[zero_length_.size() - n]); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(const program& p) { do_append(p); return *this; }
@@ -336,13 +297,6 @@ public:
 	template <class E> auto evaluate_length(const E& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 	bool matches_eps() const noexcept { return zero_length_.back(); }
-
-	encoder& zand(unsigned int n) {
-		const bool z = std::reduce(zero_length_.crbegin(), std::next(zero_length_.crbegin(), n), true, std::logical_and<>{});
-		zero_length_.resize(zero_length_.size() - n);
-		zero_length_.back() = z;
-		return *this;
-	}
 
 	encoder& call(const rule& r, unsigned short prec, bool allow_inlining = true) {
 		if (const auto& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
@@ -422,7 +376,7 @@ class program_encoder : public instruction_encoder
 
 public:
 	explicit program_encoder(program& p) : instruction_encoder{p.instructions}, program_{p} {}
-	~program_encoder() { program_.matches_eps = zero_length_.back(); }
+	~program_encoder() { program_.matches_eps = matches_eps(); }
 };
 
 class rule_encoder final : public program_encoder
@@ -578,7 +532,7 @@ constexpr auto operator*(const E& e) { return [x = make_expression(e)](encoder& 
 		d.encode(opcode::choice, 2 + n).zpsh().evaluate(x).zpop().encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator|(const E1& e1, const E2& e2) { return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
-		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).zpsh(1).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).zpsh(2).evaluate(x2).zand(2); }; }
+		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).zpsh(1).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).zpsh(2).evaluate(x2).zpop(true).zpop(true); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) {
 		d.evaluate(e1).evaluate(e2); }; }
@@ -620,31 +574,27 @@ inline grammar start(const rule& start_rule) {
 	calls.emplace_back(&start_rule.program_, 0);
 	unprocessed.emplace_back(std::vector<std::pair<const rule*, bool>>{{&start_rule, false}}, &start_rule.program_);
 	do {
-		auto [callstack, subprogram] = std::move(unprocessed.back());
-		unprocessed.pop_back();
+		auto [callstack, subprogram] = detail::pop_back(unprocessed);
 		const auto address = static_cast<std::ptrdiff_t>(grprogram.instructions.size());
 		if (addresses.emplace(subprogram, address).second) {
 			grprogram.concatenate(*subprogram);
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
-			if (auto top_rule = callstack.back().first; top_rule)
+			if (auto top_rule = callstack.back().first; top_rule) {
 				for (auto [callee_rule, callee_program, instr_offset, left_most] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
-					auto caller_last = callstack.crend(), caller = caller_last;
-					if (callee_rule && left_most)
-						for (caller = callstack.crbegin(); caller != caller_last; ++caller)
-							if (caller->first == callee_rule) {
-								left_recursive.insert(callee_program);
-								break;
-							} else if (!caller->second) {
-								caller = caller_last;
-								break;
-							}
-					if (caller == caller_last) {
+					if (callee_rule && left_most && detail::escaping_find_if(callstack.crbegin(), callstack.crend(), [callee_rule](auto& caller) {
+								return caller.first == callee_rule ? detail::search_status::accept :
+									(caller.second ? detail::search_status::reject : detail::search_status::escape);
+							}) != callstack.crend()) {
+						left_recursive.insert(callee_program);
+					}
+					else {
 						auto callee_callstack = callstack;
 						callee_callstack.emplace_back(callee_rule, left_most);
 						unprocessed.emplace_back(std::move(callee_callstack), callee_program);
 					}
 				}
+			}
 		}
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
@@ -758,7 +708,6 @@ public:
 		rc = 0, pc = 0, fc = 0, cut_deferred_ = false, cut_frame_ = 0;
 		semantics_.clear();
 		while (!done) {
-		restart:
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
 					if (!str.empty()) {
@@ -816,14 +765,15 @@ public:
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						for (auto memo = lrmemo_stack_.crbegin(), memolast = lrmemo_stack_.crend(); memo != memolast && memo->sr.ir >= ir; ++memo) {
-							if (memo->sr.ir == ir && memo->pca == pc + off) {
-								if (memo->sa.ir == lrfailcode || imm < memo->prec)
-									goto failure;
-								ir = memo->sa.ir, cr = memo->sa.cr, lr = memo->sa.lr;
-								rc = semantics_.restore_responses_after(rc, memo->responses);
-								goto restart;
-							}
+						auto memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(), [ir = ir, pca = pc + off](const auto& m) {
+							return m.sr.ir == ir && m.pca == pca ? detail::search_status::accept :
+									(m.sr.ir < ir ? detail::search_status::escape : detail::search_status::reject);
+						});
+						if (memo != lrmemo_stack_.crend()) {
+							if (memo->sa.ir == lrfailcode || imm < memo->prec)
+								goto failure;
+							ir = memo->sa.ir, cr = memo->sa.cr, lr = memo->sa.lr, rc = semantics_.restore_responses_after(rc, memo->responses);
+							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
 						lrmemo_stack_.push_back({{ir, cr, lr}, {lrfailcode, 0, 0}, rc, pc, pc + off, std::vector<semantic_response>{}, imm});
@@ -844,8 +794,7 @@ public:
 						case stack_frame_type::lrcall: {
 							auto& memo = lrmemo_stack_.back();
 							if (memo.sa.ir == lrfailcode || ir > memo.sa.ir) {
-								memo.sa = {ir, cr, lr};
-								memo.responses = semantics_.drop_responses_after(memo.rcr);
+								memo.sa = {ir, cr, lr}, memo.responses = semantics_.drop_responses_after(memo.rcr);
 								ir = memo.sr.ir, cr = memo.sr.cr, lr = memo.sr.lr, rc = memo.rcr, pc = memo.pca;
 								continue;
 							}
@@ -918,8 +867,8 @@ public:
 				case opcode::end_capture: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
-					auto [ir0, cr0, lr0] = capture_stack_.back();
 					auto ir1 = ir, cr1 = cr, lr1 = lr;
+					auto [ir0, cr0, lr0] = capture_stack_.back();
 					pop_stack_frame(capture_stack_, ir, cr, lr, rc, pc);
 					if (ir0 > ir1)
 						goto failure;
