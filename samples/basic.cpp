@@ -173,7 +173,7 @@ private:
 	{
 		std::cerr << message << "\n";
 		if (lastline_ != lines_.end())
-			std::cerr << "LINE " << line_->first << ": " << line_->second;
+			std::cerr << "LINE " << lastline_->first << ": " << lastline_->second;
 		std::cerr.flush();
 		line_ = lastline_ = lines_.end();
 		stack_.clear(), for_stack_.clear();
@@ -304,7 +304,7 @@ int main(int argc, char** argv)
 			interpreter.load(*++argv);
 		interpreter.repl();
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "ERROR: " << e.what() << std::endl;
 		return -1;
 	}
 	return 0;

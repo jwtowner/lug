@@ -10,6 +10,7 @@
 #include <any>
 #include <functional>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -141,6 +142,7 @@ struct program
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture> captures;
+	bool matches_eps{true};
 
 	void concatenate(const program& src) {
 		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
@@ -165,6 +167,7 @@ struct program
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
+		matches_eps = matches_eps && src.matches_eps;
 	}
 
 	void swap(program& p) {
@@ -172,6 +175,7 @@ struct program
 		predicates.swap(p.predicates);
 		actions.swap(p.actions);
 		captures.swap(p.captures);
+		std::swap(matches_eps, p.matches_eps);
 	}
 };
 
@@ -179,9 +183,9 @@ class rule
 {
 	friend class encoder; friend class rule_encoder;
 	friend grammar start(const rule&);
-	bool encoding_{false};
 	lug::program program_;
-	std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t>> callees_;
+	std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t, bool>> callees_;
+	mutable bool currently_encoding_{false};
 public:
 	rule() = default;
 	template <class E, class = std::enable_if_t<is_expression_v<E>>> rule(const E& e);
@@ -208,7 +212,7 @@ class semantics
 {
 	friend class parser;
 	std::string_view match_;
-	unsigned short prune_depth_, call_depth_;
+	unsigned short prune_depth_{(std::numeric_limits<unsigned short>::max)()}, call_depth_{0};
 	std::vector<semantic_response> responses_;
 	std::vector<syntax_range> captures_;
 	std::vector<std::any> attributes_;
@@ -301,16 +305,27 @@ class encoder
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
-	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t) {}
+	virtual void do_add_callee(const rule*, const program*, std::ptrdiff_t, bool) {}
 	virtual bool do_should_evaluate_length() const noexcept { return true; }
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
+protected:
+	std::vector<bool> zero_length_{true};
+	encoder& add_callee(const rule* r, const program* p, std::ptrdiff_t n) {
+		const bool left_most = zero_length_.back();
+		zero_length_.back() = left_most && p->matches_eps;
+		do_add_callee(r, p, n, left_most);
+		return *this;
+	}
 public:
 	virtual ~encoder() = default;
+	encoder& zclr(bool c = true) { if (c) { zero_length_.back() = false; } return *this; }
+	encoder& zpop() { zero_length_.pop_back(); return *this; }
+	encoder& zpsh(unsigned int n = 1) { zero_length_.push_back(zero_length_[zero_length_.size() - n]); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(const program& p) { do_append(p); return *this; }
 	template <class InputIt> encoder& append(InputIt first, InputIt last) { for ( ; first != last; ++first) do_append(*first); return *this; }
-	encoder& call(const program& p, unsigned short prec) { do_add_callee(nullptr, &p, length()); return encode(opcode::call, 0, immediate{prec}); }
-	encoder& call(const grammar& g, unsigned short prec) { do_add_callee(nullptr, &g.program(), length()); return encode(opcode::call, 3, immediate{prec}); }
+	encoder& call(const program& p, unsigned short prec) { return add_callee(nullptr, &p, length()).encode(opcode::call, 0, immediate{prec}); }
+	encoder& call(const grammar& g, unsigned short prec) { return add_callee(nullptr, &g.program(), length()).encode(opcode::call, 3, immediate{prec}); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	encoder& encode(opcode op, altcode alt, immediate imm = immediate{0}) { return append(instruction{op, to_operands(alt), imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
@@ -320,15 +335,21 @@ public:
 	template <class E> auto evaluate(const E& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
 	template <class E> auto evaluate_length(const E& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
+	bool matches_eps() const noexcept { return zero_length_.back(); }
 
-	encoder& call(const rule& r, unsigned short prec) {
-		if (auto& p = r.program_; prec <= 0 && !r.encoding_ && r.callees_.empty() && !p.instructions.empty() && p.instructions.size() <= 8 &&
-				p.predicates.size() <= 1 && p.actions.size() <= 1 && p.captures.size() <= 1) {
-			return append(r.program_);
-		} else {
-			do_add_callee(&r, &r.program_, length());
-			return encode(opcode::call, 0, immediate{prec});
-		}
+	encoder& zand(unsigned int n) {
+		const bool z = std::reduce(zero_length_.crbegin(), std::next(zero_length_.crbegin(), n), true, std::logical_and<>{});
+		zero_length_.resize(zero_length_.size() - n);
+		zero_length_.back() = z;
+		return *this;
+	}
+
+	encoder& call(const rule& r, unsigned short prec, bool allow_inlining = true) {
+		if (const auto& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
+					p.instructions.size() <= 8 && p.predicates.size() <= 1 && p.actions.size() <= 1 && p.captures.size() <= 1)
+			return zclr(!p.matches_eps).append(p);
+		else
+			return add_callee(&r, &r.program_, length()).encode(opcode::call, 0, immediate{prec});
 	}
 
 	encoder& encode(opcode op, altcode alt, std::ptrdiff_t off, immediate imm = immediate{0}) {
@@ -357,15 +378,15 @@ public:
 			encode(opcode::match, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
 			sequence.remove_prefix(subsequence.size());
 		}
-		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence).zclr(!sequence.empty());
 	}
 
 	encoder& match_range(std::string_view first, std::string_view last) {
-		return first == last ? match(first) : encode(opcode::match_range, first.size(), std::string{first}.append(last));
+		return first == last ? match(first) : encode(opcode::match_range, first.size(), std::string{first}.append(last)).zclr();
 	}
 };
 
-class instruction_length_evaluator : public encoder
+class instruction_length_evaluator final : public encoder
 {
 	std::ptrdiff_t length_{0};
 	void do_append(instruction) override { length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
@@ -377,8 +398,8 @@ class instruction_length_evaluator : public encoder
 class instruction_encoder : public encoder
 {
 	std::vector<instruction>& instructions_;
-	std::ptrdiff_t do_length() const noexcept override { return static_cast<std::ptrdiff_t>(instructions_.size()); }
-	void do_append(instruction instr) override { instructions_.push_back(instr); }
+	std::ptrdiff_t do_length() const noexcept override final { return static_cast<std::ptrdiff_t>(instructions_.size()); }
+	void do_append(instruction instr) override final { instructions_.push_back(instr); }
 	void do_append(const program&) override { throw bad_grammar{}; }
 public:
 	explicit instruction_encoder(std::vector<instruction>& i) : instructions_{i} {}
@@ -387,10 +408,10 @@ public:
 class program_encoder : public instruction_encoder
 {
 	program& program_;
-	void do_append(const program& p) override { program_.concatenate(p); }
-	immediate do_add_semantic_predicate(semantic_predicate p) override { return add_item(program_.predicates, std::move(p)); }
-	immediate do_add_semantic_action(semantic_action a) override { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_semantic_capture_action(semantic_capture a) override { return add_item(program_.captures, std::move(a)); }
+	void do_append(const program& p) override final { program_.concatenate(p); }
+	immediate do_add_semantic_predicate(semantic_predicate p) override final { return add_item(program_.predicates, std::move(p)); }
+	immediate do_add_semantic_action(semantic_action a) override final { return add_item(program_.actions, std::move(a)); }
+	immediate do_add_semantic_capture_action(semantic_capture a) override final { return add_item(program_.captures, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item) {
@@ -401,31 +422,35 @@ class program_encoder : public instruction_encoder
 
 public:
 	explicit program_encoder(program& p) : instruction_encoder{p.instructions}, program_{p} {}
+	~program_encoder() { program_.matches_eps = zero_length_.back(); }
 };
 
-class rule_encoder : public program_encoder
+class rule_encoder final : public program_encoder
 {
 	rule& rule_;
-	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n) override { rule_.callees_.emplace_back(r, p, n); }
+	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n, bool l) override { rule_.callees_.emplace_back(r, p, n, l); }
 public:
-	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} { rule_.encoding_ = true; }
-	~rule_encoder() override { rule_.encoding_ = false; }
+	explicit rule_encoder(rule& r) : program_encoder{r.program_}, rule_{r} { rule_.currently_encoding_ = true; }
+	~rule_encoder() override { rule_.currently_encoding_ = false; }
 };
 
 class string_expression
 {
 	std::vector<instruction> instructions_;
+	bool matches_eps_{true};
 	static grammar make_grammar();
 	void compile(std::string_view sv);
 
 	struct generator : semantics
 	{
+		string_expression& owner;
 		instruction_encoder encoder;
 		std::vector<std::pair<std::string_view, std::string_view>> ranges;
 		unicode::ctype classes = unicode::ctype::none;
 		bool circumflex = false;
 
-		generator(string_expression& se) : encoder{se.instructions_} {}
+		generator(string_expression& se) : owner{se}, encoder{se.instructions_} {}
+		~generator() { owner.matches_eps_ = encoder.matches_eps(); }
 
 		void bracket_class(std::string_view s) {
 			if (auto c = unicode::stoctype(s); c.has_value())
@@ -472,6 +497,7 @@ class string_expression
 				encoder.encode(opcode::match_class, immediate{static_cast<unsigned short>(classes)});
 			if (circumflex)
 				encoder.encode(opcode::commit, 0).encode(opcode::fail).encode(opcode::match_any);
+			encoder.zclr();
 			ranges.clear();
 			classes = unicode::ctype::none;
 			circumflex = false;
@@ -480,7 +506,7 @@ class string_expression
 
 public:
 	string_expression(std::string_view sv) { compile(sv); }
-	void operator()(encoder& d) const { d.append(instructions_.cbegin(), instructions_.cend()); }
+	void operator()(encoder& d) const { d.append(instructions_.cbegin(), instructions_.cend()).zclr(!matches_eps_); }
 };
 
 template <class T>
@@ -518,7 +544,7 @@ constexpr struct {
 	auto operator()(char s, char e) const { return [s, e](encoder& d) { d.match_range(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
 } chr = {};
 
-constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_any); } } any = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_any).zclr(); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::newline); } } ilr = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match); } } eps = {};
@@ -543,16 +569,16 @@ using namespace std::literals::string_literals;
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator!(const E& e) { return [x = make_expression(e)](encoder& d) {
-		d.encode(opcode::choice, 1 + d.evaluate_length(x)).evaluate(x).encode(opcode::fail, immediate{1}); }; }
+		d.encode(opcode::choice, 1 + d.evaluate_length(x)).zpsh().evaluate(x).zpop().encode(opcode::fail, immediate{1}); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator&(const E& e) { return [x = make_expression(e)](encoder& d) {
-		d.encode(opcode::choice, 2 + d.evaluate_length(x)).evaluate(x).encode(opcode::commit, altcode::commit_back, 1).encode(opcode::fail); }; }
+		d.encode(opcode::choice, 2 + d.evaluate_length(x)).zpsh().evaluate(x).zpop().encode(opcode::commit, altcode::commit_back, 1).encode(opcode::fail); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator*(const E& e) { return [x = make_expression(e)](encoder& d) { auto n = d.evaluate_length(x);
-		d.encode(opcode::choice, 2 + n).evaluate(x).encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
+		d.encode(opcode::choice, 2 + n).zpsh().evaluate(x).zpop().encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator|(const E1& e1, const E2& e2) { return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
-		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2); }; }
+		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).zpsh(1).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).zpsh(2).evaluate(x2).zand(2); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) {
 		d.evaluate(e1).evaluate(e2); }; }
@@ -588,11 +614,11 @@ inline grammar start(const rule& start_rule) {
 	program grprogram;
 	std::unordered_map<const program*, std::ptrdiff_t> addresses;
 	std::vector<std::pair<const program*, std::ptrdiff_t>> calls;
-	std::unordered_set<const program*> recursive;
-	std::vector<std::pair<std::vector<const rule*>, const program*>> unprocessed;
-	program_encoder{grprogram}.encode(opcode::call, 0, immediate{0}).encode(opcode::accept, altcode::accept_final);
+	std::unordered_set<const program*> left_recursive;
+	std::vector<std::pair<std::vector<std::pair<const rule*, bool>>, const program*>> unprocessed;
+	program_encoder{grprogram}.call(start_rule, 0, false).encode(opcode::accept, altcode::accept_final);
 	calls.emplace_back(&start_rule.program_, 0);
-	unprocessed.emplace_back(std::vector<const rule*>{&start_rule}, &start_rule.program_);
+	unprocessed.emplace_back(std::vector<std::pair<const rule*, bool>>{{&start_rule, false}}, &start_rule.program_);
 	do {
 		auto [callstack, subprogram] = std::move(unprocessed.back());
 		unprocessed.pop_back();
@@ -600,23 +626,30 @@ inline grammar start(const rule& start_rule) {
 		if (addresses.emplace(subprogram, address).second) {
 			grprogram.concatenate(*subprogram);
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
-			if (auto top_rule = callstack.back(); top_rule) {
-				for (auto [callee_rule, callee_program, instr_offset] : top_rule->callees_) {
+			if (auto top_rule = callstack.back().first; top_rule)
+				for (auto [callee_rule, callee_program, instr_offset, left_most] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
-					if (callee_rule && std::find(callstack.crbegin(), callstack.crend(), callee_rule) != callstack.crend()) {
-						recursive.insert(callee_program);
-					} else {
+					auto caller_last = callstack.crend(), caller = caller_last;
+					if (callee_rule && left_most)
+						for (caller = callstack.crbegin(); caller != caller_last; ++caller)
+							if (caller->first == callee_rule) {
+								left_recursive.insert(callee_program);
+								break;
+							} else if (!caller->second) {
+								caller = caller_last;
+								break;
+							}
+					if (caller == caller_last) {
 						auto callee_callstack = callstack;
-						callee_callstack.push_back(callee_rule);
+						callee_callstack.emplace_back(callee_rule, left_most);
 						unprocessed.emplace_back(std::move(callee_callstack), callee_program);
 					}
 				}
-			}
 		}
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
 		if (auto& iprefix = grprogram.instructions[instr_addr]; iprefix.pf.op == opcode::call)
-			iprefix.pf.val = recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
+			iprefix.pf.val = left_recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
 		auto& ioffset = grprogram.instructions[instr_addr + 1];
 		auto rel_addr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
@@ -933,7 +966,7 @@ inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 inline grammar string_expression::make_grammar() {
 	using namespace language;
 	rule Empty = eps                                                            <[](generator& g) { g.encoder.encode(opcode::match); };
-	rule Dot = chr('.')                                                         <[](generator& g) { g.encoder.encode(opcode::match_any); };
+	rule Dot = chr('.')                                                         <[](generator& g) { g.encoder.encode(opcode::match_any).zclr(); };
 	rule Element = any > chr('-') > !chr(']') > any                             <[](generator& g, syntax x) { g.bracket_range(x.capture); }
 		| chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')        <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
 		| any                                                                   <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
