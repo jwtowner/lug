@@ -98,6 +98,7 @@ union instruction
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
 static_assert(sizeof(unicode::ctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::ctype");
+static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::sctype");
 
 struct program
 {
@@ -279,8 +280,9 @@ protected:
 	}
 public:
 	virtual ~encoder() = default;
+	encoder& zand() { auto n = zero_length_.size(); zero_length_[n - 3] = zero_length_[n - 1] && zero_length_[n - 1]; zero_length_.resize(n - 2); return *this; }
 	encoder& zclr(bool c = true) { if (c) { zero_length_.back() = false; } return *this; }
-	encoder& zpop(bool a = false) { bool z = detail::pop_back(zero_length_); if (a) { zero_length_.back() = zero_length_.back() && z; } return *this; }
+	encoder& zpop() { zero_length_.pop_back(); return *this; }
 	encoder& zpsh(unsigned int n = 1) { zero_length_.push_back(zero_length_[zero_length_.size() - n]); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(const program& p) { do_append(p); return *this; }
@@ -532,7 +534,7 @@ constexpr auto operator*(const E& e) { return [x = make_expression(e)](encoder& 
 		d.encode(opcode::choice, 2 + n).zpsh().evaluate(x).zpop().encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator|(const E1& e1, const E2& e2) { return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
-		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).zpsh(1).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).zpsh(2).evaluate(x2).zpop(true).zpop(true); }; }
+		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).zpsh(1).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).zpsh(2).evaluate(x2).zand(); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) {
 		d.evaluate(e1).evaluate(e2); }; }
