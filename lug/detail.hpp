@@ -14,11 +14,11 @@ namespace lug::detail
 template <class T>
 struct dynamic_cast_if_base_of
 {
-	std::remove_reference_t<T>& b;
+	std::remove_reference_t<T>& value;
 
 	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
 	operator U&() const volatile {
-		return dynamic_cast<std::remove_reference_t<U>&>(b);
+		return dynamic_cast<std::remove_reference_t<U>&>(value);
 	}
 };
 
