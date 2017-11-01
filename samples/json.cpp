@@ -18,7 +18,7 @@ public:
 		rule Number = ~"-"s > IntegralPart > ~FractionalPart > ~ExponentPart;
 		rule Boolean = "true"s | "false";
 		rule Null = "null";
-		rule UnicodeEscape = lug::chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"s;
+		rule UnicodeEscape = chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"s;
 		rule Escape = "\\" > ("[/\\bfnrt]" | UnicodeEscape);
 		rule String = Space > "\"" > *(u8"[^\"\\\u0000-\u001F]"s | Escape) > "\"" > Space;
 		rule Array = "[[]" > ((JSON > *("," > JSON)) | Space) > "[]]";

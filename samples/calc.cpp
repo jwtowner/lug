@@ -54,7 +54,7 @@ namespace samples::calc
 int main()
 {
 	try {
-		while(lug::parse(samples::calc::Grammar, samples::calc::Sema));
+		while (lug::parse(samples::calc::Grammar, samples::calc::Sema)) ;
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;

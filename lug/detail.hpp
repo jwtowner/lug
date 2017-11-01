@@ -5,7 +5,10 @@
 #ifndef LUG_DETAIL_HPP__
 #define LUG_DETAIL_HPP__
 
+#include <functional>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace lug::detail
@@ -59,15 +62,13 @@ constexpr auto make_tuple_view(Tuple&& t) noexcept
 	return ::std::forward_as_tuple(::std::get<Indices>(::std::forward<Tuple>(t))...);
 }
 
-enum class search_status { accept, reject, escape };
-
 template<class InputIt, class UnaryPredicate>
 InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
 {
 	for ( ; first != last; ++first) {
-		if (auto s = p(*first); s == search_status::accept)
+		if (int status = p(*first); status > 0)
 			return first;
-		else if (s == search_status::escape)
+		else if (status < 0)
 			break;
 	}
 	return last;
@@ -82,11 +83,23 @@ inline auto pop_back(Sequence& s)
 }
 
 template <class Sequence, class T, class BinaryOp>
-inline auto reduce_back(Sequence& s, T value, BinaryOp op)
+inline auto fetch_reduce_back(Sequence& s, T value, BinaryOp op)
 {
 	typename Sequence::value_type result{::std::move(s.back())};
 	s.back() = op(result, value);
 	return result;
+}
+
+template <class Integral>
+inline std::string string_pack(Integral n) noexcept
+{
+	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)};
+}
+
+template <class Integral>
+inline Integral string_unpack(std::string_view s) noexcept
+{
+	return *reinterpret_cast<Integral const*>(s.data());
 }
 
 } // namespace lug::detail

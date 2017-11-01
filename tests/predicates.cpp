@@ -17,7 +17,7 @@ void test_simple_predicates()
 void test_input_position_predicate()
 {
 	using namespace lug::language;
-	rule S = +("a"s > [](parser& p){ return p.input_position().column <= 5; });
+	rule S = +("a"s > [](parser& p){ return p.input_position() <= 4; });
 	grammar G = start(S > !"."s);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));

@@ -10,7 +10,7 @@ namespace
 	void test_any_terminal()
 	{
 		using namespace lug::language;
-		rule S = lug::any > lug::eoi;
+		rule S = any > eoi;
 		grammar G = start(S);
 		assert(lug::parse("a", G));
 		assert(lug::parse("2", G));
@@ -22,7 +22,7 @@ namespace
 	void test_empty_terminal()
 	{
 		using namespace lug::language;
-		rule S = lug::eps > lug::eoi;
+		rule S = eps > eoi;
 		grammar G = start(S);
 		assert(lug::parse("", G));
 		assert(!lug::parse("a", G));
@@ -34,7 +34,7 @@ namespace
 	void test_char_terminal()
 	{
 		using namespace lug::language;
-		rule S = lug::chr('a') > lug::eoi;
+		rule S = chr('a') > eoi;
 		grammar G = start(S);
 		assert(lug::parse("a", G));
 		assert(!lug::parse("", G));
@@ -46,7 +46,7 @@ namespace
 	void test_terminal_sequence()
 	{
 		using namespace lug::language;
-		rule S = lug::chr('a') > lug::any > lug::chr('b') > lug::eoi;
+		rule S = chr('a') > any > chr('b') > eoi;
 		grammar G = start(S);
 		assert(lug::parse("a2b", G));
 		assert(lug::parse("azb", G));
@@ -59,7 +59,7 @@ namespace
 	void test_terminal_choice()
 	{
 		using namespace lug::language;
-		rule S = (lug::chr('a') | lug::chr('b')) > lug::eoi;
+		rule S = (chr('a') | chr('b')) > eoi;
 		grammar G = start(S);
 		assert(lug::parse("a", G));
 		assert(lug::parse("b", G));
@@ -71,7 +71,7 @@ namespace
 	void test_terminal_zero_or_one()
 	{
 		using namespace lug::language;
-		rule S = ~lug::chr('x') > lug::eoi;
+		rule S = ~chr('x') > eoi;
 		grammar G = start(S);
 		assert(lug::parse("", G));
 		assert(lug::parse("x", G));
@@ -85,7 +85,7 @@ namespace
 	void test_terminal_zero_or_many()
 	{
 		using namespace lug::language;
-		rule S = *lug::chr('x') > lug::eoi;
+		rule S = *chr('x') > eoi;
 		grammar G = start(S);
 		assert(lug::parse("", G));
 		assert(lug::parse("x", G));
@@ -99,7 +99,7 @@ namespace
 	void test_terminal_one_or_many()
 	{
 		using namespace lug::language;
-		rule S = +lug::chr('x') > lug::eoi;
+		rule S = +chr('x') > eoi;
 		grammar G = start(S);
 		assert(lug::parse("x", G));
 		assert(lug::parse("xx", G));
@@ -113,7 +113,7 @@ namespace
 	void test_terminal_not()
 	{
 		using namespace lug::language;
-		rule S = !lug::chr('x') > lug::any > lug::eoi;
+		rule S = !chr('x') > any > eoi;
 		grammar G = start(S);
 		assert(lug::parse("y", G));
 		assert(lug::parse("Z", G));
@@ -128,7 +128,7 @@ namespace
 	void test_terminal_predicate()
 	{
 		using namespace lug::language;
-		rule S = &lug::chr('x') > lug::any > lug::any > lug::eoi;
+		rule S = &chr('x') > any > any > eoi;
 		grammar G = start(S);
 		assert(lug::parse("xx", G));
 		assert(lug::parse("xy", G));
