@@ -11,6 +11,17 @@
 #include <string_view>
 #include <type_traits>
 
+#define LUG_BITFIELD_ENUM__(Name, UnderlyingType) \
+enum class Name : UnderlyingType; \
+constexpr Name operator~(Name x) noexcept { return static_cast<Name>(~static_cast<UnderlyingType>(x)); } \
+constexpr Name operator&(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) & static_cast<UnderlyingType>(y)); } \
+constexpr Name operator|(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) | static_cast<UnderlyingType>(y)); } \
+constexpr Name operator^(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) ^ static_cast<UnderlyingType>(y)); } \
+constexpr Name& operator&=(Name& x, Name y) noexcept { return (x = x & y); } \
+constexpr Name& operator|=(Name& x, Name y) noexcept { return (x = x | y); } \
+constexpr Name& operator^=(Name& x, Name y) noexcept { return (x = x ^ y); } \
+enum class Name : UnderlyingType
+
 namespace lug::detail
 {
 

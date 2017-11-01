@@ -48,9 +48,7 @@ enum class altcode : unsigned char
 };
 
 enum class immediate : unsigned short {};
-enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, altcode = 0x3f };
-constexpr operands operator&(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) & static_cast<unsigned char>(y)); }
-constexpr operands operator|(operands x, operands y) noexcept { return static_cast<operands>(static_cast<unsigned char>(x) | static_cast<unsigned char>(y)); }
+LUG_BITFIELD_ENUM__(operands, unsigned char) { none = 0, altcode = 0x3f, off = 0x40, str = 0x80 };
 constexpr operands to_operands(altcode alt) noexcept { return static_cast<operands>(alt) & operands::altcode; }
 
 union instruction
@@ -91,13 +89,7 @@ static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be sa
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
 static_assert(sizeof(unicode::ctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::ctype");
 static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::sctype");
-
-enum class directives : unsigned { none = 0, caseless = 1, lexeme = 2, noskip = 4, matcheps = 8 };
-constexpr directives operator~(directives x) noexcept { return static_cast<directives>(~static_cast<unsigned>(x)); }
-constexpr directives operator&(directives x, directives y) noexcept { return static_cast<directives>(static_cast<unsigned>(x) & static_cast<unsigned>(y)); }
-constexpr directives operator|(directives x, directives y) noexcept { return static_cast<directives>(static_cast<unsigned>(x) | static_cast<unsigned>(y)); }
-constexpr directives& operator&=(directives& x, directives y) noexcept { return (x = x & y); }
-constexpr directives& operator|=(directives& x, directives y) noexcept { return (x = x | y); }
+LUG_BITFIELD_ENUM__(directives, unsigned int) { none = 0, caseless = 1, lexeme = 2, noskip = 4, matcheps = 8, predrain = 16, postdrain = 32 };
 
 struct program
 {
@@ -310,6 +302,7 @@ public:
 	encoder& encode(opcode op, altcode alt, std::ptrdiff_t off, immediate imm = immediate{0}) {
 		return append(instruction{op, operands::off | to_operands(alt), imm}).append(instruction{off});
 	}
+
 	encoder& encode(opcode op, altcode alt, std::size_t val, std::string_view subsequence) {
 		if (!subsequence.empty()) {
 			detail::assure_in_range<resource_limit_error>(val, 1u, instruction::maxstrlen);
@@ -339,7 +332,7 @@ public:
 	encoder& match(unicode::ctype flags) { return encode(opcode::match_class, immediate{static_cast<unsigned short>(flags)}).dclr(directives::matcheps); }
 	encoder& match(unicode::ptype flags) { return encode(opcode::match_class, altcode::match_ptype, 1, detail::string_pack(flags)).dclr(directives::matcheps); }
 	encoder& match(unicode::gctype flags) { return encode(opcode::match_class, altcode::match_gctype, 1, detail::string_pack(flags)).dclr(directives::matcheps); }
-	encoder& match(unicode::sctype type) { return encode(opcode::match_class, altcode::match_gctype, immediate{static_cast<unsigned short>(type)}).dclr(directives::matcheps); }
+	encoder& match(unicode::sctype type) { return encode(opcode::match_class, altcode::match_sctype, immediate{static_cast<unsigned short>(type)}).dclr(directives::matcheps); }
 };
 
 class instruction_length_evaluator final : public encoder
@@ -500,6 +493,11 @@ struct directive_modifier {
 	auto operator[](const E& e) const { return [e = make_expression(e)](encoder& d) { d.dpsh(EnableMask, DisableMask).evaluate(e).dpop(RelayMask); }; }
 };
 
+constexpr auto pre_drain = directive_modifier<directives::predrain, directives::postdrain, directives::matcheps>{};
+constexpr auto post_drain = directive_modifier<directives::postdrain, directives::none, directives::matcheps>{};
+constexpr auto accept_eps = directive_modifier<directives::none, directives::none, directives::none>{};
+constexpr auto relay_eps = directive_modifier<directives::none, directives::none, directives::matcheps | directives::predrain>{};
+
 namespace language
 {
 
@@ -508,14 +506,11 @@ using lug::grammar; using lug::rule; using lug::start;
 using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
 template <class T> using variable = lug::variable<T>;
 
-constexpr auto case_insensitive = directive_modifier<directives::caseless, directives::none, directives::matcheps>{};
-constexpr auto case_sensitive = directive_modifier<directives::none, directives::caseless, directives::matcheps>{};
+constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::matcheps>{};
+constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::matcheps>{};
 constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::matcheps>{};
 constexpr auto no_skip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::matcheps>{};
 constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::matcheps>{};
-constexpr auto accept_eps = directive_modifier<directives::none, directives::none, directives::none>{};
-constexpr auto reject_eps = directive_modifier<directives::none, directives::matcheps, directives::matcheps>{};
-constexpr auto relay_eps = directive_modifier<directives::none, directives::none, directives::matcheps>{};
 
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_any).dclr(directives::matcheps); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
@@ -537,12 +532,12 @@ constexpr auto operator&(const E& e) { return [x = make_expression(e)](encoder& 
 		d.encode(opcode::choice, 2 + d.evaluate_length(x)).evaluate(accept_eps[x]).encode(opcode::commit, altcode::commit_back, 1).encode(opcode::fail); }; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator*(const E& e) { return [x = make_expression(e)](encoder& d) { auto n = d.evaluate_length(x);
-		d.encode(opcode::choice, 2 + n).evaluate(accept_eps[x]).encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
+		d.encode(opcode::choice, 2 + n).evaluate(accept_eps[post_drain[x]]).encode(opcode::commit, altcode::commit_partial, -(2 + n)); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 constexpr auto operator|(const E1& e1, const E2& e2) { return [x1 = make_expression(e1), x2 = make_expression(e2)](encoder& d) {
 		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(relay_eps[x1]).encode(opcode::commit, d.evaluate_length(x2)).evaluate(relay_eps[x2]); }; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(e2); }; }
+constexpr auto operator>(const E1& e1, const E2& e2) { return [e1 = make_expression(e1), e2 = make_expression(e2)](encoder& d) { d.evaluate(e1).evaluate(pre_drain[e2]); }; }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(const E& e, A a) {
