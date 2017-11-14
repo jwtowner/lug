@@ -15,13 +15,12 @@ namespace samples::calc
 	variable<int> i{Sema};
 	double v[26];
 
-	rule EOL	= lexeme[ "[\n\r;]"s ];
+	rule EOL	= lexeme[ "[\n\r;]" ];
 
-	rule ID		= lexeme[ m<< "[a-z]"s       <[]() -> int { return m->at(0) - 'a'; } ];
+	rule ID		= lexeme[ capture[ "[a-z]" ](m) <[]() -> int { return m->at(0) - 'a'; } ];
 
-	rule NUMBER = lexeme[
-				m<< (~"[-+]"s > +"[0-9]"s
-				> ~("[.]"s > +"[0-9]"s))     <[]{ return std::stod(std::string{*m}); } ];
+	rule NUMBER = lexeme[ capture[ ~"[-+]"s > +"[0-9]"s > ~("[.]" > +"[0-9]"s) ](m)
+				    <[]{ return std::stod(std::string{*m}); } ];
 
 	extern rule Expr;
 

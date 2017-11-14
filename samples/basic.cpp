@@ -1,7 +1,7 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
-//
+
 // Derived from BASIC, Dartmouth College Computation Center, October 1st 1964
 // http://www.bitsavers.org/pdf/dartmouth/BASIC_Oct64.pdf
 
@@ -34,16 +34,15 @@ public:
 
 		rule Expr;
 
+		rule CR		= lexeme[ "\n"s | "\r\n" | "\r" ];
+		rule Func	= lexeme[ capture[ "[A-Z]" > *"[A-Z0-9]"s ](id_) ]    <[this]{ return *id_; };
+		rule LineNo	= lexeme[ capture[ +"[0-9]"s ](sv_) ]                 <[this]{ return std::stoi(std::string{*sv_}); };
+		rule Real	= lexeme[ capture[ +"[0-9]"s > ~("[.]"s > +"[0-9]"s)
+					    > ~("[eE]"s > ~"[+-]"s > +"[0-9]"s) ](sv_) ]      <[this]{ return std::stod(std::string{*sv_}); };
+		rule String	= lexeme[ "\"" > capture[ *"[^\"]"s ](sv_) > "\"" ]   <[this]{ return *sv_; };
+		rule Var	= lexeme[ capture[ "[A-Z]" > ~"[0-9]"s ](id_) ]       <[this]{ return *id_; };
 		rule LParen = lexeme[ "(" ];
 		rule RParen = lexeme[ ")" ];
-		rule CR		= lexeme[ "\n"s | "\r\n" | "\r" ];
-		rule Func	= lexeme[ id_<< ("[A-Z]" > *"[A-Z0-9]"s) ]  <[this]{ return *id_; };
-		rule LineNo	= lexeme[ sv_<< +"[0-9]"s ]                 <[this]{ return std::stoi(std::string{*sv_}); };
-		rule Real	= lexeme[ sv_<< (+"[0-9]"s > ~("[.]"s
-					> +"[0-9]"s) > ~("[eE]"s > ~"[+-]"s
-					> +"[0-9]"s)) ]                             <[this]{ return std::stod(std::string{*sv_}); };
-		rule String	= lexeme[ "\"" > sv_<< *"[^\"]"s > "\"" ]   <[this]{ return *sv_; };
-		rule Var	= lexeme[ id_<< ("[A-Z]" > ~"[0-9]"s) ]     <[this]{ return *id_; };
 
 		rule RelOp	= "="                                       <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 					| ">="                                      <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -113,7 +112,7 @@ public:
 
 		rule Line	= Stmnt > CR
 					| Cmnd > CR
-					| no_%LineNo > sv_<< (*(!CR > ".") > CR)    <[this]{ update_line(*no_, *sv_); }
+					| no_%LineNo > capture[ *(!CR > ".") > CR ](sv_)    <[this]{ update_line(*no_, *sv_); }
 					| CR
 					| (*(!CR > ".") > CR)                       <[this]{ print_error("ILLEGAL FORMULA"); }
 					| !"."s                                     <[this]{ std::exit(EXIT_SUCCESS); };

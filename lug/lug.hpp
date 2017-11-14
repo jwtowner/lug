@@ -38,7 +38,7 @@ enum class opcode : unsigned char
 	match,          match_any,      match_class,    match_range,
 	match_set,      choice,         commit,         jump,
 	call,           ret,            fail,           accept,
-	predicate,      action,         begin_capture,  end_capture
+	predicate,      action,         begin,          end
 };
 
 enum class altcode : unsigned char
@@ -108,7 +108,7 @@ struct program
 			switch (instr.pf.op) {
 				case opcode::predicate: valoffset = predicates.size(); break;
 				case opcode::action: valoffset = actions.size(); break;
-				case opcode::end_capture: valoffset = captures.size(); break;
+				case opcode::end: valoffset = captures.size(); break;
 				default: valoffset = 0; break;
 			}
 			if (valoffset != 0) {
@@ -576,7 +576,7 @@ constexpr auto operator>(const E1& e1, const E2& e2) { return [x1 = make_express
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(const E& e, A a) {
 	if constexpr (std::is_invocable_v<A, semantics&, syntax>)
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.skip().encode(opcode::begin_capture).evaluate(e).encode(opcode::end_capture, semantic_capture{a}); };
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, semantic_capture{a}); };
 	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>)
 		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
 	else if constexpr (std::is_invocable_v<A, semantics&>)
@@ -593,8 +593,14 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator~(const E& e) { return e | eps; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e) { return cut > e; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e > cut; }
-template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator<<(variable<T>& v, const E& e) { return e < [&v](semantics&, syntax x) { *v = T{x.capture}; }; }
+
+constexpr struct {
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	constexpr auto operator[](const E& e) const {
+		return [&e](auto& v) constexpr { return e < [&v](semantics&, syntax x) { *v = std::remove_reference_t<decltype(*v)>{x.capture}; }; };
+	}
+} capture = {};
+
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); }; }
 
@@ -890,11 +896,11 @@ public:
 				case opcode::action: {
 					rc = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
-				case opcode::begin_capture: {
+				case opcode::begin: {
 					stack_frames_.push_back(stack_frame_type::capture);
 					capture_stack_.push_back(static_cast<subject>(sr));
 				} break;
-				case opcode::end_capture: {
+				case opcode::end: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
 					auto sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
@@ -947,10 +953,10 @@ inline grammar string_expression::make_grammar() {
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
 	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-		| chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
-		| any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	| chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	| any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
 	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
-		> Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
+	> Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
 	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }

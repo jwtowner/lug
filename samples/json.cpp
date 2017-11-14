@@ -15,7 +15,7 @@ public:
 		rule FractionalPart = lexeme[ "[.]" > +"[0-9]"s ];
 		rule IntegralPart   = lexeme[ "0" | "[1-9]" > *"[0-9]"s ];
 		rule Number         = lexeme[ ~"-"s > IntegralPart > ~FractionalPart > ~ExponentPart ];
-		rule Boolean        = lexeme[ "true"s | "false" ];
+		rule Boolean        = lexeme[ "true"s | "false"s ];
 		rule Null           = lexeme[ "null" ];
 		rule UnicodeEscape  = lexeme[ chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"s ];
 		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]" | UnicodeEscape) ];
