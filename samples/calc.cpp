@@ -13,9 +13,9 @@ namespace samples::calc
 	variable<std::string_view> m{Sema};
 	variable<double> e{Sema}, l{Sema}, n{Sema}, r{Sema}, s{Sema};
 	variable<int> i{Sema};
-	double variables[26];
+	double v[26];
 
-	rule EOL	= lexeme[ "\n"s | "\r\n" | "\r" | ";" ];
+	rule EOL	= lexeme[ "[\n\r;]"s ];
 
 	rule ID		= lexeme[ m<< "[a-z]"s       <[]() -> int { return m->at(0) - 'a'; } ];
 
@@ -26,7 +26,7 @@ namespace samples::calc
 	extern rule Expr;
 
 	rule Value	= n%NUMBER                   <[]{ return *n; }
-				| i%ID > !"="s               <[]{ return variables[*i]; }
+				| i%ID > !"="s               <[]{ return v[*i]; }
 				| "(" > e%Expr > ")"         <[]{ return *e; };
 
 	rule Prod	= l%Value > *(
@@ -39,11 +39,10 @@ namespace samples::calc
 				    | "-" > r%Prod           <[]{ *l -= *r; }
 				)                            <[]{ return *l; };
 
-	rule Expr	= i%ID > "=" > s%Sum         <[]{ return variables[*i] = *s; }
+	rule Expr	= i%ID > "=" > s%Sum         <[]{ return v[*i] = *s; }
 				| s%Sum                      <[]{ return *s; };
 	
-	rule Stmt	= (
-				      "quit"                 <[]{ std::exit(EXIT_SUCCESS); }
+	rule Stmt	= (   "quit"                 <[]{ std::exit(EXIT_SUCCESS); }
 				    | e%Expr                 <[]{ std::cout << *e << std::endl; }
 				) > EOL
 				| *( !EOL > "." ) > EOL      <[]{ std::cerr << "syntax error" << std::endl; };

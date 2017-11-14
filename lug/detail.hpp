@@ -93,14 +93,6 @@ inline auto pop_back(Sequence& s)
 	return result;
 }
 
-template <class Sequence, class T, class BinaryOp>
-inline auto fetch_reduce_back(Sequence& s, T value, BinaryOp op)
-{
-	typename Sequence::value_type result{::std::move(s.back())};
-	s.back() = op(result, value);
-	return result;
-}
-
 template <class Integral>
 inline std::string string_pack(Integral n) noexcept
 {

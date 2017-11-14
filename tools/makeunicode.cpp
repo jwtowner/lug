@@ -637,29 +637,8 @@ std::ostream& print_table(std::ostream& out, std::string_view name, std::string_
 class enum_printer
 {
 	enum_type enum_type_;
-	std::string_view name_;
-	std::string_view type_;
-	std::string_view comment_;
+	std::string_view name_, type_, comment_;
 	std::function<void(std::ostream&)> body_;
-
-	enum_printer const& unary(std::ostream& out, std::string_view op) const {
-		out << "constexpr " << name_ << " operator" << op << "(" << name_ <<
-			" x) noexcept { return static_cast<" << name_ << ">(" << op << "static_cast<" << type_ << ">(x)); }\n";
-		return *this;
-	}
-
-	enum_printer const& binary(std::ostream& out, std::string_view op) const {
-		out << "constexpr " << name_ << " operator" << op << "(" << name_ << " x, " << name_ <<
-			" y) noexcept { return static_cast<" << name_ << ">(static_cast<" << type_ << ">(x) " <<
-			op << " static_cast<" << type_ << ">(y)); }\n";
-		return *this;
-	}
-
-	enum_printer const& assign(std::ostream& out, std::string_view op) const {
-		out << "inline " << name_ << " operator" << op << "=(" << name_ << "& x, " << name_ <<
-			" y) noexcept { return (x = x " << op << " y); }\n";
-		return *this;
-	}
 
 public:
 	template <class BodyPrinter>
@@ -667,21 +646,19 @@ public:
 		: enum_type_{etype}, name_{name}, type_{type}, comment_{comment}, body_{std::move(body)} {}
 
 	friend std::ostream& operator<<(std::ostream& out, enum_printer const& p) {
-		out << "// " << p.comment_ << "\nenum class " << p.name_ << " : " << p.type_ << "\n{\n";
+		out << "// " << p.comment_ << "\n";
+		if (p.enum_type_ == enum_type::bitfield)
+			out << "LUG_BITFIELD_ENUM__(" << p.name_ << ", " << p.type_ << ")\n{\n";
+		else
+			out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
 		p.body_(out);
-		out << "};\n";
-		if (p.enum_type_ == enum_type::bitfield) {
-			out << "\n";
-			p.unary(out, "~").binary(out, "&").binary(out, "|").binary(out, "^").assign(out, "&").assign(out, "|").assign(out, "^");
-		}
-		return out;
+		return out << "};\n";
 	}
 };
 
 class enum_parser_printer
 {
-	std::string_view name_;
-	std::string_view abbr_;
+	std::string_view name_, abbr_;
 	std::function<std::vector<std::pair<std::string, std::string>>()> label_source_;
 
 public:
@@ -794,17 +771,15 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #ifndef LUG_UNICODE_HPP__
 #define LUG_UNICODE_HPP__
 
+#include <lug/detail.hpp>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
 #include <array>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <optional>
-#include <string>
-#include <string_view>
 #include <utility>
 
 namespace lug::unicode
@@ -962,11 +937,11 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_table()
 {
 )c++"
-	<< rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n"
+<< rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n"
 
-	<< rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << "\n"
+<< rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << "\n"
 
-	<< record_flyweight_printer(recordvalues)
+<< record_flyweight_printer(recordvalues)
 << R"c++(
 	auto table = std::make_unique<raw_record_table>();
 	detail::run_length_decode(rlestage1.begin(), rlestage1.end(), table->stage1.begin());

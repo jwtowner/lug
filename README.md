@@ -5,9 +5,11 @@ An embedded domain specific language for expressing parsers as extended [parsing
 Features
 ---
 - Natural syntax more akin to external parser generator languages
+- Separation of syntatic and lexical rules, with customizable implicit whitespace skipping
 - Direct and indirect left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
+- Evaluation of semantic actions is deferred until a match is deemed successful, ensuring actions don''t execute on failed branches
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - UTF-8 text parsing with near-complete Level 1 support of the UTS #18 Unicode Regular Expressions technical standard
 - Header only library using C++17 language and library features
@@ -48,13 +50,13 @@ TODO
 - parser error recovery
 - add an interactive processing mode flag to input sources?
 - handle exceptions thrown from semantic actions in semantics::accept?
-- feature: separation of syntatic and lexical rules, with implicit whitespace skipping and built-in line and column number tracking
+- automatic line/column tracking during semantic action phase
 - feature: case insensitive matching
 - feature: symbol tables and parsing conditions
 - feature: Adams' grammars and alignment elimination
 - feature: syntax to specify number range of allowed iteration
 - optimization: tail recursion
-- optimization: reduce number of left-recursive calls even further by lazily evaluating rule::matches_eps
+- optimization: reduce number of false-positive left-recursive calls even further by lazily evaluating rule mandate
 - optimization: additional instructions (test_char, test_any, test_range, test_class)
 - more samples, testing, and bug fixing
 - increase compiler warning level and fix any issues

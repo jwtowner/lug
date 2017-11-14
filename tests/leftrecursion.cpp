@@ -10,6 +10,7 @@ namespace
 	void test_direct_left_recursion()
 	{
 		using namespace lug::language;
+		grammar::space = nop;
 		rule R = R > chr('a') | chr('a');
 		rule S = R > !chr('a');
 		grammar G = start(S);
@@ -27,6 +28,7 @@ namespace
 	void test_indirect_left_recursion()
 	{
 		using namespace lug::language;
+		grammar::space = nop;
 		rule Q, R, S;
 		Q = R > chr('a');
 		R = Q | chr('a');
@@ -46,6 +48,7 @@ namespace
 	void test_association_and_precedence()
 	{
 		using namespace lug::language;
+		grammar::space = nop;
 		std::string out;
 		rule N	= chr('1') | chr('2') | chr('3');
 		rule E	= E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
