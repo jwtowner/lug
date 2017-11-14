@@ -9,24 +9,22 @@
 #ifndef LUG_UNICODE_HPP__
 #define LUG_UNICODE_HPP__
 
+#include <lug/detail.hpp>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
 #include <array>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <optional>
-#include <string>
-#include <string_view>
 #include <utility>
 
 namespace lug::unicode
 {
 
 // POSIX compatibility properties
-enum class ctype : std::uint_least16_t
+LUG_BITFIELD_ENUM__(ctype, std::uint_least16_t)
 {
 	alpha    = UINT16_C(1) <<  0,
 	lower    = UINT16_C(1) <<  1,
@@ -44,16 +42,8 @@ enum class ctype : std::uint_least16_t
 	none     = 0
 };
 
-constexpr ctype operator~(ctype x) noexcept { return static_cast<ctype>(~static_cast<std::uint_least16_t>(x)); }
-constexpr ctype operator&(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) & static_cast<std::uint_least16_t>(y)); }
-constexpr ctype operator|(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) | static_cast<std::uint_least16_t>(y)); }
-constexpr ctype operator^(ctype x, ctype y) noexcept { return static_cast<ctype>(static_cast<std::uint_least16_t>(x) ^ static_cast<std::uint_least16_t>(y)); }
-inline ctype operator&=(ctype& x, ctype y) noexcept { return (x = x & y); }
-inline ctype operator|=(ctype& x, ctype y) noexcept { return (x = x | y); }
-inline ctype operator^=(ctype& x, ctype y) noexcept { return (x = x ^ y); }
-
 // Unicode binary properties
-enum class ptype : std::uint_least64_t
+LUG_BITFIELD_ENUM__(ptype, std::uint_least64_t)
 {
 	Any                                  = UINT64_C(1) <<  0,
 	Ascii                                = UINT64_C(1) <<  1,
@@ -111,16 +101,8 @@ enum class ptype : std::uint_least64_t
 	None                                 = 0
 };
 
-constexpr ptype operator~(ptype x) noexcept { return static_cast<ptype>(~static_cast<std::uint_least64_t>(x)); }
-constexpr ptype operator&(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) & static_cast<std::uint_least64_t>(y)); }
-constexpr ptype operator|(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) | static_cast<std::uint_least64_t>(y)); }
-constexpr ptype operator^(ptype x, ptype y) noexcept { return static_cast<ptype>(static_cast<std::uint_least64_t>(x) ^ static_cast<std::uint_least64_t>(y)); }
-inline ptype operator&=(ptype& x, ptype y) noexcept { return (x = x & y); }
-inline ptype operator|=(ptype& x, ptype y) noexcept { return (x = x | y); }
-inline ptype operator^=(ptype& x, ptype y) noexcept { return (x = x ^ y); }
-
 // Unicode general categories
-enum class gctype : std::uint_least32_t
+LUG_BITFIELD_ENUM__(gctype, std::uint_least32_t)
 {
 	Ll = UINT32_C(1) <<  0,    Lowercase_Letter = Ll,
 	Lm = UINT32_C(1) <<  1,    Modifier_Letter = Lm,
@@ -162,14 +144,6 @@ enum class gctype : std::uint_least32_t
 	Z  = Zl|Zp|Zs,             Separator = Z,
 	None = 0
 };
-
-constexpr gctype operator~(gctype x) noexcept { return static_cast<gctype>(~static_cast<std::uint_least32_t>(x)); }
-constexpr gctype operator&(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) & static_cast<std::uint_least32_t>(y)); }
-constexpr gctype operator|(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) | static_cast<std::uint_least32_t>(y)); }
-constexpr gctype operator^(gctype x, gctype y) noexcept { return static_cast<gctype>(static_cast<std::uint_least32_t>(x) ^ static_cast<std::uint_least32_t>(y)); }
-inline gctype operator&=(gctype& x, gctype y) noexcept { return (x = x & y); }
-inline gctype operator|=(gctype& x, gctype y) noexcept { return (x = x | y); }
-inline gctype operator^=(gctype& x, gctype y) noexcept { return (x = x ^ y); }
 
 // Unicode scripts
 enum class sctype : std::uint_least8_t

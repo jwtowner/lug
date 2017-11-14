@@ -5,7 +5,6 @@
 #ifndef LUG_HPP__
 #define LUG_HPP__
 
-#include <lug/detail.hpp>
 #include <lug/error.hpp>
 #include <lug/unicode.hpp>
 #include <lug/utf8.hpp>
@@ -48,8 +47,6 @@ enum class altcode : unsigned char
 };
 
 enum class immediate : unsigned short {};
-static_assert(sizeof(unicode::ctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::ctype");
-static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::sctype");
 LUG_BITFIELD_ENUM__(operands, unsigned char) { none = 0, altcode = 0x3f, off = 0x40, str = 0x80 };
 constexpr operands to_operands(altcode alt) noexcept { return static_cast<operands>(alt) & operands::altcode; }
 
@@ -87,8 +84,11 @@ union instruction
 	}
 };
 
+static_assert(sizeof(unicode::ctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::ctype");
+static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be large enough to hold unicode::sctype");
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
+
 LUG_BITFIELD_ENUM__(directives, unsigned int) { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
 using program_callees = std::vector<std::tuple<const lug::rule*, const lug::program*, std::ptrdiff_t, directives>>;
 
@@ -275,7 +275,7 @@ protected:
 		do_add_callee(r, p, length(), callee_mode);
 		return encode(opcode::call, off, immediate{prec});
 	}
-	void skip_space() {
+	void do_skip() {
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
 		grammar::space(*this);
 	}
@@ -301,6 +301,24 @@ public:
 	directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	directives mode() const noexcept { return mode_.back(); }
 
+	encoder& dpop(directives relay) {
+		auto prev = detail::pop_back(mode_), next = (mode_.back() & ~relay) | (prev & relay);
+		if ((next & directives::postskip) == directives::none && (prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip)
+			do_skip();
+		mode_.back() = next;
+		return *this;
+	}
+
+	encoder& skip(directives callee_mandate = directives::eps, directives callee_skip = directives::lexeme) {
+		auto mode = mode_.back();
+		if (mandate_ == directives::none)
+			mandate_ = (mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
+		if ((((mode | callee_mandate)) & (callee_skip | directives::preskip)) == directives::preskip)
+			do_skip();
+		mode_.back() = mode & ~(callee_mandate & directives::eps);
+		return *this;
+	}
+
 	encoder& call(const rule& r, unsigned short prec, bool allow_inlining = true) {
 		if (const auto& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
 					p.instructions.size() <= 8 && p.predicates.size() <= 1 && p.actions.size() <= 1 && p.captures.size() <= 1)
@@ -322,24 +340,6 @@ public:
 				subsequence.remove_prefix((std::min)(std::size_t{4}, subsequence.size()));
 			} while (!subsequence.empty());
 		}
-		return *this;
-	}
-
-	encoder& dpop(directives relay) {
-		auto prev = detail::pop_back(mode_), next = (mode_.back() & ~relay) | (prev & relay);
-		if ((next & directives::postskip) == directives::none && (prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip)
-			skip_space();
-		mode_.back() = next;
-		return *this;
-	}
-
-	encoder& skip(directives callee_mandate = directives::eps, directives callee_skip = directives::lexeme) {
-		auto mode = mode_.back();
-		if (mandate_ == directives::none)
-			mandate_ = (mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		if ((((mode | callee_mandate)) & (callee_skip | directives::preskip)) == directives::preskip)
-			skip_space();
-		mode_.back() = mode & ~(callee_mandate & directives::eps);
 		return *this;
 	}
 
@@ -537,26 +537,45 @@ namespace language
 
 using namespace std::literals::string_literals;
 using lug::grammar; using lug::rule; using lug::start;
+using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
 using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
 template <class T> using variable = lug::variable<T>;
-
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
 constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
 constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
 constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
-constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
+constexpr struct { void operator()(encoder&) const {} } nop = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
+constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
 constexpr struct { void operator()(encoder& d) const { d.match("\n"); } } eol = {}; // TODO: special rule for unicode line ending
-constexpr struct { void operator()(encoder&) const {} } nop = {};
-constexpr struct { void operator()(encoder& d) const { d.match(unicode::ctype::space); } } space = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::alpha); } } alpha = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::lower); } } lower = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::upper); } } upper = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::punct); } } punct = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::digit); } } digit = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::xdigit); } } xdigit = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::alnum); } } alnum = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::space); } } space = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::blank); } } blank = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::cntrl); } } cntrl = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::graph); } } graph = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::print); } } print = {};
+constexpr struct { void operator()(encoder& d) const { d.match(ctype::word); } } word = {};
 
 constexpr struct {
 	auto operator()(char c) const { return [c](encoder& d) { d.match(std::string_view{&c, 1}); }; }
 	auto operator()(char s, char e) const { return [s, e](encoder& d) { d.match(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
 } chr = {};
+
+constexpr struct {
+	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
+	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
+	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
+	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
+} prop = {};
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator!(const E& e) { return [x = matches_eps[e]](encoder& d) {
@@ -595,10 +614,8 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e > cut; }
 
 constexpr struct {
-	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	constexpr auto operator[](const E& e) const {
-		return [&e](auto& v) constexpr { return e < [&v](semantics&, syntax x) { *v = std::remove_reference_t<decltype(*v)>{x.capture}; }; };
-	}
+	template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator[](const E& e) const {
+		return [&e](auto& v) constexpr { return e < [&v](semantics&, syntax x) { *v = std::remove_reference_t<decltype(*v)>{x.capture}; }; }; }
 } capture = {};
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -953,10 +970,10 @@ inline grammar string_expression::make_grammar() {
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
 	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-	| chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
-	| any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	    | chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	    | any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
 	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
-	> Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
+	    > Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
 	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
