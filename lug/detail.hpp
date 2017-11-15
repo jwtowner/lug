@@ -11,18 +11,57 @@
 #include <string_view>
 #include <type_traits>
 
-#define LUG_BITFIELD_ENUM__(Name, UnderlyingType) \
-enum class Name : UnderlyingType; \
-constexpr Name operator~(Name x) noexcept { return static_cast<Name>(~static_cast<UnderlyingType>(x)); } \
-constexpr Name operator&(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) & static_cast<UnderlyingType>(y)); } \
-constexpr Name operator|(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) | static_cast<UnderlyingType>(y)); } \
-constexpr Name operator^(Name x, Name y) noexcept { return static_cast<Name>(static_cast<UnderlyingType>(x) ^ static_cast<UnderlyingType>(y)); } \
-constexpr Name& operator&=(Name& x, Name y) noexcept { return (x = x & y); } \
-constexpr Name& operator|=(Name& x, Name y) noexcept { return (x = x | y); } \
-constexpr Name& operator^=(Name& x, Name y) noexcept { return (x = x ^ y); } \
-enum class Name : UnderlyingType
+namespace lug
+{
 
-namespace lug::detail
+inline namespace bitfield_enum_operators
+{
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T operator~(T x) noexcept
+{
+	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x));
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T operator&(T x, T y) noexcept
+{
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T operator|(T x, T y) noexcept
+{
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T operator^(T x, T y) noexcept
+{
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T& operator&=(T& x, T y) noexcept
+{
+	return (x = x & y);
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T& operator|=(T& x, T y) noexcept
+{
+	return (x = x | y);
+}
+
+template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+constexpr T& operator^=(T& x, T y) noexcept
+{
+	return (x = x ^ y);
+}
+
+} // namespace bitfield_enum_operators
+
+namespace detail
 {
 
 template <class T>
@@ -105,6 +144,8 @@ inline Integral string_unpack(std::string_view s) noexcept
 	return *reinterpret_cast<Integral const*>(s.data());
 }
 
-} // namespace lug::detail
+} // namespace detail
+
+} // namespace lug
 
 #endif

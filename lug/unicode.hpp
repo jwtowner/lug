@@ -24,8 +24,9 @@ namespace lug::unicode
 {
 
 // POSIX compatibility properties
-LUG_BITFIELD_ENUM__(ctype, std::uint_least16_t)
+enum class ctype : std::uint_least16_t
 {
+	is_bitfield_enum,
 	alpha    = UINT16_C(1) <<  0,
 	lower    = UINT16_C(1) <<  1,
 	upper    = UINT16_C(1) <<  2,
@@ -43,8 +44,9 @@ LUG_BITFIELD_ENUM__(ctype, std::uint_least16_t)
 };
 
 // Unicode binary properties
-LUG_BITFIELD_ENUM__(ptype, std::uint_least64_t)
+enum class ptype : std::uint_least64_t
 {
+	is_bitfield_enum,
 	Any                                  = UINT64_C(1) <<  0,
 	Ascii                                = UINT64_C(1) <<  1,
 	Assigned                             = UINT64_C(1) <<  2,
@@ -102,8 +104,9 @@ LUG_BITFIELD_ENUM__(ptype, std::uint_least64_t)
 };
 
 // Unicode general categories
-LUG_BITFIELD_ENUM__(gctype, std::uint_least32_t)
+enum class gctype : std::uint_least32_t
 {
+	is_bitfield_enum,
 	Ll = UINT32_C(1) <<  0,    Lowercase_Letter = Ll,
 	Lm = UINT32_C(1) <<  1,    Modifier_Letter = Lm,
 	Lo = UINT32_C(1) <<  2,    Other_Letter = Lo,

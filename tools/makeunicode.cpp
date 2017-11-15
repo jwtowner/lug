@@ -647,10 +647,9 @@ public:
 
 	friend std::ostream& operator<<(std::ostream& out, enum_printer const& p) {
 		out << "// " << p.comment_ << "\n";
+		out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
 		if (p.enum_type_ == enum_type::bitfield)
-			out << "LUG_BITFIELD_ENUM__(" << p.name_ << ", " << p.type_ << ")\n{\n";
-		else
-			out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
+			out << "\tis_bitfield_enum,\n";
 		p.body_(out);
 		return out << "};\n";
 	}
