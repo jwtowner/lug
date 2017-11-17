@@ -89,7 +89,7 @@ public:
 					| caseless["FOR"] > id_%Var > "=" > r1_%Expr
 					    > caseless["TO"] > r2_%Expr
 					    > ( caseless["STEP"] > r3_%Expr
-					      | eps < [this]{ *r3_ = 1.0; } )            <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
+					      | eps < [this]{ *r3_ = 1.0; } )           <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
 					| caseless["NEXT"] > id_%Var                    <[this]{ next(*id_); }
 					| caseless["GOTO"] > no_%LineNo                 <[this]{ goto_line(*no_); }
 					| caseless["READ"] > ReadEl > *("," > ReadEl)
