@@ -17,9 +17,9 @@ namespace samples::calc
 
 	rule EOL	= lexeme[ "[\n\r;]" ];
 
-	rule ID		= lexeme[ capture[ "[a-z]" ](m) <[]() -> int { return m->at(0) - 'a'; } ];
+	rule ID		= lexeme[ capture(m)[ "[a-z]" ] <[]() -> int { return m->at(0) - 'a'; } ];
 
-	rule NUMBER = lexeme[ capture[ ~"[-+]"s > +"[0-9]"s > ~("[.]" > +"[0-9]"s) ](m)
+	rule NUMBER = lexeme[ capture(m)[ ~"[-+]"s > +"[0-9]"s > ~("[.]" > +"[0-9]"s) ]
 				    <[]{ return std::stod(std::string{*m}); } ];
 
 	extern rule Expr;

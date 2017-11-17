@@ -614,8 +614,10 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator--(const E& e, int) { return e > cut; }
 
 constexpr struct {
-	template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto operator[](const E& e) const {
-		return [&e](auto& v) constexpr { return e < [&v](semantics&, syntax x) { *v = std::remove_reference_t<decltype(*v)>{x.capture}; }; }; }
+	template <class T> struct capture_to { variable<T>& v;
+		template <class E, class = std::enable_if_t<is_expression_v<E>>>
+		constexpr auto operator[](const E& e) const { return e < [this](semantics&, syntax x) { *v = T{x.capture}; }; } };
+	template <class T> constexpr auto operator()(variable<T>& v) const { return capture_to<T>{v}; }
 } capture = {};
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
