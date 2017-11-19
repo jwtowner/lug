@@ -14,7 +14,7 @@
 namespace lug
 {
 
-inline namespace bitfield_enum_operators
+inline namespace bitfield_ops
 {
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
@@ -32,13 +32,13 @@ constexpr T operator&(T x, T y) noexcept
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T operator|(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T operator^(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
@@ -59,7 +59,7 @@ constexpr T& operator^=(T& x, T y) noexcept
 	return (x = x ^ y);
 }
 
-} // namespace bitfield_enum_operators
+} // namespace bitfield_ops
 
 namespace detail
 {
