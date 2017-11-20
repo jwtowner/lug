@@ -19,6 +19,7 @@ namespace lug
 {
 
 struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
+typedef std::vector<std::pair<char32_t, char32_t>> rune_set;
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
@@ -34,8 +35,8 @@ template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predi
 
 enum class opcode : unsigned char
 {
-	match,          match_any,      match_class,    match_range,
-	match_set,      choice,         commit,         jump,
+	match,          match_any,      match_class,    match_set,
+	match_newline,  choice,         commit,         jump,
 	call,           ret,            fail,           accept,
 	predicate,      action,         begin,          end
 };
@@ -95,6 +96,7 @@ using program_callees = std::vector<std::tuple<const lug::rule*, const lug::prog
 struct program
 {
 	std::vector<instruction> instructions;
+	std::vector<rune_set> runesets;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture> captures;
@@ -106,6 +108,7 @@ struct program
 			instruction instr = *i;
 			std::size_t valoffset;
 			switch (instr.pf.op) {
+				case opcode::match_set: valoffset = runesets.size(); break;
 				case opcode::predicate: valoffset = predicates.size(); break;
 				case opcode::action: valoffset = actions.size(); break;
 				case opcode::end: valoffset = captures.size(); break;
@@ -120,6 +123,7 @@ struct program
 			instructions.push_back(instr);
 			instructions.insert(instructions.end(), i + 1, j);
 		}
+		runesets.insert(runesets.end(), src.runesets.begin(), src.runesets.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
@@ -127,11 +131,8 @@ struct program
 	}
 
 	void swap(program& p) {
-		instructions.swap(p.instructions);
-		predicates.swap(p.predicates);
-		actions.swap(p.actions);
-		captures.swap(p.captures);
-		std::swap(mandate, p.mandate);
+		instructions.swap(p.instructions); runesets.swap(p.runesets); predicates.swap(p.predicates);
+		actions.swap(p.actions); captures.swap(p.captures); std::swap(mandate, p.mandate);
 	}
 };
 
@@ -262,6 +263,7 @@ class encoder
 	std::vector<directives> mode_;
 	virtual void do_append(instruction) = 0;
 	virtual void do_append(const program&) = 0;
+	virtual immediate do_add_rune_set(rune_set) { return immediate{0}; }
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
@@ -285,7 +287,6 @@ public:
 	encoder& dpsh(directives enable, directives disable) { directives prev = mode_.back(); mode_.push_back((prev & ~disable) | enable); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(const program& p) { do_append(p); return *this; }
-	template <class InputIt> encoder& append(InputIt first, InputIt last) { for ( ; first != last; ++first) do_append(*first); return *this; }
 	encoder& call(const program& p, unsigned short prec) { return do_call(nullptr, &p, 0, prec); }
 	encoder& call(const grammar& g, unsigned short prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
@@ -356,7 +357,7 @@ public:
 		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
 	}
 
-	encoder& match(std::string_view f, std::string_view l) { return f == l ? match(f) : skip().encode(opcode::match_range, f.size(), std::string{f}.append(l)); }
+	encoder& match(rune_set set) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(set))); }
 	encoder& match(unicode::ctype flags) { return skip().encode(opcode::match_class, immediate{static_cast<unsigned short>(flags)}); }
 	encoder& match(unicode::ptype flags) { return skip().encode(opcode::match_class, altcode::match_ptype, 1, detail::string_pack(flags)); }
 	encoder& match(unicode::gctype flags) { return skip().encode(opcode::match_class, altcode::match_gctype, 1, detail::string_pack(flags)); }
@@ -376,22 +377,15 @@ public:
 	explicit instruction_length_evaluator(directives initial) : encoder{initial}, length_{0} {}
 };
 
-class instruction_encoder : public encoder
-{
-	std::vector<instruction>& instructions_;
-	std::ptrdiff_t do_length() const noexcept override final { return static_cast<std::ptrdiff_t>(instructions_.size()); }
-	void do_append(instruction instr) override final { instructions_.push_back(instr); }
-	void do_append(const program&) override { throw bad_grammar{}; }
-public:
-	instruction_encoder(std::vector<instruction>& i, directives initial) : encoder{initial}, instructions_{i} {}
-};
-
-class program_encoder : public instruction_encoder
+class program_encoder : public encoder
 {
 	program& program_;
 	program_callees& callees_;
+	std::ptrdiff_t do_length() const noexcept override final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
+	void do_append(instruction instr) override final { program_.instructions.push_back(instr); }
 	void do_append(const program& p) override final { program_.concatenate(p); }
 	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n, directives d) override final { callees_.emplace_back(r, p, n, d); }
+	immediate do_add_rune_set(rune_set r) override final { return add_item(program_.runesets, std::move(r)); }
 	immediate do_add_semantic_predicate(semantic_predicate p) override final { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override final { return add_item(program_.actions, std::move(a)); }
 	immediate do_add_semantic_capture_action(semantic_capture a) override final { return add_item(program_.captures, std::move(a)); }
@@ -404,7 +398,7 @@ class program_encoder : public instruction_encoder
 	}
 
 public:
-	program_encoder(program& p, program_callees& c, directives initial) : instruction_encoder{p.instructions, initial}, program_{p}, callees_{c} {}
+	program_encoder(program& p, program_callees& c, directives initial) : encoder{initial}, program_{p}, callees_{c} {}
 	~program_encoder() { program_.mandate = mandate(); }
 };
 
@@ -418,21 +412,21 @@ public:
 
 class string_expression
 {
-	std::vector<instruction> instructions_;
+	program program_;
 	directives skip_flags_{directives::none};
-	static constexpr directives bracket_flags = directives::eps | directives::lexeme;
 	static grammar make_grammar();
 	void compile(std::string_view sv);
 
 	struct generator : semantics
 	{
 		string_expression& owner;
-		instruction_encoder encoder;
-		std::vector<std::pair<std::string_view, std::string_view>> ranges;
+		program_callees callees;
+		program_encoder encoder;
+		rune_set runes;
 		unicode::ctype classes = unicode::ctype::none;
 		bool circumflex = false;
 
-		generator(string_expression& se) : owner{se}, encoder{se.instructions_, bracket_flags} {}
+		generator(string_expression& se) : owner{se}, encoder{se.program_, callees, directives::eps | directives::lexeme} {}
 		~generator() { owner.skip_flags_ = (encoder.mandate() & directives::eps) ^ directives::eps; }
 
 		void bracket_class(std::string_view s) {
@@ -446,48 +440,36 @@ class string_expression
 		}
 
 		void bracket_range(std::string_view first, std::string_view last) {
-			ranges.emplace_back(first > last ? last : first, first > last ? first : last);
-			std::push_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
+			bracket_range(utf8::decode_rune(std::begin(first), std::end(first)).first, utf8::decode_rune(std::begin(last), std::end(last)).first);
+		}
+
+		void bracket_range(char32_t first, char32_t last) {
+			runes.emplace_back((std::min)(first, last), (std::max)(first, last));
+			std::push_heap(std::begin(runes), std::end(runes));
 		}
 
 		void bracket_commit() {
-			std::vector<instruction> matches;
-			if (!ranges.empty()) {
-				std::vector<std::pair<std::string_view, std::string_view>> merged;
-				std::sort_heap(ranges.begin(), ranges.end(), [](auto& a, auto& b) { return a.first < b.first; });
-				for (auto curr = merged.end(), next = ranges.begin(), last = ranges.end(); next != last; ++next)
-					if (curr == merged.end() || next->first < curr->first || curr->second < next->first)
-						curr = merged.insert(merged.end(), *next); 
-					else
-						curr->second = curr->second < next->second ? next->second : curr->second;
-				if (auto curr = merged.crbegin(), last = merged.crend(); curr != last) {
-					instruction_encoder{matches, bracket_flags}.match(curr->first, curr->second);
-					for (++curr; curr != last; ++curr) {
-						std::vector<instruction> left, both;
-						instruction_encoder{left, bracket_flags}.match(curr->first, curr->second);
-						instruction_encoder{both, bracket_flags}
-							.encode(opcode::choice, 2 + left.size()).append(left.begin(), left.end())
-							.encode(opcode::commit, matches.size()).append(matches.begin(), matches.end());
-						matches = std::move(both);
-					}
-				}
-			}
+			rune_set mergedrunes;
+			std::sort_heap(runes.begin(), runes.end());
+			for (auto cur = mergedrunes.end(), next = runes.begin(), last = runes.end(); next != last; ++next)
+				if (cur == mergedrunes.end() || next->first < cur->first || cur->second < next->first)
+					cur = mergedrunes.insert(mergedrunes.end(), *next);
+				else
+					cur->second = cur->second < next->second ? next->second : cur->second;
 			if (circumflex)
-				encoder.encode(opcode::choice, 3 + matches.size() + (classes != unicode::ctype::none ? 1 : 0));
-			encoder.append(matches.begin(), matches.end());
+				encoder.encode(opcode::choice, 4 + (classes != unicode::ctype::none ? 1 : 0));
+			encoder.match(std::move(mergedrunes));
 			if (classes != unicode::ctype::none)
 				encoder.match(classes);
 			if (circumflex)
 				encoder.encode(opcode::commit, 0).encode(opcode::fail).match_any();
-			ranges.clear();
-			classes = unicode::ctype::none;
-			circumflex = false;
+			runes.clear(), classes = unicode::ctype::none, circumflex = false;
 		}
 	};
 
 public:
 	string_expression(std::string_view sv) { compile(sv); }
-	void operator()(encoder& d) const { d.skip(skip_flags_).append(instructions_.cbegin(), instructions_.cend()); }
+	void operator()(encoder& d) const { d.skip(skip_flags_).append(program_); }
 };
 
 template <class T>
@@ -567,7 +549,7 @@ constexpr struct { void operator()(encoder& d) const { d.match(ctype::word); } }
 
 constexpr struct {
 	auto operator()(char c) const { return [c](encoder& d) { d.match(std::string_view{&c, 1}); }; }
-	auto operator()(char s, char e) const { return [s, e](encoder& d) { d.match(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
+	//auto operator()(char32_t s, char32_t e) const { return [s, e](encoder& d) { d.match(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
 } chr = {};
 
 constexpr struct {
@@ -800,14 +782,16 @@ public:
 						goto failure;
 					sr += std::distance(first, next);
 				} break;
-				case opcode::match_range: {
-					std::string_view first = str.substr(0, imm), last = str.substr(imm);
-					if (!available((std::min)(first.size(), last.size()), sr))
+				case opcode::match_set: {
+					if (!available(1, sr))
 						goto failure;
-					auto sz = utf8::size_of_first_rune(input_.cbegin() + sr, input_.cend());
-					if (input_.compare(sr, sz, first) < 0 || input_.compare(sr, sz, last) > 0)
+					auto const& rs = prog.runesets[imm];
+					auto first = input_.cbegin() + sr;
+					auto [rune, next] = utf8::decode_rune(first, input_.cend());
+					if (auto it = std::lower_bound(rs.begin(), rs.end(), rune, [](auto& x, auto& y) { return x.second < y; });
+							it == rs.end() || rune < it->first || it->second < rune)
 						goto failure;
-					sr += sz;
+					sr += std::distance(first, next);
 				} break;
 				case opcode::choice: {
 					stack_frames_.push_back(stack_frame_type::backtrack);
