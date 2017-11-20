@@ -19,7 +19,6 @@ namespace lug
 {
 
 struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
-typedef std::vector<std::pair<char32_t, char32_t>> rune_set;
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
@@ -27,6 +26,7 @@ typedef std::function<bool(parser&)> semantic_predicate;
 typedef std::function<void(semantics&)> semantic_action;
 typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
 struct semantic_response { unsigned short call_depth, action_index; unsigned int capture_index; };
+typedef std::vector<std::pair<char32_t, char32_t>> rune_set;
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
@@ -106,27 +106,22 @@ struct program
 		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
 		for (auto i = src.instructions.begin(), j = i, e = src.instructions.end(); i != e; i = j) {
 			instruction instr = *i;
-			std::size_t valoffset;
+			std::size_t val;
 			switch (instr.pf.op) {
-				case opcode::match_set: valoffset = runesets.size(); break;
-				case opcode::predicate: valoffset = predicates.size(); break;
-				case opcode::action: valoffset = actions.size(); break;
-				case opcode::end: valoffset = captures.size(); break;
-				default: valoffset = 0; break;
+				case opcode::match_set: val = detail::push_back_unique(runesets, src.runesets[instr.pf.val]); break;
+				case opcode::predicate: val = predicates.size(); predicates.push_back(src.predicates[instr.pf.val]); break;
+				case opcode::action: val = actions.size(); actions.push_back(src.actions[instr.pf.val]); break;
+				case opcode::end: val = captures.size(); captures.push_back(src.captures[instr.pf.val]); break;
+				default: val = (std::numeric_limits<std::size_t>::max)(); break;
 			}
-			if (valoffset != 0) {
-				std::size_t val = instr.pf.val + valoffset;
-				detail::assure_in_range<resource_limit_error>(val, valoffset, (std::numeric_limits<unsigned short>::max)());
+			if (val != (std::numeric_limits<std::size_t>::max)()) {
+				detail::assure_in_range<resource_limit_error>(val, 0, (std::numeric_limits<unsigned short>::max)());
 				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
 			instructions.push_back(instr);
 			instructions.insert(instructions.end(), i + 1, j);
 		}
-		runesets.insert(runesets.end(), src.runesets.begin(), src.runesets.end());
-		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
-		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
-		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
 		mandate = (mandate & ~directives::eps) | (mandate & src.mandate & directives::eps);
 	}
 

@@ -5,7 +5,9 @@
 #ifndef LUG_DETAIL_HPP__
 #define LUG_DETAIL_HPP__
 
+#include <algorithm>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -113,7 +115,7 @@ constexpr auto make_tuple_view(Tuple&& t) noexcept
 }
 
 template<class InputIt, class UnaryPredicate>
-InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
+inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
 {
 	for ( ; first != last; ++first) {
 		if (int status = p(*first); status > 0)
@@ -122,6 +124,15 @@ InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
 			break;
 	}
 	return last;
+}
+
+template <class Sequence, class T>
+inline std::size_t push_back_unique(Sequence& s, T&& x)
+{
+	if (auto i = ::std::find(::std::cbegin(s), ::std::cend(s), x); i != ::std::cend(s))
+		return static_cast<std::size_t>(::std::distance(::std::cbegin(s), i));
+	s.push_back(::std::forward<T>(x));
+	return s.size() - 1;
 }
 
 template <class Sequence>
