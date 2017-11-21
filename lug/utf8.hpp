@@ -10,11 +10,11 @@
 #ifndef LUG_UTF8_HPP__
 #define LUG_UTF8_HPP__
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <iterator>
-#include <utility>
 #include <type_traits>
+#include <utility>
 
 namespace lug::utf8
 {
@@ -101,6 +101,31 @@ inline std::size_t count_runes(InputIt first, InputIt last)
 	for ( ; first != last; ++count)
 		first = ::lug::utf8::next_rune(first, last);
 	return count;
+}
+
+template <class OutputIt>
+inline std::pair<OutputIt, bool> encode_rune(OutputIt dest, char32_t rune)
+{
+	if (rune != U'\0') {
+		if (rune < 0x80) {
+			*dest++ = static_cast<char>(rune);
+		} else {
+			if (0x00110000U <= rune || (rune & 0xfffff800U) == 0x0000d800U)
+				return {::std::copy_n(u8"\U0000fffd", 3, dest), false};
+			unsigned int const n = rune >= 0x00010000U ? 4 : rune >= 0x00000800U ? 3 : 2;
+			for (unsigned int i = 0, c = (0xf0 << (4 - n)) & 0xf0; i < n; ++i, c = 0x80)
+				*dest++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3f) | c);
+		}
+	}
+	return {dest, true};
+}
+
+template <class String>
+inline String encode_rune_to(char32_t rune)
+{
+	String str;
+	encode_rune(::std::back_inserter(str), rune);
+	return str;
 }
 
 } // namespace lug::utf8

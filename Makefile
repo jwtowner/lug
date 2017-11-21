@@ -19,14 +19,19 @@ SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # tests
-TESTS = leftrecursion predicates terminals
-TESTS_BIN = $(SAMPLES:%=tests/%)
-TESTS_OBJ = $(SAMPLES:%=tests/%.o)
+TESTS = leftrecursion nonterminals predicates terminals
+TESTS_BIN = $(TESTS:%=tests/%)
+TESTS_OBJ = $(TESTS:%=tests/%.o)
+
+# tools
+TOOLS = makeunicode
+TOOLS_BIN = $(TOOLS:%=tools/%)
+TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # dependencies
-DEPS = lug/lug.hpp lug/unicode.hpp lug/utf8.hpp
+DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
-all: options samples tests
+all: options samples tests tools
 
 .cpp.o:
 	@echo CXX $<
@@ -48,6 +53,14 @@ $(TESTS_BIN): $(TESTS_OBJ)
 
 tests: $(TESTS_BIN)
 
+$(TOOLS_OBJ): $(DEPS)
+
+$(TOOLS_BIN): $(TOOLS_OBJ)
+	@echo CXX -o $@
+	@$(CXX) -o $@ $@.o $(LDFLAGS)
+
+tools: $(TOOLS_BIN)
+
 options:
 	@echo lug build options:
 	@echo "CXX       = $(CXX)"
@@ -62,7 +75,7 @@ clean:
 dist: clean
 	@echo creating dist tarball
 	@mkdir -p lug-$(VERSION)
-	@cp -R README.md LICENSE.md Makefile lug.sln lug/ msvs/ samples/ tests/ unicode/ lug-$(VERSION)
+	@cp -R README.md LICENSE.md Makefile lug.sln lug/ msvs/ samples/ tests/ tools/ lug-$(VERSION)
 	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
 	@gzip lug-$(VERSION).tar
 	@rm -rf lug-$(VERSION)
@@ -72,6 +85,10 @@ install: all
 	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
 	@cp -f lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@cp -f lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
+	@cp -f lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/error.hpp
 	@cp -f lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@cp -f lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
@@ -80,8 +97,10 @@ install: all
 uninstall:
 	@echo removing header files from $(DESTDIR)$(PREFIX)/include/lug
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/error.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all options samples tests clean dist install uninstall
+.PHONY: all options samples tests tools clean dist install uninstall

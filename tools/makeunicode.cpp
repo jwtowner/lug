@@ -2,10 +2,6 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifdef _MSC_VER
-#define _SILENCE_PARALLEL_ALGORITHMS_EXPERIMENTAL_WARNING
-#endif
-
 #include <cassert>
 #include <cctype>
 #include <cmath>

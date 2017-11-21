@@ -420,7 +420,6 @@ class string_expression
 		rune_set runes;
 		unicode::ctype classes = unicode::ctype::none;
 		bool circumflex = false;
-
 		generator(string_expression& se) : owner{se}, encoder{se.program_, callees, directives::eps | directives::lexeme} {}
 		~generator() { owner.skip_flags_ = (encoder.mandate() & directives::eps) ^ directives::eps; }
 
@@ -452,8 +451,9 @@ class string_expression
 				else
 					cur->second = cur->second < next->second ? next->second : cur->second;
 			if (circumflex)
-				encoder.encode(opcode::choice, 4 + (classes != unicode::ctype::none ? 1 : 0));
-			encoder.match(std::move(mergedrunes));
+				encoder.encode(opcode::choice, 3 + (!mergedrunes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0));
+			if (!mergedrunes.empty())
+				encoder.match(std::move(mergedrunes));
 			if (classes != unicode::ctype::none)
 				encoder.match(classes);
 			if (circumflex)
@@ -508,6 +508,7 @@ constexpr auto matches_eps = directive_modifier<directives::none, directives::no
 constexpr auto relays_eps = directive_modifier<directives::none, directives::none, directives::eps>{};
 constexpr auto skip_after = directive_modifier<directives::postskip, directives::none, directives::eps>{};
 constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
+template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match(Property); } };
 
 namespace language
 {
@@ -527,24 +528,15 @@ constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept);
 constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
-constexpr struct { void operator()(encoder& d) const { d.match("\n"); } } eol = {}; // TODO: special rule for unicode line ending
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::alpha); } } alpha = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::lower); } } lower = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::upper); } } upper = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::punct); } } punct = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::digit); } } digit = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::xdigit); } } xdigit = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::alnum); } } alnum = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::space); } } space = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::blank); } } blank = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::cntrl); } } cntrl = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::graph); } } graph = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::print); } } print = {};
-constexpr struct { void operator()(encoder& d) const { d.match(ctype::word); } } word = {};
+constexpr struct { void operator()(encoder& d) const { d.match("\n"); } } eol = {}; // TODO: special instruction for unicode line ending
+constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
+constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
+constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
+constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {}; constexpr ctype_combinator<ctype::word> word = {};
 
 constexpr struct {
-	auto operator()(char c) const { return [c](encoder& d) { d.match(std::string_view{&c, 1}); }; }
-	//auto operator()(char32_t s, char32_t e) const { return [s, e](encoder& d) { d.match(std::string_view{&s, 1}, std::string_view{&e, 1}); }; }
+	auto operator()(char32_t c) const { return [c](encoder& d) { d.match(utf8::encode_rune_to<std::string>(c)); }; }
+	auto operator()(char32_t s, char32_t e) const { return [s = (std::min)(s, e), e = (std::max)(s, e)](encoder& d) { d.match(rune_set{{s, e}}); }; }
 } chr = {};
 
 constexpr struct {
@@ -552,7 +544,7 @@ constexpr struct {
 	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
 	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
 	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
-} prop = {};
+} property = {};
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator!(const E& e) { return [x = matches_eps[e]](encoder& d) {
