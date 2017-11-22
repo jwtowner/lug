@@ -23,6 +23,11 @@ _Pragma("GCC diagnostic ignored \"-Wlogical-not-parentheses\"")
 #define LUG_DIAGNOSTIC_POP \
 _Pragma("GCC diagnostic pop")
 
+#else
+
+#define LUG_DIAGNOSTIC_PUSH_AND_IGNORE
+#define LUG_DIAGNOSTIC_POP
+
 #endif
 
 namespace lug
