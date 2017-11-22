@@ -31,7 +31,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 # dependencies
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
-all: options samples tests tools
+all: options samples tests
 
 .cpp.o:
 	@echo CXX $<

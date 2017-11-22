@@ -32,6 +32,7 @@ template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
+grammar start(const rule& start_rule);
 
 enum class opcode : unsigned char
 {
@@ -692,7 +693,7 @@ class parser
 		registers_ = {sr, mr, rc, pc, 0};
 		semantics_.accept(grammar_, input_);
 		input_.erase(0, sr);
-		registers_.sr = 0, registers_.mr, registers_.rc = 0;
+		registers_.sr = 0, registers_.mr = 0, registers_.rc = 0;
 		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
 		std::tie(sr, mr, rc, pc, std::ignore) = registers_.as_tuple();
 	}
@@ -715,7 +716,7 @@ public:
 	std::size_t max_input_position() const noexcept { return registers_.mr; }
 	parser_registers& registers() noexcept { return registers_; }
 	const parser_registers& registers() const noexcept { return registers_; }
-	bool available(std::size_t n) { available(n, registers_.sr); }
+	bool available(std::size_t n) { return available(n, registers_.sr); }
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last) {
@@ -942,12 +943,12 @@ inline grammar string_expression::make_grammar() {
 	grammar::space = nop;
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
-	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-	    | chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	rule Element = any > chr('-') > (!chr(']')) > any                       <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+	    | chr('[') > chr(':') > +((!chr(':')) > any) > chr(':') > chr(']')  <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
 	    | any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
 	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
-	    > Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	    > Element > *((!chr(']')) > Element) > chr(']')                     <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +((!(chr('.')) | chr('[')) > any)                       <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
 
