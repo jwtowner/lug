@@ -13,6 +13,18 @@
 #include <string_view>
 #include <type_traits>
 
+#ifdef __GNUC__
+
+#define LUG_DIAGNOSTIC_PUSH_AND_IGNORE \
+_Pragma("GCC diagnostic push") \
+_Pragma("GCC diagnostic ignored \"-Wparentheses\"") \
+_Pragma("GCC diagnostic ignored \"-Wlogical-not-parentheses\"")
+
+#define LUG_DIAGNOSTIC_POP \
+_Pragma("GCC diagnostic pop")
+
+#endif
+
 namespace lug
 {
 

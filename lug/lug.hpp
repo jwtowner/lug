@@ -116,7 +116,7 @@ struct program
 				default: val = (std::numeric_limits<std::size_t>::max)(); break;
 			}
 			if (val != (std::numeric_limits<std::size_t>::max)()) {
-				detail::assure_in_range<resource_limit_error>(val, 0, (std::numeric_limits<unsigned short>::max)());
+				detail::assure_in_range<resource_limit_error>(val, 0u, (std::numeric_limits<unsigned short>::max)());
 				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
@@ -938,19 +938,23 @@ inline bool parse(std::string_view sv, const grammar& grmr) { return parse(sv.cb
 inline bool parse(const grammar& grmr, semantics& sema) { return parse(std::cin, grmr, sema); }
 inline bool parse(const grammar& grmr) { return parse(std::cin, grmr); }
 
+LUG_DIAGNOSTIC_PUSH_AND_IGNORE
+
 inline grammar string_expression::make_grammar() {
 	using namespace language;
 	grammar::space = nop;
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
-	rule Element = any > chr('-') > (!chr(']')) > any                       <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-	    | chr('[') > chr(':') > +((!chr(':')) > any) > chr(':') > chr(']')  <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+	    | chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
 	    | any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
 	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
-	    > Element > *((!chr(']')) > Element) > chr(']')                     <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +((!(chr('.')) | chr('[')) > any)                       <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	    > Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
+
+LUG_DIAGNOSTIC_POP
 
 inline void string_expression::compile(std::string_view sv) {
 	static const grammar grmr = make_grammar();
