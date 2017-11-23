@@ -72,20 +72,20 @@ inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int s
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
-inline std::pair<char32_t, InputIt> decode_rune(InputIt first, InputIt last)
+inline std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
 {
 	char32_t rune = U'\0';
 	unsigned int state = decode_accept;
 	while (first != last && state != decode_reject)
 		if (state = ::lug::utf8::decode_rune_octet(rune, *first++, state); state == decode_accept)
-			return ::std::make_pair(rune, first);
-	return ::std::make_pair(U'\U0000fffd', ::std::find_if(first, last, ::lug::utf8::is_lead));
+			return ::std::make_pair(first, rune);
+	return ::std::make_pair(::std::find_if(first, last, ::lug::utf8::is_lead), U'\U0000fffd');
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
 inline InputIt next_rune(InputIt first, InputIt last)
 {
-	return ::lug::utf8::decode_rune(first, last).second;
+	return ::lug::utf8::decode_rune(first, last).first;
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
@@ -101,6 +101,21 @@ inline std::size_t count_runes(InputIt first, InputIt last)
 	for ( ; first != last; ++count)
 		first = ::lug::utf8::next_rune(first, last);
 	return count;
+}
+
+template <class InputIt>
+inline InputIt skip_end_of_line(InputIt first, InputIt last)
+{
+	if (auto [next, rune] = ::lug::utf8::decode_rune(first, last); next != first) {
+		if (0x0d == rune) {
+			if (auto [next2, rune2] = ::lug::utf8::decode_rune(next, last); next2 != next && rune2 == 0x0a)
+				next = next2;
+			return next;
+		} else if ((0x0a <= rune && rune <= 0x0c) || rune == 0x85 || rune == 0x2028 || rune == 0x2029) {
+			return next;
+		}
+	}
+	return first;
 }
 
 template <class OutputIt>

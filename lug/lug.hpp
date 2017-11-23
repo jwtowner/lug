@@ -37,7 +37,7 @@ grammar start(const rule& start_rule);
 enum class opcode : unsigned char
 {
 	match,          match_any,      match_class,    match_set,
-	match_newline,  choice,         commit,         jump,
+	match_eol,      choice,         commit,         jump,
 	call,           ret,            fail,           accept,
 	predicate,      action,         begin,          end
 };
@@ -435,7 +435,7 @@ class string_expression
 		}
 
 		void bracket_range(std::string_view first, std::string_view last) {
-			bracket_range(utf8::decode_rune(std::begin(first), std::end(first)).first, utf8::decode_rune(std::begin(last), std::end(last)).first);
+			bracket_range(utf8::decode_rune(std::begin(first), std::end(first)).second, utf8::decode_rune(std::begin(last), std::end(last)).second);
 		}
 
 		void bracket_range(char32_t first, char32_t last) {
@@ -518,19 +518,19 @@ using namespace std::literals::string_literals;
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
 using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
+struct implicit_space_rule { implicit_space_rule(std::function<void(encoder&)> e) { grammar::implicit_space = std::move(e); } };
 template <class T> using variable = lug::variable<T>;
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
 constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
 constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
 constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
-struct implicit_space_rule { implicit_space_rule(std::function<void(encoder&)> e) { grammar::implicit_space = std::move(e); } };
 constexpr struct { void operator()(encoder&) const {} } nop = {};
-constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
 constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
-constexpr struct { void operator()(encoder& d) const { d.match("\n"); } } eol = {}; // TODO: special instruction for unicode line ending
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol = {};
+constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
 constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
 constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
 constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
@@ -743,11 +743,9 @@ public:
 		while (!done) {
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
-					if (!str.empty()) {
-						if (!available(str.size(), sr) || input_.compare(sr, str.size(), str) != 0)
-							goto failure;
-						sr += str.size();
-					}
+					if (!str.empty() && (!available(str.size(), sr) || input_.compare(sr, str.size(), str) != 0))
+						goto failure;
+					sr += str.size();
 				} break;
 				case opcode::match_any: {
 					if (!available(1, sr))
@@ -757,9 +755,9 @@ public:
 				case opcode::match_class: {
 					if (!available(1, sr))
 						goto failure;
-					auto first = input_.cbegin() + sr;
-					auto [rune, next] = utf8::decode_rune(first, input_.cend());
-					auto record = unicode::query(rune);
+					auto const first = input_.cbegin() + sr;
+					auto const [next, rune] = utf8::decode_rune(first, input_.cend());
+					auto const record = unicode::query(rune);
 					bool match = false;
 					switch (alt) {
 						case altcode::match_ptype: match = record.any_of(detail::string_unpack<unicode::ptype>(str)); break;
@@ -775,10 +773,19 @@ public:
 					if (!available(1, sr))
 						goto failure;
 					auto const& rs = prog.runesets[imm];
-					auto first = input_.cbegin() + sr;
-					auto [rune, next] = utf8::decode_rune(first, input_.cend());
+					auto const first = input_.cbegin() + sr;
+					auto const [next, rune] = utf8::decode_rune(first, input_.cend());
 					if (auto it = std::lower_bound(rs.begin(), rs.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							it == rs.end() || rune < it->first || it->second < rune)
+						goto failure;
+					sr += std::distance(first, next);
+				} break;
+				case opcode::match_eol: {
+					if (!available(1, sr))
+						goto failure;
+					auto const first = input_.cbegin() + sr;
+					auto const next = utf8::skip_end_of_line(first, input_.cend());
+					if (next == first)
 						goto failure;
 					sr += std::distance(first, next);
 				} break;
