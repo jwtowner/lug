@@ -15,6 +15,8 @@ namespace samples::calc
 	variable<int> i{Sema};
 	double v[26];
 
+	implicit_space_rule BLANK = lexeme[ *"[ \t]"s ];
+
 	rule EOL	= lexeme[ "[\n\r;]" ];
 
 	rule ID		= lexeme[ capture(m)[ "[a-z]" ] <[]() -> int { return m->at(0) - 'a'; } ];

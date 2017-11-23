@@ -30,7 +30,7 @@ public:
 	basic_interpreter()
 	{
 		using namespace lug::language;
-		grammar::space = *"[ \t]"s;
+		grammar::implicit_space = *"[ \t]"s;
 
 		rule Expr;
 

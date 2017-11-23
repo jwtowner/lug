@@ -159,7 +159,7 @@ public:
 	grammar() = default;
 	void swap(grammar& g) { program_.swap(g.program_); }
 	const lug::program& program() const noexcept { return program_; };
-	static thread_local std::function<void(encoder&)> space;
+	static thread_local std::function<void(encoder&)> implicit_space;
 };
 
 class semantics
@@ -275,7 +275,7 @@ protected:
 	}
 	void do_skip() {
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
-		grammar::space(*this);
+		grammar::implicit_space(*this);
 	}
 public:
 	explicit encoder(directives initial) : mandate_{directives::none}, mode_{initial} {}
@@ -524,6 +524,7 @@ constexpr auto caseless = directive_modifier<directives::caseless, directives::n
 constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
 constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
 constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
+struct implicit_space_rule { implicit_space_rule(std::function<void(encoder&)> e) { grammar::implicit_space = std::move(e); } };
 constexpr struct { void operator()(encoder&) const {} } nop = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
 constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
@@ -586,7 +587,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> constexpr auto 
 constexpr struct {
 	template <class T> struct capture_to { variable<T>& v;
 		template <class E, class = std::enable_if_t<is_expression_v<E>>>
-		constexpr auto operator[](const E& e) const { return e < [this](semantics&, syntax x) { *v = T{x.capture}; }; } };
+		constexpr auto operator[](const E& e) const { return e < [&v = v](semantics&, syntax x) { *v = T{x.capture}; }; } };
 	template <class T> constexpr auto operator()(variable<T>& v) const { return capture_to<T>{v}; }
 } capture = {};
 
@@ -595,7 +596,7 @@ inline auto operator%(variable<T>& v, const E& e) { return e < [&v](semantics& s
 
 } // namespace language
 
-inline thread_local std::function<void(encoder&)> grammar::space{language::operator*(language::space)};
+inline thread_local std::function<void(encoder&)> grammar::implicit_space{language::operator*(language::space)};
 
 inline grammar start(const rule& start_rule) {
 	program grprogram;
@@ -637,7 +638,7 @@ inline grammar start(const rule& start_rule) {
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
 		ioffset.off = static_cast<int>(rel_addr);
 	}
-	grammar::space = language::operator*(language::space);
+	grammar::implicit_space = language::operator*(language::space);
 	return grammar{std::move(grprogram)};
 }
 
@@ -942,7 +943,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
 inline grammar string_expression::make_grammar() {
 	using namespace language;
-	grammar::space = nop;
+	grammar::implicit_space = nop;
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
 	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
