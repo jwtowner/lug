@@ -9,7 +9,7 @@ Features
 - Direct and indirect left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
-- Evaluation of semantic actions is deferred, ensuring actions do not execute on failed branches or invalid input
+- Deferred evaluation of semantic actions, ensuring actions do not execute on failed branches or invalid input
 - Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
 - UTF-8 text parsing with near-complete Level 1 support of the UTS #18 Unicode Regular Expressions technical standard
 - Header only library using C++17 language and library features
@@ -33,7 +33,7 @@ It is based on research introduced in the following papers:
 Building
 ---
 As a header only library, lug itself does not need to be built.
-Simply ensure the `lug` header directory is in your header include path and you're good to go.
+Simply ensure the `lug` header directory is in your include path and you're good to go.
 
 As a baseline, the following compiler versions are known to work with lug.
 
