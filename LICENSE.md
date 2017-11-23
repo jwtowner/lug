@@ -24,6 +24,7 @@ DEALINGS IN THE SOFTWARE.
 The deterministic finite automata used in the UTF-8 decoder is derived
 from Bjoern Hoehrmann's Flexible and Economical UTF-8 Decoder and is
 also distributed under the MIT License. For more details, see:
+
 http://bjoern.hoehrmann.de/utf-8/decoder/dfa/
 
 Copyright © 2008-2009 Bjoern Hoehrmann <bjoern AT hoehrmann DOT de>
