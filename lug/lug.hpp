@@ -518,7 +518,6 @@ using namespace std::literals::string_literals;
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
 using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
-struct implicit_space_rule { implicit_space_rule(std::function<void(encoder&)> e) { grammar::implicit_space = std::move(e); } };
 template <class T> using variable = lug::variable<T>;
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
@@ -547,6 +546,13 @@ constexpr struct {
 	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
 	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
 } property = {};
+
+struct implicit_space_rule {
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	implicit_space_rule(const E& e) {
+		grammar::implicit_space = std::function<void(encoder&)>{make_expression(e)};
+	}
+};
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator!(const E& e) { return [x = matches_eps[e]](encoder& d) {
