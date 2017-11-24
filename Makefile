@@ -8,7 +8,6 @@ VERSION = 0.1
 PREFIX = /usr/local
 
 # toolchain
-CXX = g++
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
 LDFLAGS = $(CXXSTD) -s
@@ -40,7 +39,7 @@ all: options samples tests
 $(SAMPLES_OBJ): $(DEPS)
 
 $(SAMPLES_BIN): $(SAMPLES_OBJ)
-	@echo CXX -o $@
+	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
 samples: $(SAMPLES_BIN)
@@ -48,7 +47,7 @@ samples: $(SAMPLES_BIN)
 $(TESTS_OBJ): $(DEPS)
 
 $(TESTS_BIN): $(TESTS_OBJ)
-	@echo CXX -o $@
+	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
 tests: $(TESTS_BIN)
@@ -56,7 +55,7 @@ tests: $(TESTS_BIN)
 $(TOOLS_OBJ): $(DEPS)
 
 $(TOOLS_BIN): $(TOOLS_OBJ)
-	@echo CXX -o $@
+	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
 tools: $(TOOLS_BIN)
