@@ -2,14 +2,14 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.1
+VERSION = 0.1-pre
 
 # paths
 PREFIX = /usr/local
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Werror -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
 # samples
