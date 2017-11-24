@@ -1,6 +1,6 @@
+lug
 [![Build Status](https://travis-ci.org/jwtowner/lug.svg?branch=master)](https://travis-ci.org/jwtowner/lug)
 [![License](https://img.shields.io/packagist/l/doctrine/orm.svg)](https://github.com/jwtowner/lug/blob/master/LICENSE.md)
-lug
 ===
 An embedded domain specific language for expressing parsers as extended [parsing expression grammars (PEGs)](https://en.wikipedia.org/wiki/Parsing_expression_grammar) in C++17
 
