@@ -60,6 +60,9 @@ $(TOOLS_BIN): $(TOOLS_OBJ)
 
 tools: $(TOOLS_BIN)
 
+check: tests
+	@sh runtests.sh "tests" $(TESTS_BIN)
+
 options:
 	@echo lug build options:
 	@echo "CXX       = $(CXX)"
@@ -69,12 +72,12 @@ options:
 
 clean:
 	@echo cleaning
-	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) $(TESTS_BIN) $(TESTS_OBJ) lug-$(VERSION).tar.gz
+	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) $(TESTS_BIN) $(TESTS_OBJ) $(TOOLS_BIN) $(TOOLS_OBJ) lug-$(VERSION).tar.gz
 
 dist: clean
 	@echo creating dist tarball
 	@mkdir -p lug-$(VERSION)
-	@cp -R README.md LICENSE.md Makefile lug.sln lug/ msvs/ samples/ tests/ tools/ lug-$(VERSION)
+	@cp -R README.md LICENSE.md Makefile lug.sln runtests.sh lug/ msvs/ samples/ tests/ tools/ lug-$(VERSION)
 	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
 	@gzip lug-$(VERSION).tar
 	@rm -rf lug-$(VERSION)
@@ -102,4 +105,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all options samples tests tools clean dist install uninstall
+.PHONY: all check options samples tests tools clean dist install uninstall
