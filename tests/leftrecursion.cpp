@@ -45,7 +45,7 @@ namespace
 		assert(!lug::parse("b", G));
 	}
 
-	void test_hidden_left_recursion()
+	/*void test_hidden_left_recursion()
 	{
 		using namespace lug::language;
 		grammar::implicit_space = nop;
@@ -68,7 +68,7 @@ namespace
 		assert(lug::parse("bbababbbbaaaai", G));
 		assert(!lug::parse("", G));
 		assert(!lug::parse("z", G));
-	}
+	}*/
 	
 	void test_association_and_precedence()
 	{
