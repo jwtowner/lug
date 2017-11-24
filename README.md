@@ -1,5 +1,5 @@
 [![Build Status](https://travis-ci.org/jwtowner/lug.svg?branch=master)](https://travis-ci.org/jwtowner/lug)
-[![License](https://img.shields.io/packagist/l/doctrine/orm.svg)](https://github.com/jwtowner/lug/raw/master/LICENSE)
+[![License](https://img.shields.io/packagist/l/doctrine/orm.svg)](https://github.com/jwtowner/lug/raw/master/LICENSE.md)
 
 lug
 ===
