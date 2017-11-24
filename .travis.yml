@@ -7,20 +7,15 @@ matrix:
       addons:
         apt:
           sources:
-            - llvm-toolchain-trusty-5.0
-          packages:
-            - clang-5.0
-      env:
-        - MATRIX_EVAL="CC=clang-5.0 && CXX=clang++-5.0"
-    - os: linux
-      addons:
-        apt:
-          sources:
             - ubuntu-toolchain-r-test
           packages:
             - g++-7
       env:
         - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    - os: osx
+      osx_image: xcode9.1
+      env:
+        - MATRIX_EVAL="CC=clang && CXX=clang++"
 before_install:
   - eval "${MATRIX_EVAL}"
 script: make
