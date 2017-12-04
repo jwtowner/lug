@@ -13,8 +13,9 @@ Features
 - Traditional PEG syntax has been extended to support attribute grammars
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
 - Deferred evaluation of semantic actions, ensuring actions do not execute on failed branches or invalid input
-- Generated parsers are compiled down to special-purpose bytecode and executed in a virtual parsing machine
+- Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine
 - UTF-8 text parsing with near-complete Level 1 support of the UTS #18 Unicode Regular Expressions technical standard
+- Case insensitive matching mode
 - Header only library using C++17 language and library features
 - Uses expression template functors to implement the rules of the domain specific language
 - Relatively small with the intent of core to remain under 1000 lines of very terse code
@@ -54,9 +55,8 @@ TODO
 - add an interactive processing mode flag to input sources?
 - handle exceptions thrown from semantic actions in semantics::accept?
 - automatic line/column tracking during semantic action phase
-- feature: case insensitive matching
 - feature: symbol tables and parsing conditions
-- feature: Adams' grammars and alignment elimination
+- feature: Adams' grammars and whitespace alignment
 - feature: syntax to specify number range of allowed iteration
 - optimization: tail recursion
 - optimization: reduce number of false-positive left-recursive calls even further by lazily evaluating rule mandate

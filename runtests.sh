@@ -1,8 +1,5 @@
 #!/bin/sh
 
-# lug - Embedded DSL for PE grammar parsers in C++
-# See LICENSE file for copyright and license details
-
 printf "running %s\n" "$1"
 printf "=============================================\n"
 

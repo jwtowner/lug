@@ -17,6 +17,7 @@
 #include <limits>
 #include <map>
 #include <regex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -208,10 +209,14 @@ static ucd_array<std::uint_least64_t> ptable; // Binary Properties table
 static ucd_array<std::uint_least16_t> ctable; // POSIX Compatibility table
 static ucd_array<std::uint_least8_t> gctable; // General Category table
 static ucd_array<std::uint_least8_t> sctable; // Script table
+static ucd_array<std::int_least32_t> cfoldtable; // Simple case folding offset table
+static ucd_array<std::int_least32_t> clowertable; // Simple lowercase conversion offset table
+static ucd_array<std::int_least32_t> cuppertable; // Simple uppercase conversion offset table
 
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
 static std::regex const rx_ucd_version(R"(^#\s*\w+-(\d+(\.\d+)+).*)", default_rx_options);
 static std::regex const rx_ucd_prop_range(R"(^\s*([0-9a-fA-F]+)(\.\.([0-9a-fA-F]+))?\s*;\s*(\w+)\s*.*)", default_rx_options);
+static std::regex const rx_ucd_case_folding(R"(^\s*([0-9a-fA-F]+);\s*(C|S);\s*([0-9a-fA-F]+);.*)", default_rx_options);
 
 std::ifstream open_ucd_file_and_read_version(stdfs::path const& filepath, std::string& version)
 {
@@ -227,7 +232,7 @@ std::ifstream open_ucd_file_and_read_version(stdfs::path const& filepath, std::s
 }
 
 template <class StoreFunc>
-std::string read_ucd_array(stdfs::path filepath, StoreFunc store)
+std::string read_ucd_array(stdfs::path filepath, std::regex const& line_regex, StoreFunc store)
 {
 	std::string version;
 	std::ifstream input = open_ucd_file_and_read_version(filepath, version);
@@ -235,16 +240,31 @@ std::string read_ucd_array(stdfs::path filepath, StoreFunc store)
 		std::string line;
 		while (std::getline(input, line)) {
 			std::smatch match;
-			if (!line.empty() && line[0] != '#' && std::regex_match(line, match, rx_ucd_prop_range)) {
+			if (!line.empty() && line[0] != '#' && std::regex_match(line, match, line_regex)) {
 				auto start = std::stoul(match.str(1), nullptr, 16);
-				auto end = match.length(2) > 0 ? std::stoul(match.str(3), nullptr, 16) : start;
-				store(start, end, match.str(4));
+				auto end = match.length(3) > 0 ? std::stoul(match.str(3), nullptr, 16) : start;
+				if constexpr (std::is_invocable_v<StoreFunc, decltype(start), decltype(end)>)
+					store(start, end);
+				else
+					store(start, end, match.str(4));
 			}
 		}
 	} catch (std::exception& e) {
 		throw makeunicode_error("unable to read data from " + filepath.string() + "\n -- " + e.what());
 	}
 	return version;
+}
+
+template <class StoreFunc>
+std::string read_ucd_prop_array(stdfs::path filepath, StoreFunc store)
+{
+	return read_ucd_array(std::move(filepath), rx_ucd_prop_range, store);
+}
+
+template <class StoreFunc>
+std::string read_ucd_case_array(stdfs::path filepath, StoreFunc store)
+{
+	return read_ucd_array(std::move(filepath), rx_ucd_case_folding, store);
 }
 
 // Filters for deriving POSIX compatibility table from binary properties and general
@@ -317,17 +337,26 @@ void read_and_build_tables()
 			};
 			std::fill(std::execution::par_unseq, ptable.begin(), ptable.end(), binary_properties.find("Any")->second);
 			set_ptable_bits(0, 128, "Ascii");
-			auto proplist_version = read_ucd_array("PropList.txt", set_ptable_bits);
-			auto dcp_version = read_ucd_array("DerivedCoreProperties.txt", set_ptable_bits);
+			auto proplist_version = read_ucd_prop_array("PropList.txt", set_ptable_bits);
+			auto dcp_version = read_ucd_prop_array("DerivedCoreProperties.txt", set_ptable_bits);
 			return std::vector<std::string>{proplist_version, dcp_version};
 		});
 
 		// read in general category table
 		auto pending_gcversion = std::async(std::launch::async, [] {
 			std::fill(std::execution::par_unseq, gctable.begin(), gctable.end(), general_categories.find("Cn")->second);
-			return read_ucd_array("DerivedGeneralCategory.txt", [](auto start, auto end, auto const& value) {
+			return read_ucd_prop_array("DerivedGeneralCategory.txt", [](auto start, auto end, auto const& value) {
 				if (auto category = general_categories.find(value); category != general_categories.end())
 					std::fill(std::execution::par_unseq, gctable.begin() + start, gctable.begin() + end + 1, category->second);
+			});
+		});
+
+		// read in casefolding table
+		auto pending_cfoldversion = std::async(std::launch::async, [] {
+			std::fill(std::execution::par_unseq, cfoldtable.begin(), cfoldtable.end(), 0);
+			return read_ucd_case_array("CaseFolding.txt", [](auto code, auto mapping) {
+				if (cfoldtable[code] == 0)
+					cfoldtable[code] = static_cast<std::int_least32_t>(mapping) - static_cast<std::int_least32_t>(code);
 			});
 		});
 
@@ -357,10 +386,45 @@ void read_and_build_tables()
 			{ "print", { make_compat_filter({"cntrl"}) } }
 		};
 
-		// make sure reading of ptable and gctable is complete, as they're
-		// needed to build the compatibility property table
+		// make sure reading of ptable and gctable is complete, as they're needed
+		// to build the compatibility property table and lowercase/uppercase
+		// mapping tables
 		auto prop_versions = pending_prop_versions.get();
 		prop_versions.push_back(pending_gcversion.get());
+		prop_versions.push_back(pending_cfoldversion.get());
+
+		// setup case conversion tables in parallel
+		auto pending_caseconversion_task = std::async(std::launch::async, [] {
+			auto const lowercase = binary_properties.find("Lowercase")->second;
+			auto const uppercase = binary_properties.find("Uppercase")->second;
+			auto const changes_on_lowercase = binary_properties.find("Changes_When_Lowercased")->second;
+			auto const changes_on_uppercase = binary_properties.find("Changes_When_Uppercased")->second;
+			std::fill(std::execution::par_unseq, clowertable.begin(), clowertable.end(), 0);
+			std::fill(std::execution::par_unseq, cuppertable.begin(), cuppertable.end(), 0);
+			// pass one, determine upper or lowercase conversions for target casefold mappings
+			for (std::size_t code = 0, numcodes = cfoldtable.size(); code < numcodes; ++code) {
+				if (auto const offset = cfoldtable[code]; offset != 0) {
+					auto mapping = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(code) + offset);
+					assert((ptable[mapping] & (lowercase | uppercase)) != 0); // we assume target mappings aren't titlecase
+					if ((ptable[mapping] & uppercase) != 0 && (ptable[code] & lowercase) != 0 && clowertable[mapping] == 0)
+						clowertable[mapping] = -offset;
+					if ((ptable[mapping] & lowercase) != 0 && (ptable[code] & uppercase) != 0 && cuppertable[mapping] == 0)
+						cuppertable[mapping] = -offset;
+				}
+			}
+			// pass two, determine upper or lowercase conversions for source casefold codes
+			for (std::size_t code = 0, numcodes = cfoldtable.size(); code < numcodes; ++code) {
+				if (auto const offset = cfoldtable[code]; offset != 0) {
+					auto mapping = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(code) + offset);
+					auto mapping_lower = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(mapping) + clowertable[mapping]);
+					auto mapping_upper = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(mapping) + cuppertable[mapping]);
+					if (((ptable[code] & lowercase) == 0 || (ptable[code] & changes_on_lowercase) != 0) && clowertable[code] == 0)
+						clowertable[code] = static_cast<std::int_least32_t>(mapping_lower) - static_cast<std::int_least32_t>(code);
+					if (((ptable[code] & uppercase) == 0 || (ptable[code] & changes_on_uppercase) != 0) && cuppertable[code] == 0)
+						cuppertable[code] = static_cast<std::int_least32_t>(mapping_upper) - static_cast<std::int_least32_t>(code);
+				}
+			}
+		});
 
 		// for all non-unassigned codepoints on gctable, set Assigned flag in ptable
 		auto const gcunassignedindex = general_categories.find("Cn")->second;
@@ -391,15 +455,17 @@ void read_and_build_tables()
 								std::get<compat_filter_arg::cflags>(args) &= ~cflag;
 				}
 				ctable[i] = std::get<compat_filter_arg::cflags>(args);
-			});
+			}
+		);
 
+		pending_caseconversion_task.wait();
 		return prop_versions;
 	});
 
 	// load in the scripts table
 	auto pending_scversion = std::async(std::launch::async, [] {
 		std::fill(std::execution::par_unseq, sctable.begin(), sctable.end(), scripts.find("Unknown")->second);
-		return read_ucd_array("Scripts.txt", [](auto start, auto end, auto const& value) {
+		return read_ucd_prop_array("Scripts.txt", [](auto start, auto end, auto const& value) {
 			if (auto script = scripts.find(value); script != scripts.end())
 				std::fill(std::execution::par_unseq, sctable.begin() + start, sctable.begin() + end + 1, script->second);
 		});
@@ -420,31 +486,46 @@ struct ucd_type_info
 	unsigned int digits10 = 0;
 };
 
-#define make_unsigned_types_entry(T, C) { (std::numeric_limits<T>::max)(), { #T, C, static_cast<unsigned int>(sizeof(T)) } }
-
-std::map<std::uintmax_t, std::tuple<std::string_view, std::string_view, unsigned int>> const unsigned_integer_types =
+template <class T, class Types>
+auto get_best_fit_type_info(T value, Types const& types)
 {
-	make_unsigned_types_entry(std::uint_least8_t, "UINT8_C"), make_unsigned_types_entry(std::uint_least16_t, "UINT16_C"),
-	make_unsigned_types_entry(std::uint_least32_t, "UINT32_C"), make_unsigned_types_entry(std::uint_least64_t, "UINT64_C")
-};
+	for (auto const& [min, max, name, cmacro, szbytes] : types)
+		if (min <= value && value <= max)
+			return ucd_type_info{name, cmacro, szbytes, static_cast<unsigned int>(std::to_string(value).size())};
+	throw makeunicode_error("no best fit type");
+}
 
-#undef make_unsigned_types_entry
-
-auto get_maxval_type_info(std::uintmax_t maxval)
+template <class T>
+auto get_best_fit_type_info(T value)
 {
-	auto[type, cmacro, size] = unsigned_integer_types.upper_bound((std::min)(maxval, maxval - 1))->second;
-	return ucd_type_info{type, cmacro, size, static_cast<unsigned int>(std::to_string(maxval).size())};
+	static_assert(std::is_integral_v<T>, "best fit type must be integral");
+	#define make_integral_type_entry(T, C) { (std::numeric_limits<T>::min)(), (std::numeric_limits<T>::max)(), #T, C, static_cast<unsigned int>(sizeof(T)) }
+	if constexpr (std::is_signed_v<T>) {
+		static std::vector<std::tuple<std::intmax_t, std::intmax_t, std::string_view, std::string_view, unsigned int>> const signed_types = {
+			make_integral_type_entry(std::int_least8_t, "INT8_C"), make_integral_type_entry(std::int_least16_t, "INT16_C"),
+			make_integral_type_entry(std::int_least32_t, "INT32_C"), make_integral_type_entry(std::int_least64_t, "INT64_C")
+		};
+		return get_best_fit_type_info(value, signed_types);
+	} else {
+		static std::vector<std::tuple<std::uintmax_t, std::uintmax_t, std::string_view, std::string_view, unsigned int>> const unsigned_types =
+		{
+			make_integral_type_entry(std::uint_least8_t, "UINT8_C"), make_integral_type_entry(std::uint_least16_t, "UINT16_C"),
+			make_integral_type_entry(std::uint_least32_t, "UINT32_C"), make_integral_type_entry(std::uint_least64_t, "UINT64_C")
+		};
+		return get_best_fit_type_info(value, unsigned_types);
+	}
+	#undef make_integral_type_entry
 }
 
 inline auto get_table_type_info(std::vector<std::size_t> const& table)
 {
-	return get_maxval_type_info(*std::max_element(table.cbegin(), table.cend()));
+	return get_best_fit_type_info(*std::max_element(table.cbegin(), table.cend()));
 }
 
 template <class T>
 inline auto get_type_info()
 {
-	return get_maxval_type_info((std::numeric_limits<T>::max)());
+	return get_best_fit_type_info((std::numeric_limits<T>::max)());
 }
 
 struct ucd_record
@@ -453,11 +534,15 @@ struct ucd_record
 	std::uint_least16_t cflags;
 	std::uint_least8_t gcindex;
 	std::uint_least8_t scindex;
+	std::int_least32_t cfoffset;
+	std::int_least32_t cloffset;
+	std::int_least32_t cuoffset;
 };
 
 constexpr bool operator==(ucd_record const& x, ucd_record const& y) noexcept
 {
-	return x.pflags == y.pflags && x.cflags == y.cflags && x.gcindex == y.gcindex && x.scindex == y.scindex;
+	return x.pflags == y.pflags && x.cflags == y.cflags && x.gcindex == y.gcindex && x.scindex == y.scindex &&
+		x.cfoffset == y.cfoffset && x.cloffset == y.cloffset && x.cuoffset == y.cuoffset;
 }
 
 constexpr bool operator!=(ucd_record const& x, ucd_record const& y) noexcept
@@ -470,7 +555,9 @@ struct ucd_record_hash
 	std::size_t operator()(ucd_record const& record) const noexcept {
 		return hash_combine(
 			std::hash<std::uint_least64_t>{}(record.pflags), std::hash<std::uint_least16_t>{}(record.cflags),
-			std::hash<std::uint_least8_t>{}(record.gcindex), std::hash<std::uint_least8_t>{}(record.scindex));
+			std::hash<std::uint_least8_t>{}(record.gcindex), std::hash<std::uint_least8_t>{}(record.scindex),
+			std::hash<std::int_least32_t>{}(record.cfoffset), std::hash<std::int_least32_t>{}(record.cloffset),
+			std::hash<std::int_least32_t>{}(record.cuoffset));
 	}
 };
 
@@ -484,11 +571,49 @@ struct ucd_record_stage_table
 	std::size_t table_size = 0;
 };
 
+template <class IndexMap, class ValueSequence, class Value>
+static auto intern_value(IndexMap& indices, ValueSequence& values, Value value)
+{
+	using index_type = typename IndexMap::mapped_type;
+	auto emplacement = indices.try_emplace(value, static_cast<index_type>(values.size()));
+	if (emplacement.second) {
+		assert(values.size() < (std::numeric_limits<index_type>::max)());
+		values.push_back(value);
+	}
+	return emplacement.first;
+}
+
+struct ucd_flyweight_compressed_records
+{
+	std::unordered_map<std::uint_least64_t, std::uint_least8_t> pflag_indices;
+	std::unordered_map<std::uint_least16_t, std::uint_least8_t> cflag_indices;
+	std::unordered_map<std::int_least32_t, std::uint_least8_t> cmapping_indices;
+	std::vector<std::uint_least64_t> pflag_values;
+	std::vector<std::uint_least16_t> cflag_values;
+	std::vector<std::int_least32_t> cmapping_values;
+	std::vector<std::uint_least8_t> flyweights;
+
+	ucd_flyweight_compressed_records() = default;
+
+	explicit ucd_flyweight_compressed_records(std::vector<ucd_record> const& records) {
+		for (auto const& record : records) {
+			flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
+			flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
+			flyweights.push_back(record.gcindex);
+			flyweights.push_back(record.scindex);
+			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cfoffset)->second);
+			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cloffset)->second);
+			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cuoffset)->second);
+		}
+	}
+};
+
 static std::size_t invalidrecordindex;
 static std::unordered_map<ucd_record, std::size_t, ucd_record_hash> recordindices;
 static std::vector<ucd_record> recordvalues;
 static ucd_array<std::size_t> recordtable;
 static ucd_record_stage_table recordstagetable;
+static ucd_flyweight_compressed_records compressedrecords;
 
 std::size_t combine_record(ucd_record const& record)
 {
@@ -501,9 +626,10 @@ std::size_t combine_record(ucd_record const& record)
 void combine_records()
 {
 	for (std::size_t i = 0, n = ptable.size(); i < n; ++i)
-		recordtable[i] = combine_record({ptable[i], ctable[i], gctable[i], sctable[i]});
-	ucd_record invalidrecord{binary_properties.find("Any")->second, 0, general_categories.find("Cn")->second, scripts.find("Unknown")->second};
+		recordtable[i] = combine_record({ptable[i], ctable[i], gctable[i], sctable[i], cfoldtable[i], clowertable[i], cuppertable[i]});
+	ucd_record invalidrecord{binary_properties.find("Any")->second, 0, general_categories.find("Cn")->second, scripts.find("Unknown")->second, 0};
 	invalidrecordindex = combine_record(invalidrecord);
+	compressedrecords = ucd_flyweight_compressed_records(recordvalues);
 }
 
 void compress_records()
@@ -591,18 +717,6 @@ inline int align_padding(Integral value) noexcept
 	return ((static_cast<int>(value) + 3) / 4) * 4;
 }
 
-template <class IndexMap, class ValueSequence, class Value>
-auto intern_value(IndexMap& indices, ValueSequence& values, Value value)
-{
-	using index_type = typename IndexMap::mapped_type;
-	auto emplacement = indices.try_emplace(value, static_cast<index_type>(values.size()));
-	if (emplacement.second) {
-		assert(values.size() < (std::numeric_limits<index_type>::max)());
-		values.push_back(value);
-	}
-	return emplacement.first;
-}
-
 auto normalize_property_label(std::string_view id)
 {
 	std::string normid;
@@ -629,6 +743,22 @@ std::ostream& print_table(std::ostream& out, std::string_view name, std::string_
 	}
 	return out << "\n" << indent << "};\n";
 }
+
+template <class ValueSequence>
+struct function_table_printer
+{
+	std::string_view name_;
+	std::string_view type_;
+	ValueSequence const& values_;
+
+public:
+	function_table_printer(std::string_view name, std::string_view type, ValueSequence const& values)
+		: name_{name}, type_{type}, values_{values} {}
+
+	friend std::ostream& operator<<(std::ostream& out, function_table_printer const& p) {
+		return print_table(out, p.name_, p.type_, "", p.values_, 120, "\t", "\n\t\t");
+	}
+};
 
 class enum_printer
 {
@@ -721,29 +851,16 @@ public:
 
 class record_flyweight_printer
 {
-	std::vector<ucd_record> const& records_;
+	ucd_flyweight_compressed_records const& records_;
 
 public:
-	explicit record_flyweight_printer(std::vector<ucd_record> const& records)
+	explicit record_flyweight_printer(ucd_flyweight_compressed_records const& records)
 		: records_{records} {}
 
 	friend std::ostream& operator<<(std::ostream& out, record_flyweight_printer const& p) {
-		std::unordered_map<std::uint_least64_t, std::uint_least8_t> pflag_indices;
-		std::unordered_map<std::uint_least16_t, std::uint_least8_t> cflag_indices;
-		std::vector<std::uint_least64_t> pflag_values;
-		std::vector<std::uint_least16_t> cflag_values;
-		std::vector<std::uint_least8_t> flyweights;
-
-		for (auto const& record : p.records_) {
-			flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
-			flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
-			flyweights.push_back(record.gcindex);
-			flyweights.push_back(record.scindex);
-		}
-
-		print_table(out, "flyweights", "std::uint_least8_t", "", flyweights, 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", pflag_values, 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "cflags", "std::uint_least16_t", "", cflag_values, 120, "\t", "\n\t\t");
+		print_table(out, "flyweights", "std::uint_least8_t", "", p.records_.flyweights, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", p.records_.pflag_values, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t");
 		return out;
 	}
 };
@@ -833,6 +950,9 @@ class ucd_record
 		std::uint_least16_t cflags;
 		std::uint_least8_t gcindex;
 		std::uint_least8_t scindex;
+		std::uint_least8_t cfindex;
+		std::uint_least8_t clindex;
+		std::uint_least8_t cuindex;
 	} const* record_;
 	explicit ucd_record(raw_record const* r) noexcept : record_(r) {}
 	struct raw_record_table {)c++"
@@ -840,6 +960,7 @@ class ucd_record
 		<< "\t\tstd::array<" << recordstagetable.typeinfo2.name << ", " << std::dec << recordstagetable.stage2.size() << "> stage2;\n"
 		<< "\t\tstd::array<raw_record, " << std::dec << recordvalues.size() << "> records;" << R"c++(
 	};
+	static std::int_least32_t case_mapping(std::size_t index) noexcept;
 	static std::unique_ptr<raw_record_table> decompress_table();
 	friend ucd_record query(char32_t r);
 public:
@@ -850,6 +971,9 @@ public:
 	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
 	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
 	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
+	std::int_least32_t casefold_mapping() const noexcept { return case_mapping(record_->cfindex); }
+	std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(record_->clindex); }
+	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(record_->cuindex); }
 };
 
 // Retrieves the UCD record for the given Unicode codepoint
@@ -862,6 +986,24 @@ inline ucd_record query(char32_t r)
 		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
 	}
 	return ucd_record{table->records.data() + index};
+}
+
+// Simple casefold conversion
+inline char32_t tocasefold(char32_t r)
+{
+	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).casefold_mapping());
+}
+
+// Simple lowercase conversion
+inline char32_t tolower(char32_t r)
+{
+	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).lowercase_mapping());
+}
+
+// Simple uppercase conversion
+inline char32_t toupper(char32_t r)
+{
+	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).uppercase_mapping());
 }
 
 namespace detail
@@ -927,6 +1069,14 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 } // namespace detail
 
+inline std::int_least32_t ucd_record::case_mapping(std::size_t index) noexcept
+{
+)c++"
+<< function_table_printer<decltype(compressedrecords.cmapping_values)>("casemappings", "std::int_least32_t", compressedrecords.cmapping_values)
+<< R"c++(
+	return casemappings[index];
+}
+
 inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_table()
 {
 )c++"
@@ -934,17 +1084,20 @@ inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_tabl
 
 << rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << "\n"
 
-<< record_flyweight_printer(recordvalues)
+<< record_flyweight_printer(compressedrecords)
 << R"c++(
 	auto table = std::make_unique<raw_record_table>();
-	detail::run_length_decode(rlestage1.begin(), rlestage1.end(), table->stage1.begin());
-	detail::run_length_decode(rlestage2.begin(), rlestage2.end(), table->stage2.begin());
+	detail::run_length_decode(std::begin(rlestage1), std::end(rlestage1), std::begin(table->stage1));
+	detail::run_length_decode(std::begin(rlestage2), std::end(rlestage2), std::begin(table->stage2));
 	auto& records = table->records;
-	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 4) {
+	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 7) {
 		records[r].pflags = pflags[flyweights[f + 0]];
 		records[r].cflags = cflags[flyweights[f + 1]];
 		records[r].gcindex = flyweights[f + 2];
 		records[r].scindex = flyweights[f + 3];
+		records[r].cfindex = flyweights[f + 4];
+		records[r].clindex = flyweights[f + 5];
+		records[r].cuindex = flyweights[f + 6];
 	}
 	return table;
 }

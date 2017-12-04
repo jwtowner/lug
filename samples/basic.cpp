@@ -30,17 +30,17 @@ public:
 	basic_interpreter()
 	{
 		using namespace lug::language;
-		grammar::implicit_space = *"[ \t]"s;
-
 		rule Expr;
 
-		rule CR		= lexeme["\n"s | "\r\n" | "\r"];
-		rule Func	= lexeme[capture(id_)["[a-zA-Z]" > *"[a-zA-Z0-9]"s]]  <[this]{ return *id_; };
+		implicit_space_rule SP = *"[ \t]"s;
+
+		rule NL		= lexeme["\n"s | "\r\n" | "\r"];
+		rule Func	= lexeme[capture(id_)["[A-Z]" > *"[A-Z0-9]"s]]  <[this]{ return *id_; };
 		rule LineNo	= lexeme[capture(sv_)[+"[0-9]"s]]                     <[this]{ return std::stoi(std::string{*sv_}); };
 		rule Real	= lexeme[capture(sv_)[+"[0-9]"s > ~("[.]"s > +"[0-9]"s)
 					    > ~("[eE]"s > ~"[+-]"s > +"[0-9]"s)]]             <[this]{ return std::stod(std::string{*sv_}); };
 		rule String	= lexeme["\"" > capture(sv_)[*"[^\"]"s] > "\""]       <[this]{ return *sv_; };
-		rule Var	= lexeme[capture(id_)["[a-zA-Z]" > ~"[0-9]"s]]        <[this]{ return *id_; };
+		rule Var	= lexeme[capture(id_)["[A-Z]" > ~"[0-9]"s]]        <[this]{ return *id_; };
 
 		rule RelOp	= "="                                 <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 					| ">="                                <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -101,7 +101,7 @@ public:
 					| caseless["STOP"]                              <[this]{ haltline_ = line_; line_ = lines_.end(); }
 					| caseless["END"]                               <[this]{ if (line_ == lines_.end()) std::exit(EXIT_SUCCESS); line_ = lines_.end(); }
 					| (caseless["EXIT"] | caseless["QUIT"])         <[this]{ std::exit(EXIT_SUCCESS); }
-					| caseless["REM"] > *(!CR > any);
+					| caseless["REM"] > *(!NL > any);
 
 		rule Cmnd	= caseless["CLEAR"]                             <[this]{ lines_.clear(); }
 					| caseless["CONT"]                              <[this]{ cont(); }
@@ -110,11 +110,11 @@ public:
 					| caseless["RUN"]                               <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
 					| caseless["SAVE"] > sv_%String                 <[this]{ save(*sv_); };
 
-		rule Line	= Stmnt > CR
-					| Cmnd > CR
-					| no_%LineNo > capture(sv_)[*(!CR > any) > CR]  <[this]{ update_line(*no_, *sv_); }
-					| CR
-					| (*(!CR > any) > CR)                           <[this]{ print_error("ILLEGAL FORMULA"); }
+		rule Line	= Stmnt > NL
+					| Cmnd > NL
+					| no_%LineNo > capture(sv_)[*(!NL > any) > NL]  <[this]{ update_line(*no_, *sv_); }
+					| NL
+					| (*(!NL > any) > NL)                           <[this]{ print_error("ILLEGAL FORMULA"); }
 					| !any                                          <[this]{ std::exit(EXIT_SUCCESS); };
 
 		grammar_ = start(Line);

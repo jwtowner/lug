@@ -6,7 +6,6 @@
 #define LUG_HPP__
 
 #include <lug/error.hpp>
-#include <lug/unicode.hpp>
 #include <lug/utf8.hpp>
 #include <any>
 #include <iostream>
@@ -45,7 +44,7 @@ enum class opcode : unsigned char
 enum class altcode : unsigned char
 {
 	none = 0, accept_final = 1, commit_back = 1, commit_partial = 2,
-	match_ptype = 1, match_gctype = 2, match_sctype = 3, match_scxtype = 4
+	caseless_match = 1, match_ptype = 1, match_gctype = 2, match_sctype = 3, match_scxtype = 4
 };
 
 enum class immediate : unsigned short {};
@@ -273,6 +272,17 @@ protected:
 		do_add_callee(r, p, length(), callee_mode);
 		return encode(opcode::call, off, immediate{prec});
 	}
+	encoder& do_match(std::string_view sequence, altcode alt) {
+		while (sequence.size() > instruction::maxstrlen) {
+			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
+			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
+				subsequence.remove_suffix(1);
+			subsequence.remove_suffix(!subsequence.empty());
+			encode(opcode::match, alt, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
+			sequence.remove_prefix(subsequence.size());
+		}
+		return encode(opcode::match, alt, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+	}
 	void do_skip() {
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
 		grammar::implicit_space(*this);
@@ -340,17 +350,12 @@ public:
 		return *this;
 	}
 
-	encoder& match(std::string_view sequence) {
-		skip(!sequence.empty() ? directives::eps : directives::none);
-		while (sequence.size() > instruction::maxstrlen) {
-			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
-			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
-				subsequence.remove_suffix(1);
-			subsequence.remove_suffix(!subsequence.empty());
-			encode(opcode::match, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
-			sequence.remove_prefix(subsequence.size());
-		}
-		return encode(opcode::match, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+	encoder& match(std::string_view subject) {
+		skip(!subject.empty() ? directives::eps : directives::none);
+		if ((mode() & directives::caseless) != directives::none)
+			return do_match(utf8::tocasefold(subject), altcode::caseless_match);
+		else
+			return do_match(subject, altcode::none);
 	}
 
 	encoder& match(rune_set set) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(set))); }
@@ -408,21 +413,19 @@ public:
 
 class string_expression
 {
-	program program_;
-	directives skip_flags_{directives::none};
+	std::string const expression_;
+	std::shared_ptr<program> const program_;
 	static grammar make_grammar();
-	void compile(std::string_view sv);
 
 	struct generator : semantics
 	{
-		string_expression& owner;
+		string_expression const& owner;
 		program_callees callees;
 		program_encoder encoder;
 		rune_set runes;
 		unicode::ctype classes = unicode::ctype::none;
 		bool circumflex = false;
-		generator(string_expression& se) : owner{se}, encoder{se.program_, callees, directives::eps | directives::lexeme} {}
-		~generator() { owner.skip_flags_ = (encoder.mandate() & directives::eps) ^ directives::eps; }
+		generator(string_expression const& se, directives mode) : owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
 
 		void bracket_class(std::string_view s) {
 			if (auto c = unicode::stoctype(s); c.has_value())
@@ -464,20 +467,20 @@ class string_expression
 	};
 
 public:
-	string_expression(std::string_view sv) { compile(sv); }
-	void operator()(encoder& d) const { d.skip(skip_flags_).append(program_); }
+	explicit string_expression(std::string_view e) : expression_{e}, program_{std::make_shared<program>()} {}
+	void operator()(encoder& d) const;
 };
 
-template <class T>
-constexpr auto make_expression(const T& t) {
-	static_assert(is_expression_v<T>, "T must be an expression type");
-	if constexpr (is_callable_v<T>)
+template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>>
+constexpr auto make_expression(T&& t) {
+	static_assert(is_expression_v<E>, "T must be an expression type");
+	if constexpr (is_callable_v<E>)
 		return [&target = t](encoder& d){ d.call(target, 0); };
-	else if constexpr (std::is_invocable_r_v<bool, T, parser&>)
+	else if constexpr (std::is_invocable_r_v<bool, E, parser&>)
 		return [p = semantic_predicate{t}](encoder& d) { d.encode(opcode::predicate, p); };
-	else if constexpr (std::is_invocable_r_v<bool, T>)
-		return [p = semantic_predicate{[a = T{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
-	else if constexpr (is_string_expression_v<T>)
+	else if constexpr (std::is_invocable_r_v<bool, E>)
+		return [p = semantic_predicate{[a = E{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
+	else if constexpr (is_string_expression_v<E>)
 		return string_expression{t};
 	else
 		return t;
@@ -533,10 +536,10 @@ constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept);
 constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
 constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
 constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
-constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {}; constexpr ctype_combinator<ctype::word> word = {};
+constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {};
 
 constexpr struct {
-	auto operator()(char32_t c) const { return [c](encoder& d) { d.match(utf8::encode_rune_to<std::string>(c)); }; }
+	auto operator()(char32_t c) const { return [c](encoder& d) { d.match(utf8::encode_rune(c)); }; }
 	auto operator()(char32_t s, char32_t e) const { return [s = (std::min)(s, e), e = (std::max)(s, e)](encoder& d) { d.match(rune_set{{s, e}}); }; }
 } chr = {};
 
@@ -663,20 +666,21 @@ class parser
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 	const lug::grammar& grammar_;
 	lug::semantics& semantics_;
+	std::vector<std::function<bool(std::string&)>> sources_;
 	std::string input_;
+	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
 	parser_registers registers_{0, 0, 0, 0, 0};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
-	std::vector<std::function<bool(std::string&)>> sources_;
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::tuple<std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // sr, rc, pc
 	std::vector<std::ptrdiff_t> call_stack_; // pc
 	std::vector<subject> capture_stack_; // sr
 	std::vector<lrmemo> lrmemo_stack_;
 
-	bool available(std::size_t n, std::size_t sr) {
+	bool available(std::size_t sr, std::size_t sn) {
 		do {
-			if (n <= input_.size() - sr)
+			if (sn <= input_.size() - sr)
 				return true;
 			if (sr < input_.size())
 				return false;
@@ -696,10 +700,22 @@ class parser
 		return !text.empty();
 	}
 
+	bool compare_subject(altcode alt, std::size_t sr, std::size_t sn, std::string_view str) {
+		std::string_view subject{input_.data() + sr, sn};
+		if (alt == altcode::caseless_match) {
+			auto& cfs = casefolded_subjects_[sr];
+			if (cfs.size() < sn)
+				cfs = utf8::tocasefold(subject);
+			subject = cfs;
+		}
+		return subject.compare(0, sn, str) == 0;
+	}
+
 	void accept(std::size_t& sr, std::size_t& mr, std::size_t& rc, std::ptrdiff_t& pc) {
 		registers_ = {sr, mr, rc, pc, 0};
 		semantics_.accept(grammar_, input_);
 		input_.erase(0, sr);
+		casefolded_subjects_.clear();
 		registers_.sr = 0, registers_.mr = 0, registers_.rc = 0;
 		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
 		std::tie(sr, mr, rc, pc, std::ignore) = registers_.as_tuple();
@@ -723,7 +739,7 @@ public:
 	std::size_t max_input_position() const noexcept { return registers_.mr; }
 	parser_registers& registers() noexcept { return registers_; }
 	const parser_registers& registers() const noexcept { return registers_; }
-	bool available(std::size_t n) { return available(n, registers_.sr); }
+	bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last) {
@@ -749,17 +765,18 @@ public:
 		while (!done) {
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
-					if (!str.empty() && (!available(str.size(), sr) || input_.compare(sr, str.size(), str) != 0))
+					if (auto sn = str.size(); !sn || (available(sr, sn) && compare_subject(alt, sr, sn, str)))
+						sr += sn;
+					else
 						goto failure;
-					sr += str.size();
 				} break;
 				case opcode::match_any: {
-					if (!available(1, sr))
+					if (!available(sr, 1))
 						goto failure;
 					sr += utf8::size_of_first_rune(input_.cbegin() + sr, input_.cend());
 				} break;
 				case opcode::match_class: {
-					if (!available(1, sr))
+					if (!available(sr, 1))
 						goto failure;
 					auto const first = input_.cbegin() + sr;
 					auto const [next, rune] = utf8::decode_rune(first, input_.cend());
@@ -776,7 +793,7 @@ public:
 					sr += std::distance(first, next);
 				} break;
 				case opcode::match_set: {
-					if (!available(1, sr))
+					if (!available(sr, 1))
 						goto failure;
 					auto const& rs = prog.runesets[imm];
 					auto const first = input_.cbegin() + sr;
@@ -787,7 +804,7 @@ public:
 					sr += std::distance(first, next);
 				} break;
 				case opcode::match_eol: {
-					if (!available(1, sr))
+					if (!available(sr, 1))
 						goto failure;
 					auto const first = input_.cbegin() + sr;
 					auto const next = utf8::skip_end_of_line(first, input_.cend());
@@ -956,6 +973,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
 inline grammar string_expression::make_grammar() {
 	using namespace language;
+	auto old_implicit_space = grammar::implicit_space;
 	grammar::implicit_space = nop;
 	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
@@ -965,16 +983,21 @@ inline grammar string_expression::make_grammar() {
 	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
 	    > Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
 	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
-	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
+	grammar grmr = start((+(Dot | Bracket | Sequence) | Empty) > eoi);
+	grammar::implicit_space = old_implicit_space;
+	return grmr;
 }
 
 LUG_DIAGNOSTIC_POP
 
-inline void string_expression::compile(std::string_view sv) {
-	static const grammar grmr = make_grammar();
-	generator genr(*this);
-	if (!parse(sv, grmr, genr))
-		throw bad_string_expression{};
+inline void string_expression::operator()(encoder& d) const {
+	if (program_->instructions.empty()) {
+		static const grammar grmr = make_grammar();
+		generator genr(*this, d.mode() & directives::caseless);
+		if (!parse(expression_, grmr, genr))
+			throw bad_string_expression{};
+	}
+	d.skip((program_->mandate & directives::eps) ^ directives::eps).append(*program_);
 }
 
 } // namespace lug
