@@ -357,6 +357,60 @@ inline char32_t toupper(char32_t r)
 	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).uppercase_mapping());
 }
 
+// Sparse character rune set
+using rune_set = std::vector<std::pair<char32_t, char32_t>>;
+
+inline void push_range(rune_set& runes, char32_t start, char32_t end)
+{
+	runes.emplace_back(start, end);
+	std::push_heap(std::begin(runes), std::end(runes));
+}
+
+namespace detail
+{
+
+inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t start, char32_t end)
+{
+	if ((props & ptype::Cased) != ptype::None) {
+		push_range(runes, tolower(start), tolower(end));
+		push_range(runes, toupper(start), toupper(end));
+	} else {
+		push_range(runes, start, end);
+	}
+}
+
+} // namespace detail
+
+inline void push_casefolded_range(rune_set& runes, char32_t start, char32_t end)
+{
+	ptype p = query(start).properties();
+	char32_t r1 = start, r2 = start;
+	for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
+		ptype q = query(start).properties();
+		if (((p ^ q) & ptype::Cased) != ptype::None) {
+			detail::push_uniform_casefolded_range(runes, p, r1, r2);
+			r1 = rn;
+			p = q;
+		}
+	}
+	detail::push_uniform_casefolded_range(runes, p, r1, r2);
+}
+
+inline rune_set sort_and_optimize(rune_set runes)
+{
+	rune_set optimized_runes;
+	auto out = optimized_runes.end();
+	std::sort_heap(std::begin(runes), std::end(runes));
+	for (auto next = std::cbegin(runes), last = std::cend(runes); next != last; ++next) {
+		if (out == optimized_runes.end() || next->first < out->first || out->second < next->first)
+			out = optimized_runes.insert(optimized_runes.end(), *next);
+		else
+			out->second = out->second < next->second ? next->second : out->second;
+	}
+	optimized_runes.shrink_to_fit();
+	return optimized_runes;
+}
+
 namespace detail
 {
 
@@ -381,7 +435,7 @@ inline std::optional<ctype> stoctype(std::string_view s)
 	{ {
 		{ "alnum"sv, ct::alnum }, { "alpha"sv, ct::alpha }, { "blank"sv, ct::blank }, { "cntrl"sv, ct::cntrl },
 		{ "digit"sv, ct::digit }, { "graph"sv, ct::graph }, { "lower"sv, ct::lower }, { "print"sv, ct::print },
-		{ "punct"sv, ct::punct }, { "space"sv, ct::space }, { "upper"sv, ct::upper }, { "word"sv, ct::word }, { "xdigit"sv, ct::xdigit }
+		{ "punct"sv, ct::punct }, { "space"sv, ct::space }, { "upper"sv, ct::upper }, { "xdigit"sv, ct::xdigit }
 	} };
 
 	auto l = detail::normalize_property_label(s);

@@ -35,12 +35,12 @@ public:
 		implicit_space_rule SP = *"[ \t]"s;
 
 		rule NL		= lexeme["\n"s | "\r\n" | "\r"];
-		rule Func	= lexeme[capture(id_)["[A-Z]" > *"[A-Z0-9]"s]]  <[this]{ return *id_; };
+		rule Func	= lexeme[capture(id_)["[A-Za-z]" > *"[0-9A-Za-z]"s]]  <[this]{ return lug::utf8::toupper(*id_); };
 		rule LineNo	= lexeme[capture(sv_)[+"[0-9]"s]]                     <[this]{ return std::stoi(std::string{*sv_}); };
 		rule Real	= lexeme[capture(sv_)[+"[0-9]"s > ~("[.]"s > +"[0-9]"s)
-					    > ~("[eE]"s > ~"[+-]"s > +"[0-9]"s)]]             <[this]{ return std::stod(std::string{*sv_}); };
+					    > ~("[Ee]"s > ~"[+-]"s > +"[0-9]"s)]]             <[this]{ return std::stod(std::string{*sv_}); };
 		rule String	= lexeme["\"" > capture(sv_)[*"[^\"]"s] > "\""]       <[this]{ return *sv_; };
-		rule Var	= lexeme[capture(id_)["[A-Z]" > ~"[0-9]"s]]        <[this]{ return *id_; };
+		rule Var	= lexeme[capture(id_)["[A-Za-z]" > ~"[0-9]"s]]        <[this]{ return lug::utf8::toupper(*id_); };
 
 		rule RelOp	= "="                                 <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 					| ">="                                <[]() -> RelOpFn { return std::isgreaterequal; }

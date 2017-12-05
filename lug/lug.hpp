@@ -21,11 +21,10 @@ struct program; class rule; class grammar; class encoder; class rule_encoder; cl
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
-typedef std::function<bool(parser&)> semantic_predicate;
-typedef std::function<void(semantics&)> semantic_action;
-typedef std::function<void(semantics&, const syntax_view&)> semantic_capture;
+using semantic_predicate = std::function<bool(parser&)>;
+using semantic_action = std::function<void(semantics&)>;
+using semantic_capture = std::function<void(semantics&, const syntax_view&)>;
 struct semantic_response { unsigned short call_depth, action_index; unsigned int capture_index; };
-typedef std::vector<std::pair<char32_t, char32_t>> rune_set;
 template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
@@ -96,7 +95,7 @@ using program_callees = std::vector<std::tuple<const lug::rule*, const lug::prog
 struct program
 {
 	std::vector<instruction> instructions;
-	std::vector<rune_set> runesets;
+	std::vector<unicode::rune_set> runesets;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture> captures;
@@ -258,7 +257,7 @@ class encoder
 	std::vector<directives> mode_;
 	virtual void do_append(instruction) = 0;
 	virtual void do_append(const program&) = 0;
-	virtual immediate do_add_rune_set(rune_set) { return immediate{0}; }
+	virtual immediate do_add_rune_set(unicode::rune_set) { return immediate{0}; }
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
@@ -307,6 +306,13 @@ public:
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 	directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	directives mode() const noexcept { return mode_.back(); }
+	encoder& match(unicode::rune_set runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
+	encoder& match(unicode::ctype flags) { return skip().encode(opcode::match_class, immediate{ static_cast<unsigned short>(flags) }); }
+	encoder& match(unicode::ptype flags) { return skip().encode(opcode::match_class, altcode::match_ptype, 1, detail::string_pack(flags)); }
+	encoder& match(unicode::gctype flags) { return skip().encode(opcode::match_class, altcode::match_gctype, 1, detail::string_pack(flags)); }
+	encoder& match(unicode::sctype type) { return skip().encode(opcode::match_class, altcode::match_sctype, immediate{ static_cast<unsigned short>(type) }); }
+	encoder& match_any() { return skip().encode(opcode::match_any); }
+	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 
 	encoder& dpop(directives relay) {
 		auto prev = detail::pop_back(mode_), next = (mode_.back() & ~relay) | (prev & relay);
@@ -357,14 +363,6 @@ public:
 		else
 			return do_match(subject, altcode::none);
 	}
-
-	encoder& match(rune_set set) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(set))); }
-	encoder& match(unicode::ctype flags) { return skip().encode(opcode::match_class, immediate{static_cast<unsigned short>(flags)}); }
-	encoder& match(unicode::ptype flags) { return skip().encode(opcode::match_class, altcode::match_ptype, 1, detail::string_pack(flags)); }
-	encoder& match(unicode::gctype flags) { return skip().encode(opcode::match_class, altcode::match_gctype, 1, detail::string_pack(flags)); }
-	encoder& match(unicode::sctype type) { return skip().encode(opcode::match_class, altcode::match_sctype, immediate{static_cast<unsigned short>(type)}); }
-	encoder& match_any() { return skip().encode(opcode::match_any); }
-	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 };
 
 class instruction_length_evaluator final : public encoder
@@ -386,7 +384,7 @@ class program_encoder : public encoder
 	void do_append(instruction instr) override final { program_.instructions.push_back(instr); }
 	void do_append(const program& p) override final { program_.concatenate(p); }
 	void do_add_callee(const rule* r, const program* p, std::ptrdiff_t n, directives d) override final { callees_.emplace_back(r, p, n, d); }
-	immediate do_add_rune_set(rune_set r) override final { return add_item(program_.runesets, std::move(r)); }
+	immediate do_add_rune_set(unicode::rune_set r) override final { return add_item(program_.runesets, std::move(r)); }
 	immediate do_add_semantic_predicate(semantic_predicate p) override final { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override final { return add_item(program_.actions, std::move(a)); }
 	immediate do_add_semantic_capture_action(semantic_capture a) override final { return add_item(program_.captures, std::move(a)); }
@@ -411,6 +409,17 @@ public:
 	~rule_encoder() override { rule_.currently_encoding_ = false; }
 };
 
+template <class RuneSet>
+inline auto&& add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last) {
+	if (first > last)
+		throw bad_character_range{};
+	if ((mode & directives::caseless) != directives::none)
+		unicode::push_casefolded_range(runes, first, last);
+	else
+		unicode::push_range(runes, first, last);
+	return ::std::move(runes);
+}
+
 class string_expression
 {
 	std::string const expression_;
@@ -422,9 +431,9 @@ class string_expression
 		string_expression const& owner;
 		program_callees callees;
 		program_encoder encoder;
-		rune_set runes;
-		unicode::ctype classes = unicode::ctype::none;
 		bool circumflex = false;
+		unicode::ctype classes = unicode::ctype::none;
+		unicode::rune_set runes;
 		generator(string_expression const& se, directives mode) : owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
 
 		void bracket_class(std::string_view s) {
@@ -437,27 +446,15 @@ class string_expression
 			bracket_range(s.substr(0, s.find('-')), s.substr(s.find('-') + 1));
 		}
 
-		void bracket_range(std::string_view first, std::string_view last) {
-			bracket_range(utf8::decode_rune(std::begin(first), std::end(first)).second, utf8::decode_rune(std::begin(last), std::end(last)).second);
-		}
-
-		void bracket_range(char32_t first, char32_t last) {
-			runes.emplace_back((std::min)(first, last), (std::max)(first, last));
-			std::push_heap(std::begin(runes), std::end(runes));
+		void bracket_range(std::string_view s1, std::string_view s2) {
+			add_rune_range(std::ref(runes), encoder.mode(), utf8::decode_rune(std::begin(s1), std::end(s1)).second, utf8::decode_rune(std::begin(s2), std::end(s2)).second);
 		}
 
 		void bracket_commit() {
-			rune_set mergedrunes;
-			std::sort_heap(runes.begin(), runes.end());
-			for (auto cur = mergedrunes.end(), next = runes.begin(), last = runes.end(); next != last; ++next)
-				if (cur == mergedrunes.end() || next->first < cur->first || cur->second < next->first)
-					cur = mergedrunes.insert(mergedrunes.end(), *next);
-				else
-					cur->second = cur->second < next->second ? next->second : cur->second;
 			if (circumflex)
-				encoder.encode(opcode::choice, 3 + (!mergedrunes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0));
-			if (!mergedrunes.empty())
-				encoder.match(std::move(mergedrunes));
+				encoder.encode(opcode::choice, 3 + (!runes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0));
+			if (!runes.empty())
+				encoder.match(unicode::sort_and_optimize(std::move(runes)));
 			if (classes != unicode::ctype::none)
 				encoder.match(classes);
 			if (circumflex)
@@ -540,7 +537,9 @@ constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<
 
 constexpr struct {
 	auto operator()(char32_t c) const { return [c](encoder& d) { d.match(utf8::encode_rune(c)); }; }
-	auto operator()(char32_t s, char32_t e) const { return [s = (std::min)(s, e), e = (std::max)(s, e)](encoder& d) { d.match(rune_set{{s, e}}); }; }
+	auto operator()(char32_t start, char32_t end) const {
+		return [start, end](encoder& d) { d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end))); };
+	}
 } chr = {};
 
 constexpr struct {

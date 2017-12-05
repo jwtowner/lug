@@ -11,7 +11,7 @@ public:
 	{
 		using namespace lug::language;
 		rule JSON;
-		rule ExponentPart   = lexeme[ "[eE]" > ~"[+-]"s > +"[0-9]"s ];
+		rule ExponentPart   = lexeme[ "[Ee]" > ~"[+-]"s > +"[0-9]"s ];
 		rule FractionalPart = lexeme[ "[.]" > +"[0-9]"s ];
 		rule IntegralPart   = lexeme[ "0" | "[1-9]" > *"[0-9]"s ];
 		rule Number         = lexeme[ ~"-"s > IntegralPart > ~FractionalPart > ~ExponentPart ];
