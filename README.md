@@ -58,7 +58,7 @@ WIP
 | Sequence | *e1* > *e2* |
 | Ordered Choice | *e1* \| *e2* |
 | Zero-or-More | \**e* |
-| One-or-More | \*+e* |
+| One-or-More | +*e* |
 | Optional | ~*e* |
 | Positive Lookahead | &*e* |
 | Negative Lookahead | !*e* |
