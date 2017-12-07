@@ -45,9 +45,43 @@ As a baseline, the following compiler versions are known to work with lug.
 | --- | --- |
 | Clang 5.0.0 (September 2017) | -std=c++17 or -std=gnu++17 |
 | GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
-| Microsoft Visual C++ 2017 15.5 Preview 2.0 (October 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2017 15.5 (December 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 
-For building the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
+To build the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
+
+Syntax Reference
+---
+WIP
+
+| Operator | Syntax |
+| --- | --- |
+| Sequence | *e1* > *e2* |
+| Ordered Choice | *e1* \| *e2* |
+| Zero-or-More | \**e* |
+| One-or-More | \*+e* |
+| Optional | ~*e* |
+| Positive Lookahead | &*e* |
+| Negative Lookahead | !*e* |
+
+| Terminal | Description |
+| --- | --- |
+| `chr(c)` | Matches the UTF-8, UTF-16, or UTF-32 character *c* |
+| `chr(c1, c2)` | Matches characters in the UTF-8, UTF-16, or UTF-32 interval \[*c1*-*c2*\] |
+| `any` | Matches any single character |
+| `any(flags)` | Matches a character exhibiting any of the character properties |
+| `all(flags)` | Matches a character with all of the character properties |
+| `none(flags)` | Matches a character with none of the character properties |
+| `eps` | Matches the empty string |
+| `eoi` | Matches the end of the input sequence |
+| `eol` | Matches a Unicode line-ending |
+| `nop` | No operation, does not emit any instructions |
+| `cut` | Emits a cut operation into the stream of semantic actions without matching |
+
+| Literal | Name | Description |
+| --- | --- | --- |
+| `_cx` | Character Expression | Matches the UTF-8, UTF-16, or UTF-32 character literal |
+| `_sx` | String Expression | Matches the sequence of characters in a string literal |
+| `_rx` | Regular Expression | POSIX Basic Regular Expression (BRE) |
 
 TODO
 ---
