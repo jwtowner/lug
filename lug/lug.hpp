@@ -860,12 +860,12 @@ class parser
 		return false;
 	}
 
-	bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
+	int casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
 	{
 		auto& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
 			subject = utf8::tocasefold(std::string_view{input_.data() + sr, sn});
-		return subject.compare(0, sn, str) == 0;
+		return subject.compare(0, sn, str);
 	}
 
 	void accept(std::size_t& sr, std::size_t& mr, std::size_t& rc, std::ptrdiff_t& pc)
