@@ -624,6 +624,13 @@ chr = {};
 
 constexpr struct
 {
+	auto operator()(std::string_view s) const { return[s = std::move(s)](encoder& d) { d.match(s); }; }
+	auto operator()(char const* s, std::size_t n) const { return[s = std::string_view{s, n}](encoder& d) { d.match(s); }; }
+}
+str = {};
+
+constexpr struct
+{
 	void operator()(encoder& d) const { d.match_any(); }
 	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
 	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
@@ -631,6 +638,16 @@ constexpr struct
 	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
 }
 any = {};
+
+inline auto operator ""_cx(char32_t c) { return chr(c); }
+inline auto operator ""_sx(char const* s, std::size_t n) { return str(s, n); }
+inline auto operator ""_rx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
+inline auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
+inline auto operator ""_isx(char const* s, std::size_t n) { return caseless[str(s, n)]; }
+inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
+inline auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
+inline auto operator ""_ssx(char const* s, std::size_t n) { return cased[str(s, n)]; }
+inline auto operator ""_srx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
 
 struct implicit_space_rule
 {

@@ -34,88 +34,88 @@ public:
 
 		implicit_space_rule SP = *"[ \t]"s;
 
-		rule NL		= lexeme["\n"s | "\r\n" | "\r"];
-		rule Func	= lexeme[capture(id_)["[A-Za-z]" > *"[0-9A-Za-z]"s]]  <[this]{ return lug::utf8::toupper(*id_); };
-		rule LineNo	= lexeme[capture(sv_)[+"[0-9]"s]]                     <[this]{ return std::stoi(std::string{*sv_}); };
-		rule Real	= lexeme[capture(sv_)[+"[0-9]"s > ~("[.]"s > +"[0-9]"s)
-					    > ~("[Ee]"s > ~"[+-]"s > +"[0-9]"s)]]             <[this]{ return std::stod(std::string{*sv_}); };
-		rule String	= lexeme["\"" > capture(sv_)[*"[^\"]"s] > "\""]       <[this]{ return *sv_; };
-		rule Var	= lexeme[capture(id_)["[A-Za-z]" > ~"[0-9]"s]]        <[this]{ return lug::utf8::toupper(*id_); };
+		rule NL		= lexeme["\n"_sx | "\r\n" | "\r"];
+		rule Func	= lexeme[capture(id_)["[A-Za-z]"_rx > *"[0-9A-Za-z]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
+		rule LineNo	= lexeme[capture(sv_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{*sv_}); };
+		rule Real	= lexeme[capture(sv_)[+"[0-9]"_rx > ~(any > +"[0-9]"_rx)
+					    > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]     <[this]{ return std::stod(std::string{*sv_}); };
+		rule String	= lexeme["\"" > capture(sv_)[*"[^\"]"_rx] > "\""]   <[this]{ return *sv_; };
+		rule Var	= lexeme[capture(id_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
 
-		rule RelOp	= "="                                 <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
-					| ">="                                <[]() -> RelOpFn { return std::isgreaterequal; }
-					| ">"                                 <[]() -> RelOpFn { return std::isgreater; }
-					| "<="                                <[]() -> RelOpFn { return std::islessequal; }
-					| "<>"                                <[]() -> RelOpFn { return [](double x, double y) { return x != y; }; }
-					| "<"                                 <[]() -> RelOpFn { return std::isless; };
+		rule RelOp	= "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
+					| ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
+					| ">"                             <[]() -> RelOpFn { return std::isgreater; }
+					| "<="                            <[]() -> RelOpFn { return std::islessequal; }
+					| "<>"                            <[]() -> RelOpFn { return [](double x, double y) { return x != y; }; }
+					| "<"                             <[]() -> RelOpFn { return std::isless; };
 
-		rule Factor	= !(caseless["[A-Z][A-Z][A-Z]"] > "(")
-					> (   id_%Var                                   <[this]{ return vars_[*id_]; }
-					    | r1_%Real > ~(u8"[↑^]"s > r2_%Real         <[this]{ *r1_ = std::pow(*r1_, *r2_); }
-					    )                                           <[this]{ return *r1_; }
+		rule Factor	= !("[A-Z][A-Z][A-Z]"_irx > "(")
+					> (   id_%Var                               <[this]{ return vars_[*id_]; }
+					    | r1_%Real > ~(u8"[↑^]"_rx > r2_%Real   <[this]{ *r1_ = std::pow(*r1_, *r2_); }
+					    )                                       <[this]{ return *r1_; }
 					    | "(" > Expr > ")" )
-					| caseless["SIN"] > "(" > r1_%Expr > ")"        <[this]{ return std::sin(*r1_); }
-					| caseless["COS"] > "(" > r1_%Expr > ")"        <[this]{ return std::cos(*r1_); }
-					| caseless["TAN"] > "(" > r1_%Expr > ")"        <[this]{ return std::tan(*r1_); }
-					| caseless["ATN"] > "(" > r1_%Expr > ")"        <[this]{ return std::atan(*r1_); }
-					| caseless["EXP"] > "(" > r1_%Expr > ")"        <[this]{ return std::exp(*r1_); }
-					| caseless["ABS"] > "(" > r1_%Expr > ")"        <[this]{ return std::abs(*r1_); }
-					| caseless["LOG"] > "(" > r1_%Expr > ")"        <[this]{ return std::log(*r1_); }
-					| caseless["SQR"] > "(" > r1_%Expr > ")"        <[this]{ return std::sqrt(*r1_); }
-					| caseless["INT"] > "(" > r1_%Expr > ")"        <[this]{ return std::trunc(*r1_); }
-					| caseless["RND"] > "(" > r1_%Expr > ")"        <[this]{ return std::rand() / static_cast<double>(RAND_MAX); };
+					| "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(*r1_); }
+					| "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(*r1_); }
+					| "TAN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::tan(*r1_); }
+					| "ATN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::atan(*r1_); }
+					| "EXP"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::exp(*r1_); }
+					| "ABS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::abs(*r1_); }
+					| "LOG"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::log(*r1_); }
+					| "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(*r1_); }
+					| "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
+					| "RND"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::rand() / static_cast<double>(RAND_MAX); };
 
 		rule Term	= r1_%Factor > *(
-					      "*"s > r2_%Factor                         <[this]{ *r1_ *= *r2_; }
-					    | "/"s > r2_%Factor                         <[this]{ *r1_ /= *r2_; }
-					)                                               <[this]{ return *r1_; };
+					      "*"_sx > r2_%Factor                   <[this]{ *r1_ *= *r2_; }
+					    | "/"_sx > r2_%Factor                   <[this]{ *r1_ /= *r2_; }
+					)                                           <[this]{ return *r1_; };
 
-		     Expr	= (  ~ "+"s > r1_%Term
-					     | "-"s > r1_%Term                          <[this]{ *r1_ = -*r1_; }
-					) > *( "+"s > r2_%Term                          <[this]{ *r1_ += *r2_; }
-					     | "-"s > r2_%Term                          <[this]{ *r1_ -= *r2_; }
-					)                                               <[this]{ return *r1_; };
+		     Expr	= (  ~ "+"_sx > r1_%Term
+					     | "-"_sx > r1_%Term                    <[this]{ *r1_ = -*r1_; }
+					) > *( "+"_sx > r2_%Term                    <[this]{ *r1_ += *r2_; }
+					     | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
+					)                                           <[this]{ return *r1_; };
 
-		rule ReadEl = id_%Var                                       <[this]{ read(*id_); };
-		rule DataEl = r1_%Real                                      <[this]{ data_.push_back(*r1_); };
-		rule InptEl	= id_%Var                                       <[this]{ std::cin >> vars_[*id_]; };
-		rule PrntEl	= sv_%String                                    <[this]{ std::cout << *sv_; }
-					| r1_%Expr                                      <[this]{ std::cout << *r1_; };
+		rule ReadEl = id_%Var                                   <[this]{ read(*id_); };
+		rule DataEl = r1_%Real                                  <[this]{ data_.push_back(*r1_); };
+		rule InptEl	= id_%Var                                   <[this]{ std::cin >> vars_[*id_]; };
+		rule PrntEl	= sv_%String                                <[this]{ std::cout << *sv_; }
+					| r1_%Expr                                  <[this]{ std::cout << *r1_; };
 
-		rule Stmnt	= caseless["PRINT"] > ~PrntEl > *("," > PrntEl) <[this]{ std::cout << std::endl; }
-					| caseless["IF"] > r1_%Expr
-					    > rop_%RelOp > r2_%Expr                     <[this]{ if (!(*rop_)(*r1_, *r2_)) { semantics_.escape(); } }
-					    > caseless[ "THEN" ] > Stmnt
-					| caseless["FOR"] > id_%Var > "=" > r1_%Expr
-					    > caseless["TO"] > r2_%Expr
-					    > ( caseless["STEP"] > r3_%Expr
-					      | eps < [this]{ *r3_ = 1.0; } )           <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
-					| caseless["NEXT"] > id_%Var                    <[this]{ next(*id_); }
-					| caseless["GOTO"] > no_%LineNo                 <[this]{ goto_line(*no_); }
-					| caseless["READ"] > ReadEl > *("," > ReadEl)
-					| caseless["RESTORE"]                           <[this]{ read_itr_ = data_.cbegin(); }
-					| caseless["INPUT"] > InptEl > *("," > InptEl)
-					| caseless["LET"] > id_%Var > "=" > r1_%Expr    <[this]{ vars_[*id_] = *r1_; }
-					| caseless["GOSUB"] > no_%LineNo                <[this]{ gosub(*no_); }
-					| caseless["RETURN"]                            <[this]{ retsub(); }
-					| caseless["STOP"]                              <[this]{ haltline_ = line_; line_ = lines_.end(); }
-					| caseless["END"]                               <[this]{ if (line_ == lines_.end()) std::exit(EXIT_SUCCESS); line_ = lines_.end(); }
-					| (caseless["EXIT"] | caseless["QUIT"])         <[this]{ std::exit(EXIT_SUCCESS); }
-					| caseless["REM"] > *(!NL > any);
+		rule Stmnt	= "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[this]{ std::cout << std::endl; }
+					| "IF"_isx > r1_%Expr
+					    > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { semantics_.escape(); } }
+					    > "THEN"_isx > Stmnt
+					| "FOR"_isx > id_%Var > "=" > r1_%Expr
+					    > "TO"_isx > r2_%Expr
+					    > ( "STEP"_isx > r3_%Expr
+					      | eps < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
+					| "NEXT"_isx > id_%Var                      <[this]{ next(*id_); }
+					| "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(*no_); }
+					| "READ"_isx > ReadEl > *("," > ReadEl)
+					| "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
+					| "INPUT"_isx > InptEl > *("," > InptEl)
+					| "LET"_isx > id_%Var > "=" > r1_%Expr      <[this]{ vars_[*id_] = *r1_; }
+					| "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
+					| "RETURN"_isx                              <[this]{ retsub(); }
+					| "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
+					| "END"_isx                                 <[this]{ if (line_ == lines_.end()) std::exit(EXIT_SUCCESS); line_ = lines_.end(); }
+					| ("EXIT"_isx | "QUIT"_isx)                 <[this]{ std::exit(EXIT_SUCCESS); }
+					| "REM"_isx > *(!NL > any);
 
-		rule Cmnd	= caseless["CLEAR"]                             <[this]{ lines_.clear(); }
-					| caseless["CONT"]                              <[this]{ cont(); }
-					| caseless["LIST"]                              <[this]{ list(std::cout); }
-					| caseless["LOAD"] > sv_%String                 <[this]{ load(*sv_); }
-					| caseless["RUN"]                               <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
-					| caseless["SAVE"] > sv_%String                 <[this]{ save(*sv_); };
+		rule Cmnd	= "CLEAR"_isx                               <[this]{ lines_.clear(); }
+					| "CONT"_isx                                <[this]{ cont(); }
+					| "LIST"_isx                                <[this]{ list(std::cout); }
+					| "LOAD"_isx > sv_%String                   <[this]{ load(*sv_); }
+					| "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
+					| "SAVE"_isx > sv_%String                   <[this]{ save(*sv_); };
 
 		rule Line	= Stmnt > NL
 					| Cmnd > NL
-					| no_%LineNo > capture(sv_)[*(!NL > any) > NL]  <[this]{ update_line(*no_, *sv_); }
+					| no_%LineNo > capture(sv_)[*(!NL > any) > NL] <[this]{ update_line(*no_, *sv_); }
 					| NL
-					| (*(!NL > any) > NL)                           <[this]{ print_error("ILLEGAL FORMULA"); }
-					| !any                                          <[this]{ std::exit(EXIT_SUCCESS); };
+					| (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); }
+					| !any                                      <[this]{ std::exit(EXIT_SUCCESS); };
 
 		grammar_ = start(Line);
 	}
