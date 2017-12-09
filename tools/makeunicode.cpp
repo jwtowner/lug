@@ -215,8 +215,8 @@ static ucd_array<std::int_least32_t> cuppertable; // Simple uppercase conversion
 
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
 static std::regex const rx_ucd_version(R"(^#\s*\w+-(\d+(\.\d+)+).*)", default_rx_options);
-static std::regex const rx_ucd_prop_range(R"(^\s*([0-9a-fA-F]+)(\.\.([0-9a-fA-F]+))?\s*;\s*(\w+)\s*.*)", default_rx_options);
-static std::regex const rx_ucd_case_folding(R"(^\s*([0-9a-fA-F]+);\s*(C|S);\s*([0-9a-fA-F]+);.*)", default_rx_options);
+static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*(\w+)\s*.*)", default_rx_options);
+static std::regex const rx_ucd_case_folding(R"(^\s*([0-9A-Fa-f]+);\s*(C|S);\s*([0-9A-Fa-f]+);.*)", default_rx_options);
 
 std::ifstream open_ucd_file_and_read_version(stdfs::path const& filepath, std::string& version)
 {

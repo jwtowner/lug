@@ -55,7 +55,7 @@ enum class altcode : unsigned char
 };
 
 enum class immediate : unsigned short {};
-enum class operands : unsigned char { is_bitfield_enum, none = 0, altcode = 0x3f, off = 0x40, str = 0x80 };
+enum class operands : unsigned char { none = 0, altcode = 0x3f, off = 0x40, str = 0x80, is_bitfield_enum };
 constexpr operands to_operands(altcode alt) noexcept { return static_cast<operands>(alt) & operands::altcode; }
 
 union instruction
@@ -99,7 +99,7 @@ static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be l
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
 
-enum class directives : unsigned int { is_bitfield_enum, none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
+enum class directives : unsigned int { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct program
