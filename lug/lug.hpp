@@ -34,16 +34,17 @@ grammar start(rule const& start_rule);
 
 enum class opcode : unsigned char
 {
-	match,          match_any,      match_class,    match_set,
-	match_eol,      choice,         commit,         jump,
-	call,           ret,            fail,           accept,
-	predicate,      action,         begin,          end
+	match,          match_any,      match_casefold, match_class,
+	match_set,      match_eol,      choice,         commit,
+	jump,           call,           ret,            fail,
+	accept,         predicate,      action,         begin,
+	end
 };
 
 enum class altcode : unsigned char
 {
 	none = 0, accept_final = 1, commit_back = 1, commit_partial = 2,
-	caseless_match = 1, match_ptype = 1, match_gctype = 2, match_sctype = 3, match_scxtype = 4
+	match_ptype = 1, match_gctype = 2, match_sctype = 3, match_scxtype = 4
 };
 
 enum class immediate : unsigned short {};
@@ -125,8 +126,12 @@ struct program
 	}
 
 	void swap(program& p) {
-		instructions.swap(p.instructions); runesets.swap(p.runesets); predicates.swap(p.predicates);
-		actions.swap(p.actions); captures.swap(p.captures); std::swap(mandate, p.mandate);
+		instructions.swap(p.instructions);
+		runesets.swap(p.runesets);
+		predicates.swap(p.predicates);
+		actions.swap(p.actions);
+		captures.swap(p.captures);
+		std::swap(mandate, p.mandate);
 	}
 };
 
@@ -271,16 +276,16 @@ protected:
 		do_add_callee(r, p, length(), callee_mode);
 		return encode(opcode::call, off, immediate{prec});
 	}
-	encoder& do_match(std::string_view sequence, altcode alt) {
+	encoder& do_match(opcode op, std::string_view sequence) {
 		while (sequence.size() > instruction::maxstrlen) {
 			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
 			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
 				subsequence.remove_suffix(1);
 			subsequence.remove_suffix(!subsequence.empty());
-			encode(opcode::match, alt, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
+			encode(op, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
 			sequence.remove_prefix(subsequence.size());
 		}
-		return encode(opcode::match, alt, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+		return encode(op, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
 	}
 	void do_skip() {
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
@@ -359,9 +364,9 @@ public:
 	encoder& match(std::string_view subject) {
 		skip(!subject.empty() ? directives::eps : directives::none);
 		if ((mode() & directives::caseless) != directives::none)
-			return do_match(utf8::tocasefold(subject), altcode::caseless_match);
+			return do_match(opcode::match_casefold, utf8::tocasefold(subject));
 		else
-			return do_match(subject, altcode::none);
+			return do_match(opcode::match, subject);
 	}
 };
 
@@ -434,7 +439,9 @@ class string_expression
 		bool circumflex = false;
 		unicode::ctype classes = unicode::ctype::none;
 		unicode::rune_set runes;
-		generator(string_expression const& se, directives mode) : owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
+
+		generator(string_expression const& se, directives mode)
+			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
 
 		void bracket_class(std::string_view s) {
 			if (auto c = unicode::stoctype(s); c.has_value())
@@ -502,7 +509,9 @@ template <directives EnableMask, directives DisableMask, directives RelayMask>
 struct directive_modifier
 {
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	auto operator[](E const& e) const { return [e = make_expression(e)](encoder& d) { d.dpsh(EnableMask, DisableMask).evaluate(e).dpop(RelayMask); }; }
+	auto operator[](E const& e) const {
+		return [e = make_expression(e)](encoder& d) { d.dpsh(EnableMask, DisableMask).evaluate(e).dpop(RelayMask); };
+	}
 };
 
 constexpr auto matches_eps = directive_modifier<directives::none, directives::none, directives::none>{};
@@ -626,8 +635,8 @@ inline grammar start(rule const& start_rule) {
 				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
 					if (callee_rule && (mode & directives::eps) != directives::none && detail::escaping_find_if(
-								callstack.crbegin(), callstack.crend(), [callee_rule](auto& caller) {
-									return caller.first == callee_rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
+							callstack.crbegin(), callstack.crend(), [callee_rule](auto& caller) {
+								return caller.first == callee_rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
 						left_recursive.insert(callee_program);
 					} else {
 						auto callee_callstack = callstack;
@@ -699,14 +708,19 @@ class parser
 		return !text.empty();
 	}
 
-	bool compare_subject(altcode alt, std::size_t sr, std::size_t sn, std::string_view str) {
-		std::string_view subject{input_.data() + sr, sn};
-		if (alt == altcode::caseless_match) {
-			auto& cfs = casefolded_subjects_[sr];
-			if (cfs.size() < sn)
-				cfs = utf8::tocasefold(subject);
-			subject = cfs;
+	template <class Compare>
+	bool match_subject(std::size_t& sr, std::string_view str, Compare&& comp) {
+		if (auto sn = str.size(); available(sr, sn) && comp(sr, sn, str)) {
+			sr += sn;
+			return true;
 		}
+		return false;
+	}
+
+	bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) {
+		auto& subject = casefolded_subjects_[sr];
+		if (subject.size() < sn)
+			subject = utf8::tocasefold(std::string_view{input_.data() + sr, sn});
 		return subject.compare(0, sn, str) == 0;
 	}
 
@@ -748,7 +762,8 @@ public:
 
 	template <class InputFunc>
 	parser& push_source(InputFunc&& func) {
-		if (reading_) throw reenterant_read_error{};
+		if (reading_)
+			throw reenterant_read_error{};
 		sources_.emplace_back(::std::forward<InputFunc>(func));
 		return *this;
 	}
@@ -764,9 +779,11 @@ public:
 		while (!done) {
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
-					if (auto sn = str.size(); !sn || (available(sr, sn) && compare_subject(alt, sr, sn, str)))
-						sr += sn;
-					else
+					if (!match_subject(sr, str, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+						goto failure;
+				} break;
+				case opcode::match_casefold: {
+					if (!match_subject(sr, str, [this](auto i, auto n, auto s) { return casefold_compare(i, n, s) == 0; }))
 						goto failure;
 				} break;
 				case opcode::match_any: {

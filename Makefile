@@ -9,7 +9,7 @@ PREFIX = /usr/local
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wno-parentheses -Wno-logical-not-parentheses -Wunused-but-set-variable -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
 # samples
