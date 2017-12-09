@@ -32,7 +32,7 @@ public:
 		using namespace lug::language;
 		rule Expr;
 
-		implicit_space_rule SP = *"[ \t]"s;
+		implicit_space_rule SP = *"[ \t]"_rx;
 
 		rule NL		= lexeme["\n"_sx | "\r\n" | "\r"];
 		rule Func	= lexeme[capture(id_)["[A-Za-z]"_rx > *"[0-9A-Za-z]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };

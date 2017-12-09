@@ -18,6 +18,7 @@ namespace lug
 {
 
 struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
+
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; syntax_position start, end; };
 struct syntax_view { std::string_view capture; syntax_position start, end; };
@@ -25,11 +26,17 @@ using semantic_predicate = std::function<bool(parser&)>;
 using semantic_action = std::function<void(semantics&)>;
 using semantic_capture = std::function<void(semantics&, syntax_view const&)>;
 struct semantic_response { unsigned short call_depth, action_index; unsigned int capture_index; };
-template <class E> constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+
+template <class E> constexpr bool is_callable_v =
+	std::is_same_v<grammar, std::decay_t<E>> ||
+	std::is_same_v<rule, std::decay_t<E>> ||
+	std::is_same_v<program, std::decay_t<E>>;
+
 template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
 template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
+
 grammar start(rule const& start_rule);
 
 enum class opcode : unsigned char
@@ -467,7 +474,7 @@ inline auto&& add_rune_range(RuneSet&& runes, directives mode, char32_t first, c
 	return ::std::move(runes);
 }
 
-class string_expression
+class basic_regular_expression
 {
 	std::string const expression_;
 	std::shared_ptr<program> const program_;
@@ -476,14 +483,14 @@ class string_expression
 
 	struct generator : semantics
 	{
-		string_expression const& owner;
+		basic_regular_expression const& owner;
 		program_callees callees;
 		program_encoder encoder;
 		bool circumflex = false;
 		unicode::ctype classes = unicode::ctype::none;
 		unicode::rune_set runes;
 
-		generator(string_expression const& se, directives mode)
+		generator(basic_regular_expression const& se, directives mode)
 			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
 
 		void bracket_class(std::string_view s)
@@ -498,9 +505,11 @@ class string_expression
 			bracket_range(s.substr(0, s.find('-')), s.substr(s.find('-') + 1));
 		}
 
-		void bracket_range(std::string_view s1, std::string_view s2)
+		void bracket_range(std::string_view a, std::string_view b)
 		{
-			add_rune_range(std::ref(runes), encoder.mode(), utf8::decode_rune(std::begin(s1), std::end(s1)).second, utf8::decode_rune(std::begin(s2), std::end(s2)).second);
+			add_rune_range(std::ref(runes), encoder.mode(),
+				utf8::decode_rune(std::begin(a), std::end(a)).second,
+				utf8::decode_rune(std::begin(b), std::end(b)).second);
 		}
 
 		void bracket_commit()
@@ -518,8 +527,16 @@ class string_expression
 	};
 
 public:
-	explicit string_expression(std::string_view e) : expression_{e}, program_{std::make_shared<program>()} {}
+	explicit basic_regular_expression(std::string_view e) : expression_{e}, program_{std::make_shared<program>()} {}
 	void operator()(encoder& d) const;
+};
+
+class string_expression
+{
+	std::string_view const expression_;
+public:
+	explicit string_expression(std::string_view e) : expression_{e} {}
+	void operator()(encoder& d) const { d.match(expression_); }
 };
 
 template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>>
@@ -586,7 +603,6 @@ template <unicode::ctype Property> struct ctype_combinator { void operator()(enc
 namespace language
 {
 
-using namespace std::literals::string_literals;
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
 using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
@@ -608,6 +624,23 @@ constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<
 
 constexpr struct
 {
+	void operator()(encoder& d) const { d.match_any(); }
+	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
+	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
+	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
+	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
+}
+any = {};
+
+constexpr struct
+{
+	auto operator()(std::string_view s) const { return basic_regular_expression{s}; }
+	auto operator()(char const* s, std::size_t n) const { return basic_regular_expression{std::string_view{s, n}}; }
+}
+bre = {};
+
+constexpr struct
+{
 	auto operator()(char32_t c) const
 	{
 		return [c](encoder& d) { d.match(utf8::encode_rune(c)); };
@@ -624,30 +657,20 @@ chr = {};
 
 constexpr struct
 {
-	auto operator()(std::string_view s) const { return[s = std::move(s)](encoder& d) { d.match(s); }; }
-	auto operator()(char const* s, std::size_t n) const { return[s = std::string_view{s, n}](encoder& d) { d.match(s); }; }
+	auto operator()(std::string_view s) const { return string_expression{s}; }
+	auto operator()(char const* s, std::size_t n) const { return string_expression{std::string_view{s, n}}; }
 }
 str = {};
 
-constexpr struct
-{
-	void operator()(encoder& d) const { d.match_any(); }
-	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
-	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
-	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
-	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
-}
-any = {};
-
 inline auto operator ""_cx(char32_t c) { return chr(c); }
-inline auto operator ""_sx(char const* s, std::size_t n) { return str(s, n); }
-inline auto operator ""_rx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
+inline auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
+inline auto operator ""_rx(char const* s, std::size_t n) { return basic_regular_expression{std::string_view{s, n}}; }
 inline auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
-inline auto operator ""_isx(char const* s, std::size_t n) { return caseless[str(s, n)]; }
-inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
+inline auto operator ""_isx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
+inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[basic_regular_expression{std::string_view{s, n}}]; }
 inline auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
-inline auto operator ""_ssx(char const* s, std::size_t n) { return cased[str(s, n)]; }
-inline auto operator ""_srx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
+inline auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
+inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
 
 struct implicit_space_rule
 {
@@ -749,7 +772,7 @@ constexpr struct
 		template <class E, class = std::enable_if_t<is_expression_v<E>>>
 		constexpr auto operator[](E const& e) const
 		{
-			return e < [&v = v](semantics&, syntax x) { *v = T{x.capture}; };
+			return e < [&vr = v](semantics&, syntax x) { *vr = T{x.capture}; };
 		}
 	};
 
@@ -1172,7 +1195,7 @@ inline bool parse(grammar const& grmr)
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
-inline grammar string_expression::make_grammar()
+inline grammar basic_regular_expression::make_grammar()
 {
 	using namespace language;
 	auto old_implicit_space = grammar::implicit_space;
@@ -1192,7 +1215,7 @@ inline grammar string_expression::make_grammar()
 
 LUG_DIAGNOSTIC_POP
 
-inline void string_expression::operator()(encoder& d) const
+inline void basic_regular_expression::operator()(encoder& d) const
 {
 	if (program_->instructions.empty()) {
 		static grammar const grmr = make_grammar();

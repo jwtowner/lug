@@ -11,16 +11,16 @@ public:
 	{
 		using namespace lug::language;
 		rule JSON;
-		rule ExponentPart   = lexeme[ "[Ee]" > ~"[+-]"s > +"[0-9]"s ];
-		rule FractionalPart = lexeme[ "[.]" > +"[0-9]"s ];
-		rule IntegralPart   = lexeme[ "0" | "[1-9]" > *"[0-9]"s ];
-		rule Number         = lexeme[ ~"-"s > IntegralPart > ~FractionalPart > ~ExponentPart ];
-		rule Boolean        = lexeme[ "true"s | "false"s ];
+		rule ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
+		rule FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
+		rule IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
+		rule Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ];
+		rule Boolean        = lexeme[ "true"_sx | "false" ];
 		rule Null           = lexeme[ "null" ];
-		rule UnicodeEscape  = lexeme[ chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"s ];
-		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]" | UnicodeEscape) ];
-		rule String         = lexeme[ "\"" > *(u8"[^\"\\\u0000-\u001F]"s | Escape) > "\"" ];
-		rule Array          = "[[]" > JSON > *("," > JSON) > "[]]";
+		rule UnicodeEscape  = lexeme[ chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
+		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
+		rule String         = lexeme[ "\"" > *(u8"[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ];
+		rule Array          = "[" > JSON > *("," > JSON) > "]";
 		rule Object         = "{" > String > ":" > JSON > *("," > String > ":" > JSON) > "}";
 		JSON                = Object | Array | String | Number | Boolean | Null;
 		grammar_ = start(JSON);

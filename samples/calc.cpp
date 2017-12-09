@@ -17,15 +17,15 @@ namespace samples::calc
 
 	extern rule Expr;
 
-	implicit_space_rule BLANK = lexeme[ *"[ \t]"s ];
+	implicit_space_rule BLANK = lexeme[ *"[ \t]"_rx ];
 
-	rule EOL	= lexeme[ "[\n\r;]" ];
-	rule ID		= lexeme[ capture(m)[ "[a-z]" ] <[]() -> int { return m->at(0) - 'a'; } ];
-	rule NUMBER = lexeme[ capture(m)[ ~"[-+]"s > +"[0-9]"s > ~("[.]" > +"[0-9]"s) ]
+	rule EOL	= lexeme[ "[\n\r;]"_rx ];
+	rule ID		= lexeme[ capture(m)[ "[a-z]"_rx] <[]() -> int { return m->at(0) - 'a'; } ];
+	rule NUMBER = lexeme[ capture(m)[ ~"[-+]"_rx > +"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx) ]
 				    <[]{ return std::stod(std::string{*m}); } ];
 
 	rule Value	= n%NUMBER               <[]{ return *n; }
-				| i%ID > !"="s           <[]{ return v[*i]; }
+				| i%ID > !"="_sx         <[]{ return v[*i]; }
 				| "(" > e%Expr > ")"     <[]{ return *e; };
 	rule Prod	= l%Value > *(
 				      "*" > r%Value      <[]{ *l *= *r; }
@@ -37,10 +37,10 @@ namespace samples::calc
 				)                        <[]{ return *l; };
 	rule Expr	= i%ID > "=" > s%Sum     <[]{ return v[*i] = *s; }
 				| s%Sum                  <[]{ return *s; };
-	rule Stmt	= (   "quit"             <[]{ std::exit(EXIT_SUCCESS); }
+	rule Stmt	= (   "quit"_isx         <[]{ std::exit(EXIT_SUCCESS); }
 				    | e%Expr             <[]{ std::cout << *e << std::endl; }
 				) > EOL
-				| *( !EOL > "." ) > EOL  <[]{ std::cerr << "syntax error" << std::endl; };
+				| *( !EOL > any ) > EOL  <[]{ std::cerr << "syntax error" << std::endl; };
 
 	grammar Grammar = start(Stmt);
 }
