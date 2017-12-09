@@ -534,7 +534,6 @@ constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noski
 constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
 constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
 constexpr struct { void operator()(encoder&) const {} } nop = {};
-constexpr struct { void operator()(encoder& d) const { d.match_any(); } } any = {};
 constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
 constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol = {};
@@ -545,20 +544,24 @@ constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<
 constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {};
 
 constexpr struct {
-	auto operator()(char32_t c) const { return [c](encoder& d) { d.match(utf8::encode_rune(c)); }; }
+	auto operator()(char32_t c) const { return [c](encoder& d) {d.match(utf8::encode_rune(c)); }; }
 	auto operator()(char32_t start, char32_t end) const {
-		return [start, end](encoder& d) { d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end))); };
+		return [start, end](encoder& d) {
+			d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end)));
+		};
 	}
 } chr = {};
 
 constexpr struct {
+	void operator()(encoder& d) const { d.match_any(); }
 	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
 	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
 	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
 	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
-} property = {};
+} any = {};
 
-struct implicit_space_rule {
+struct implicit_space_rule
+{
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	implicit_space_rule(E const& e) {
 		grammar::implicit_space = std::function<void(encoder&)>{make_expression(e)};
