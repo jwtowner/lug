@@ -49,7 +49,7 @@ int main()
 {
 	try {
 		while (lug::parse(samples::calc::Grammar, samples::calc::Sema)) ;
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;
 	}
