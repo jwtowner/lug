@@ -20,7 +20,7 @@ namespace samples::calc
 	implicit_space_rule BLANK = lexeme[ *"[ \t]"_rx ];
 
 	rule EOL	= lexeme[ "[\n\r;]"_rx ];
-	rule ID		= lexeme[ capture(m)[ "[a-z]"_rx] <[]() -> int { return m->at(0) - 'a'; } ];
+	rule ID		= lexeme[ capture(m)[ "[a-z]"_rx ] <[]() -> int { return m->at(0) - 'a'; } ];
 	rule NUMBER = lexeme[ capture(m)[ ~"[-+]"_rx > +"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx) ]
 				    <[]{ return std::stod(std::string{*m}); } ];
 

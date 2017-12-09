@@ -167,7 +167,7 @@ private:
 		return filename;
 	}
 
-	void print_error(const char* message)
+	void print_error(char const* message)
 	{
 		std::cerr << message << "\n";
 		if (lastline_ != lines_.end())
@@ -186,7 +186,7 @@ private:
 
 	void list(std::ostream& out)
 	{
-		for (const auto& [n, l] : lines_)
+		for (auto const& [n, l] : lines_)
 			out << n << "\t" << l;
 		out << std::flush;
 	}
@@ -233,7 +233,7 @@ private:
 			print_error("ILLEGAL RETURN");
 	}
 
-	void for_to_step(const std::string& id, double from, double to, double step)
+	void for_to_step(std::string const& id, double from, double to, double step)
 	{
 		if (lastline_ != lines_.end()) {
 			double& v = vars_[id];
@@ -257,7 +257,7 @@ private:
 		print_error("FOR WITHOUT NEXT");
 	}
 
-	void next(const std::string& id)
+	void next(std::string const& id)
 	{
 		if (lastline_ != lines_.end() && !for_stack_.empty() && for_stack_.back().first == id) {
 			lastline_ = line_;
@@ -267,7 +267,7 @@ private:
 		}
 	}
 
-	void read(const std::string& id)
+	void read(std::string const& id)
 	{
 		if (read_itr_ != data_.cend())
 			vars_[id] = *(read_itr_++);
@@ -275,7 +275,7 @@ private:
 			print_error("NO DATA");
 	}
 
-	using RelOpFn = bool(*)(double, double);
+	using RelOpFn = bool (*)(double, double);
 	lug::grammar grammar_;
 	lug::semantics semantics_;
 	lug::variable<std::string> id_{semantics_};
@@ -290,7 +290,7 @@ private:
 	std::map<int, std::string>::iterator line_{lines_.end()}, lastline_{lines_.end()}, haltline_{lines_.end()};
 	std::vector<std::map<int, std::string>::iterator> stack_;
 	std::vector<std::pair<std::string, std::map<int, std::string>::iterator>> for_stack_;
-	const bool stdin_tty_{isatty(fileno(stdin)) != 0};
+	bool const stdin_tty_{isatty(fileno(stdin)) != 0};
 };
 
 int main(int argc, char** argv)

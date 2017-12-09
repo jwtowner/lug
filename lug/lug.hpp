@@ -1200,14 +1200,14 @@ inline grammar basic_regular_expression::make_grammar()
 	using namespace language;
 	auto old_implicit_space = grammar::implicit_space;
 	grammar::implicit_space = nop;
-	rule Empty = eps                                                        <[](generator& g) { g.encoder.match_eps(); };
-	rule Dot = chr('.')                                                     <[](generator& g) { g.encoder.match_any(); };
-	rule Element = any > chr('-') > !chr(']') > any                         <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-	    | chr('[') > chr(':') > +(!chr(':') > any) > chr(':') > chr(']')    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
-	    | any                                                               <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
-	rule Bracket = chr('[') > ~(chr('^')                                    <[](generator& g) { g.circumflex = true; })
-	    > Element > *(!chr(']') > Element) > chr(']')                       <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(chr('.') | chr('[')) > any)                         <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	rule Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
+	rule Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
+	rule Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax x) { g.bracket_range(x.capture); }
+	    | str("[:") > +(!chr(':') > any) > str(":]")    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
+	    | any                                           <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	rule Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
+	    > Element > *(!chr(']') > Element) > chr(']')   <[](generator& g) { g.bracket_commit(); };
+	rule Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax x) { g.encoder.match(x.capture); };
 	grammar grmr = start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 	grammar::implicit_space = old_implicit_space;
 	return grmr;
