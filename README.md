@@ -18,7 +18,7 @@ Features
 - Case insensitive matching mode
 - Header only library using C++17 language and library features
 - Uses expression template functors to implement the rules of the domain specific language
-- Relatively small with the intent of core to remain under 1000 lines of very terse code
+- Relatively small with the intent of parser core to remain under 1500 lines of terse code
 
 It is based on research introduced in the following papers:
 
