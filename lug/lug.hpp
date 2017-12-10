@@ -17,15 +17,13 @@
 namespace lug
 {
 
-struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics;
-
+struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics; class syntax;
 struct syntax_position { std::size_t column, line; };
-struct syntax_range { std::size_t index, size; syntax_position start, end; };
-struct syntax_view { std::string_view capture; syntax_position start, end; };
-using semantic_predicate = std::function<bool(parser&)>;
+struct syntax_range { std::size_t index, size; };
+struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
+using syntactic_capture = std::function<void(syntax const&)>;
 using semantic_action = std::function<void(semantics&)>;
-using semantic_capture = std::function<void(semantics&, syntax_view const&)>;
-struct semantic_response { unsigned short call_depth, action_index; unsigned int capture_index; };
+using semantic_predicate = std::function<bool(parser&)>;
 
 template <class E> constexpr bool is_callable_v =
 	std::is_same_v<grammar, std::decay_t<E>> ||
@@ -108,7 +106,7 @@ struct program
 	std::vector<unicode::rune_set> runesets;
 	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
-	std::vector<semantic_capture> captures;
+	std::vector<syntactic_capture> captures;
 	directives mandate{directives::eps};
 
 	void concatenate(program const& src)
@@ -176,13 +174,26 @@ public:
 	static thread_local std::function<void(encoder&)> implicit_space;
 };
 
+class syntax
+{
+	lug::semantics& semantics_;
+	syntax_range const range_;
+public:
+	syntax(lug::semantics& s, syntax_range const& r) : semantics_{s}, range_{r} {}
+	semantics& semantics() const noexcept { return semantics_; }
+	template <class T> T& semantics() const { return dynamic_cast<T&>(semantics_); }
+	syntax_range range() const noexcept { return range_; }
+	std::string_view capture() const;
+};
+
 class semantics
 {
 	friend class parser;
+	static constexpr unsigned short max_depth = (std::numeric_limits<unsigned short>::max)();
+	static constexpr std::size_t max_index = (std::numeric_limits<std::size_t>::max)();
 	std::string_view match_;
-	unsigned short prune_depth_{(std::numeric_limits<unsigned short>::max)()}, call_depth_{0};
+	unsigned short prune_depth_{max_depth}, call_depth_{0};
 	std::vector<std::any> attributes_;
-	std::vector<std::pair<std::size_t, std::size_t>> captures_;
 	std::vector<semantic_response> responses_;
 
 	virtual void on_accept_begin() {}
@@ -212,23 +223,17 @@ class semantics
 		return responses_.size();
 	}
 
-	auto push_response(std::size_t depth, std::size_t action_index, unsigned int capture_index = (std::numeric_limits<unsigned int>::max)())
+	auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_index, 0})
 	{
-		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), capture_index});
+		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), range});
 		return responses_.size();
-	}
-
-	auto push_capture_response(std::size_t depth, std::size_t action_index, std::size_t index, std::size_t size)
-	{
-		captures_.emplace_back(index, size); // TODO: erase this on pop/drop? 
-		return push_response(depth, action_index, static_cast<unsigned int>(captures_.size() - 1));
 	}
 
 public:
 	virtual ~semantics() = default;
-	std::string_view const& match() const { return match_; }
-	void escape() { prune_depth_ = call_depth_; }
 	unsigned short call_depth() const { return call_depth_; }
+	void escape() { prune_depth_ = call_depth_; }
+	std::string_view match() const { return match_; }
 
 	template <class T>
 	void push_attribute(T&& x)
@@ -257,13 +262,11 @@ public:
 		for (auto& response : responses_) {
 			if (prune_depth_ <= response.call_depth)
 				continue;
-			prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = response.call_depth;
-			if (response.capture_index < (std::numeric_limits<unsigned int>::max)()) {
-				auto const& cap = captures_[response.capture_index];
-				captures[response.action_index](*this, {match_.substr(cap.first, cap.second), syntax_position{}, syntax_position{}}); // TODO
-			} else {
+			prune_depth_ = max_depth, call_depth_ = response.call_depth;
+			if (response.range.index < max_index)
+				captures[response.action_index](syntax{*this, response.range});
+			else
 				actions[response.action_index](*this);
-			}
 		}
 		on_accept_end();
 		clear();
@@ -271,11 +274,16 @@ public:
 
 	void clear()
 	{
-		match_ = std::string_view{}, prune_depth_ = (std::numeric_limits<unsigned short>::max)(), call_depth_ = 0;
-		attributes_.clear(), captures_.clear(), responses_.clear();
+		match_ = std::string_view{}, prune_depth_ = max_depth, call_depth_ = 0;
+		attributes_.clear(), responses_.clear();
 		on_clear();
 	}
 };
+
+inline std::string_view syntax::capture() const
+{
+	return semantics_.match().substr(range_.index, range_.size);
+}
 
 template <class T>
 class variable
@@ -299,7 +307,7 @@ class encoder
 	virtual immediate do_add_rune_set(unicode::rune_set) { return immediate{0}; }
 	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
-	virtual immediate do_add_semantic_capture_action(semantic_capture) { return immediate{0}; }
+	virtual immediate do_add_syntactic_capture(syntactic_capture) { return immediate{0}; }
 	virtual void do_add_callee(rule const*, program const*, std::ptrdiff_t, directives) {}
 	virtual bool do_should_evaluate_length() const noexcept { return true; }
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
@@ -344,7 +352,7 @@ public:
 	encoder& encode(opcode op, altcode alt, immediate imm = immediate{0}) { return append(instruction{op, to_operands(alt), imm}); }
 	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	encoder& encode(opcode op, semantic_capture c) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(c))}); }
+	encoder& encode(opcode op, syntactic_capture c) { return append(instruction{op, operands::none, do_add_syntactic_capture(std::move(c))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	encoder& encode(opcode op, std::size_t val, std::string_view subsequence) { return encode(op, altcode::none, val, subsequence); }
 	template <class E> auto evaluate(E const& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
@@ -439,7 +447,7 @@ class program_encoder : public encoder
 	immediate do_add_rune_set(unicode::rune_set r) override final { return add_item(program_.runesets, std::move(r)); }
 	immediate do_add_semantic_predicate(semantic_predicate p) override final { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) override final { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_semantic_capture_action(semantic_capture a) override final { return add_item(program_.captures, std::move(a)); }
+	immediate do_add_syntactic_capture(syntactic_capture a) override final { return add_item(program_.captures, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item)
@@ -605,7 +613,7 @@ namespace language
 
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
-using parser = lug::parser; using semantics = lug::semantics; using syntax = const lug::syntax_view&;
+using parser = lug::parser; using semantics = lug::semantics; using syntax = lug::syntax; using csyntax = lug::syntax const;
 template <class T> using variable = lug::variable<T>;
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
@@ -723,18 +731,35 @@ constexpr auto operator>(E1 const& e1, E2 const& e2)
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(E const& e, A a)
 {
-	if constexpr (std::is_invocable_v<A, semantics&, syntax>)
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, semantic_capture{a}); };
-	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>)
-		return e < [a = std::move(a)](semantics& s, syntax x) { a(detail::dynamic_cast_if_base_of<semantics&>{s}, x); };
-	else if constexpr (std::is_invocable_v<A, semantics&>)
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, semantic_action{a}); };
-	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>)
-		return e < [a = std::move(a)](semantics& s) { a(detail::dynamic_cast_if_base_of<semantics&>{s}); };
-	else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>)
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); }); };
-	else if constexpr (std::is_invocable_v<A>)
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) { d.evaluate(e).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); }); };
+	if constexpr (std::is_invocable_v<A, syntax>) {
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+			d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, syntactic_capture{a});
+		};
+	} else if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
+		return e < [a = ::std::move(a)](csyntax& x) {
+			a(x.semantics(), x);
+		};
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
+		return e < [a = ::std::move(a)](csyntax& x) {
+			a(detail::dynamic_cast_if_base_of<semantics&>{x.semantics()}, x);
+		};
+	} else if constexpr (std::is_invocable_v<A, semantics&>) {
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+			d.evaluate(e).encode(opcode::action, semantic_action{a});
+		};
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
+		return e < [a = ::std::move(a)](semantics& s) {
+			a(detail::dynamic_cast_if_base_of<semantics&>{s});
+		};
+	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+			d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); });
+		};
+	} else if constexpr (std::is_invocable_v<A>) {
+		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+			d.evaluate(e).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); });
+		};
+	}
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -772,7 +797,7 @@ constexpr struct
 		template <class E, class = std::enable_if_t<is_expression_v<E>>>
 		constexpr auto operator[](E const& e) const
 		{
-			return e < [&vr = v](semantics&, syntax x) { *vr = T{x.capture}; };
+			return e < [&vr = v](syntax x) { *vr = T(x.capture()); };
 		}
 	};
 
@@ -1134,7 +1159,7 @@ public:
 					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
 					if (sr0 > sr1)
 						goto failure;
-					rc = semantics_.push_capture_response(call_stack_.size() + lrmemo_stack_.size(), imm, sr0, sr1 - sr0);
+					rc = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
 				} break;
 				default: registers_ = {sr, sr > mr ? sr : mr, rc, pc, 0}; throw bad_opcode{};
 			}
@@ -1202,12 +1227,12 @@ inline grammar basic_regular_expression::make_grammar()
 	grammar::implicit_space = nop;
 	rule Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
-	rule Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax x) { g.bracket_range(x.capture); }
-	    | str("[:") > +(!chr(':') > any) > str(":]")    <[](generator& g, syntax x) { g.bracket_class(x.capture.substr(2, x.capture.size() - 4)); }
-	    | any                                           <[](generator& g, syntax x) { g.bracket_range(x.capture, x.capture); };
+	rule Element = any > chr('-') > !chr(']') > any     <[](generator& g, csyntax& x) { g.bracket_range(x.capture()); }
+	    | str("[:") > +(!chr(':') > any) > str(":]")    <[](generator& g, csyntax& x) { g.bracket_class(x.capture().substr(2, x.range().size - 4)); }
+	    | any                                           <[](generator& g, csyntax& x) { g.bracket_range(x.capture(), x.capture()); };
 	rule Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
 	    > Element > *(!chr(']') > Element) > chr(']')   <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax x) { g.encoder.match(x.capture); };
+	rule Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, csyntax& x) { g.encoder.match(x.capture()); };
 	grammar grmr = start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 	grammar::implicit_space = old_implicit_space;
 	return grmr;

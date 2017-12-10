@@ -78,7 +78,7 @@ namespace
 		rule N	= chr('1') | chr('2') | chr('3');
 		rule E	= E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
 				| E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
-				| N <[&out](semantics&, syntax x){ out += x.capture; };
+				| N <[&out](semantics&, csyntax& x){ out += x.capture(); };
 		rule S = E > eoi;
 		grammar G = start(S);
 		out.clear();
