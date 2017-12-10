@@ -17,7 +17,15 @@
 namespace lug
 {
 
-struct program; class rule; class grammar; class encoder; class rule_encoder; class parser; class semantics; class syntax;
+struct program;
+class rule;
+class grammar;
+class encoder;
+class rule_encoder;
+class parser;
+class syntax;
+class semantics;
+
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
