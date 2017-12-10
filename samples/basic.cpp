@@ -37,7 +37,7 @@ public:
 		rule NL		= lexeme["\n"_sx | "\r\n" | "\r"];
 		rule Func	= lexeme[capture(id_)["[A-Za-z]"_rx > *"[0-9A-Za-z]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
 		rule LineNo	= lexeme[capture(sv_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{*sv_}); };
-		rule Real	= lexeme[capture(sv_)[+"[0-9]"_rx > ~(any > +"[0-9]"_rx)
+		rule Real	= lexeme[capture(sv_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
 					    > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]     <[this]{ return std::stod(std::string{*sv_}); };
 		rule String	= lexeme["\"" > capture(sv_)[*"[^\"]"_rx] > "\""]   <[this]{ return *sv_; };
 		rule Var	= lexeme[capture(id_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
