@@ -5,6 +5,8 @@ lug
 
 An embedded domain specific language for expressing parsers as extended [parsing expression grammars (PEGs)](https://en.wikipedia.org/wiki/Parsing_expression_grammar) in C++17
 
+![lug](https://github.com/jwtowner/lug/raw/master/doc/lug_logo_large.png)
+
 Features
 ---
 - Natural syntax more akin to external parser generator languages
@@ -51,7 +53,6 @@ To build the sample programs and unit tests, a makefile is provided for Linux an
 
 Syntax Reference
 ---
-WIP
 
 | Operator | Syntax |
 | --- | --- |
@@ -67,6 +68,8 @@ WIP
 | --- | --- |
 | `chr(c)` | Matches the UTF-8, UTF-16, or UTF-32 character *c* |
 | `chr(c1, c2)` | Matches characters in the UTF-8, UTF-16, or UTF-32 interval \[*c1*-*c2*\] |
+| `str(s)` | Matches the sequence of characters in a string |
+| `bre(s)` | POSIX Basic Regular Expression (BRE) |
 | `any` | Matches any single character |
 | `any(flags)` | Matches a character exhibiting any of the character properties |
 | `all(flags)` | Matches a character with all of the character properties |
@@ -82,6 +85,12 @@ WIP
 | `_cx` | Character Expression | Matches the UTF-8, UTF-16, or UTF-32 character literal |
 | `_sx` | String Expression | Matches the sequence of characters in a string literal |
 | `_rx` | Regular Expression | POSIX Basic Regular Expression (BRE) |
+| `_icx` | Case Insensitive Character Expression | Same as `_cx` but case insensitive |
+| `_isx` | Case Insensitive String Expression | Same as `_sx` but case insensitive |
+| `_irx` | Case Insensitive Regular Expression | Same as `_rx` but case insensitive |
+| `_scx` | Case Sensitive Character Expression | Same as `_cx` but case sensitive |
+| `_ssx` | Case Sensitive String Expression | Same as `_sx` but case sensitive |
+| `_srx` | Case Sensitive Regular Expression | Same as `_rx` but case sensitive |
 
 TODO
 ---
@@ -90,7 +99,7 @@ TODO
 - handle exceptions thrown from semantic actions in semantics::accept?
 - automatic line/column tracking during semantic action phase
 - feature: symbol tables and parsing conditions
-- feature: Adams' grammars and whitespace alignment
+- feature: Adams-Nestra grammars and whitespace alignment
 - feature: syntax to specify number range of allowed iteration
 - optimization: tail recursion
 - optimization: reduce number of false-positive left-recursive calls even further by lazily evaluating rule mandate
