@@ -188,7 +188,7 @@ class syntax
 	syntax_range const range_;
 public:
 	syntax(lug::semantics& s, syntax_range const& r) : semantics_{s}, range_{r} {}
-	semantics& semantics() const noexcept { return semantics_; }
+	lug::semantics& semantics() const noexcept { return semantics_; }
 	template <class T> T& semantics() const { return dynamic_cast<T&>(semantics_); }
 	syntax_range range() const noexcept { return range_; }
 	std::string_view capture() const;
@@ -926,7 +926,7 @@ class parser
 	template <class Compare>
 	bool match_subject(std::size_t& sr, std::string_view str, Compare&& comp)
 	{
-		if (auto sn = str.size(); available(sr, sn) && comp(sr, sn, str)) {
+		if (auto sn = str.size(); !sn || (available(sr, sn) && comp(sr, sn, str))) {
 			sr += sn;
 			return true;
 		}
