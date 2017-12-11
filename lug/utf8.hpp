@@ -102,7 +102,8 @@ inline std::size_t size_of_first_rune(InputIt first, InputIt last)
 template <class InputIt>
 inline InputIt skip_eol(InputIt first, InputIt last)
 {
-	if (auto [next, rune] = ::lug::utf8::decode_rune(first, last); next != first && unicode::iseol(rune)) {
+	using namespace ::lug::unicode;
+	if (auto [next, rune] = ::lug::utf8::decode_rune(first, last); next != first && (query(rune).properties() & ptype::Line_Ending) != ptype::None) {
 		if (0x0d == rune)
 			if (auto [next2, rune2] = ::lug::utf8::decode_rune(next, last); next2 != next && rune2 == 0x0a)
 				next = next2;

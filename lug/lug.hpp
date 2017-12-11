@@ -203,6 +203,7 @@ class syntax_positions
 public:
 	syntax_position const& position_at(std::size_t index, std::string_view subject)
 	{
+		using namespace unicode;
 		auto posit = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (posit != std::end(positions_) && index == posit->first)
 			return posit->second;
@@ -219,7 +220,7 @@ public:
 		char32_t prevrune = U'\0';
 		while (curr < last) {
 			auto [next, rune] = utf8::decode_rune(curr, last);
-			if (unicode::iseol(rune) && (prevrune != 0x0d || rune != 0x0a))
+			if ((query(rune).properties() & ptype::Line_Ending) != ptype::None && (prevrune != 0x0d || rune != 0x0a))
 			{
 				position.column = 1;
 				position.line += rune;

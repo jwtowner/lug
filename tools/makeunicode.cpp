@@ -116,7 +116,7 @@ auto build_namemap(List const& namelist)
 static std::vector<std::string> const binary_property_names =
 {
 	// Custom names
-	"Any", "Ascii", "Assigned",
+	"Any", "Ascii", "Assigned", "Line_Ending",
 	// PropList.txt
 	"White_Space", "Bidi_Control", "Join_Control", "Dash", "Quotation_Mark", "Terminal_Punctuation",
 	"Other_Math", "Hex_Digit", "ASCII_Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
@@ -336,7 +336,10 @@ void read_and_build_tables()
 							[bitflag = prop->second](auto const& old) { return bitflag | old; });
 			};
 			std::fill(std::execution::par_unseq, ptable.begin(), ptable.end(), binary_properties.find("Any")->second);
-			set_ptable_bits(0, 128, "Ascii");
+			set_ptable_bits(0x00, 0x7f, "Ascii");
+			set_ptable_bits(0x0a, 0x0d, "Line_Ending");
+			set_ptable_bits(0x85, 0x85, "Line_Ending");
+			set_ptable_bits(0x2028, 0x2029, "Line_Ending");
 			auto proplist_version = read_ucd_prop_array("PropList.txt", set_ptable_bits);
 			auto dcp_version = read_ucd_prop_array("DerivedCoreProperties.txt", set_ptable_bits);
 			return std::vector<std::string>{proplist_version, dcp_version};
