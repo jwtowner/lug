@@ -339,6 +339,12 @@ inline ucd_record query(char32_t r)
 	return ucd_record{table->records.data() + index};
 }
 
+// Tests rune if it is recognized end-of-line character
+constexpr bool iseol(char32_t r) noexcept
+{
+	return (0x0a <= r && r <= 0x0d) || r == 0x85 || r == 0x2028 || r == 0x2029;
+}
+
 // Simple casefold conversion
 inline char32_t tocasefold(char32_t r)
 {

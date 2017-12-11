@@ -85,31 +85,28 @@ inline InputIt next_rune(InputIt first, InputIt last)
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
+inline std::size_t count_runes(InputIt first, InputIt last)
+{
+	std::size_t count = 0;
+	for (; first != last; ++count)
+		first = ::lug::utf8::next_rune(first, last);
+	return count;
+}
+
+template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
 inline std::size_t size_of_first_rune(InputIt first, InputIt last)
 {
 	return static_cast<std::size_t>(::std::distance(first, ::lug::utf8::next_rune(first, last)));
 }
 
-template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
-inline std::size_t count_runes(InputIt first, InputIt last)
-{
-	std::size_t count = 0;
-	for ( ; first != last; ++count)
-		first = ::lug::utf8::next_rune(first, last);
-	return count;
-}
-
 template <class InputIt>
-inline InputIt skip_end_of_line(InputIt first, InputIt last)
+inline InputIt skip_eol(InputIt first, InputIt last)
 {
-	if (auto [next, rune] = ::lug::utf8::decode_rune(first, last); next != first) {
-		if (0x0d == rune) {
+	if (auto [next, rune] = ::lug::utf8::decode_rune(first, last); next != first && unicode::iseol(rune)) {
+		if (0x0d == rune)
 			if (auto [next2, rune2] = ::lug::utf8::decode_rune(next, last); next2 != next && rune2 == 0x0a)
 				next = next2;
-			return next;
-		} else if ((0x0a <= rune && rune <= 0x0c) || rune == 0x85 || rune == 0x2028 || rune == 0x2029) {
-			return next;
-		}
+		return next;
 	}
 	return first;
 }

@@ -73,6 +73,31 @@ namespace
 		assert(!lug::parse(" b", G2));
 		assert(!lug::parse("b ", G2));
 	}
+
+	void test_string()
+	{
+		using namespace lug::language;
+		rule S = noskip[ str("hello world") > eoi ];
+		grammar G = start(S);
+		assert(lug::parse("hello world", G));
+		assert(!lug::parse("hello world!", G));
+		assert(!lug::parse("hello", G));
+		assert(!lug::parse("h", G));
+		assert(!lug::parse("", G));
+	}
+
+	void test_regular_expression()
+	{
+		using namespace lug::language;
+		rule S = noskip[ bre("hello.w[oO]rld[[:digit:]]") > eoi ];
+		grammar G = start(S);
+		assert(lug::parse("hello world4", G));
+		assert(lug::parse("hello_wOrld8", G));
+		assert(!lug::parse("hello world!", G));
+		assert(!lug::parse("hello", G));
+		assert(!lug::parse("h", G));
+		assert(!lug::parse("", G));
+	}
 }
 
 int main()
@@ -82,6 +107,8 @@ int main()
 		test_any();
 		test_char();
 		test_char_range();
+		test_string();
+		test_regular_expression();
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;

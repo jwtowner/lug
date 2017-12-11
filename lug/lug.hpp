@@ -191,7 +191,50 @@ public:
 	lug::semantics& semantics() const noexcept { return semantics_; }
 	template <class T> T& semantics() const { return dynamic_cast<T&>(semantics_); }
 	syntax_range range() const noexcept { return range_; }
+	syntax_position const& start() const;
+	syntax_position const& end() const;
 	std::string_view capture() const;
+};
+
+class syntax_positions
+{
+	std::vector<std::pair<std::size_t, syntax_position>> positions_;
+
+public:
+	syntax_position const& position_at(std::size_t index, std::string_view subject)
+	{
+		auto posit = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
+		if (posit != std::end(positions_) && index == posit->first)
+			return posit->second;
+		std::size_t start = 0;
+		syntax_position position{1, 1};
+		if (posit != std::begin(positions_) && posit != std::end(positions_)) {
+			auto prevposit = std::prev(posit);
+			start = prevposit->first;
+			position = prevposit->second;
+		}
+		auto const last = std::next(std::begin(subject), index);
+		auto curr = std::next(std::begin(subject), start);
+		auto newline = curr;
+		char32_t prevrune = U'\0';
+		while (curr < last) {
+			auto [next, rune] = utf8::decode_rune(curr, last);
+			if (unicode::iseol(rune) && (prevrune != 0x0d || rune != 0x0a))
+			{
+				position.column = 1;
+				position.line += rune;
+			}
+			curr = next;
+			prevrune = rune;
+		}
+		position.column += utf8::count_runes(newline, last);
+		return positions_.insert(posit, std::make_pair(index, position))->second;
+	}
+
+	void clear()
+	{
+		positions_.clear();
+	}
 };
 
 class semantics
@@ -200,6 +243,7 @@ class semantics
 	static constexpr unsigned short max_depth = (std::numeric_limits<unsigned short>::max)();
 	static constexpr std::size_t max_index = (std::numeric_limits<std::size_t>::max)();
 	std::string_view match_;
+	syntax_positions positions_;
 	unsigned short prune_depth_{max_depth}, call_depth_{0};
 	std::vector<std::any> attributes_;
 	std::vector<semantic_response> responses_;
@@ -242,6 +286,7 @@ public:
 	unsigned short call_depth() const { return call_depth_; }
 	void escape() { prune_depth_ = call_depth_; }
 	std::string_view match() const { return match_; }
+	syntax_position const& position_at(std::size_t index) { return positions_.position_at(index, match_); }
 
 	template <class T>
 	void push_attribute(T&& x)
@@ -260,12 +305,12 @@ public:
 		T r{::std::any_cast<T>(detail::pop_back(attributes_))};
 		return r;
 	}
-
-	void accept(grammar const& grmr, std::string_view m)
+	
+	void accept(grammar const& grmr, std::string_view match)
 	{
 		auto const& actions = grmr.program().actions;
 		auto const& captures = grmr.program().captures;
-		match_ = m;
+		match_ = match;
 		on_accept_begin();
 		for (auto& response : responses_) {
 			if (prune_depth_ <= response.call_depth)
@@ -283,7 +328,7 @@ public:
 	void clear()
 	{
 		match_ = std::string_view{}, prune_depth_ = max_depth, call_depth_ = 0;
-		attributes_.clear(), responses_.clear();
+		attributes_.clear(), responses_.clear(); positions_.clear();
 		on_clear();
 	}
 };
@@ -291,6 +336,16 @@ public:
 inline std::string_view syntax::capture() const
 {
 	return semantics_.match().substr(range_.index, range_.size);
+}
+
+inline syntax_position const& syntax::start() const
+{
+	return semantics_.position_at(range_.index);
+}
+
+inline syntax_position const& syntax::end() const
+{
+	return semantics_.position_at(range_.index + range_.size);
 }
 
 template <class T>
@@ -513,7 +568,8 @@ class basic_regular_expression
 		{
 			if (auto c = unicode::stoctype(s); c.has_value())
 				classes |= c.value();
-			throw bad_character_class{};
+			else
+				throw bad_character_class{};
 		}
 
 		void bracket_range(std::string_view s)
@@ -1045,7 +1101,7 @@ public:
 					if (!available(sr, 1))
 						goto failure;
 					auto const first = input_.cbegin() + sr;
-					auto const next = utf8::skip_end_of_line(first, input_.cend());
+					auto const next = utf8::skip_eol(first, input_.cend());
 					if (next == first)
 						goto failure;
 					sr += std::distance(first, next);
