@@ -2,7 +2,7 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.1-pre
+VERSION = 0.1
 
 # paths
 PREFIX = /usr/local
@@ -29,6 +29,9 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # dependencies
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
+
+# distribution files
+DISTFILES = README.md LICENSE.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
 
 all: options samples tests
 
@@ -77,7 +80,7 @@ clean:
 dist: clean
 	@echo creating dist tarball
 	@mkdir -p lug-$(VERSION)
-	@cp -R README.md LICENSE.md Makefile lug.sln runtests.sh lug/ msvs/ samples/ tests/ tools/ lug-$(VERSION)
+	@cp -R $(DISTFILES) lug-$(VERSION)
 	@tar -cf lug-$(VERSION).tar lug-$(VERSION)
 	@gzip lug-$(VERSION).tar
 	@rm -rf lug-$(VERSION)
