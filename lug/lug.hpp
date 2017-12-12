@@ -197,9 +197,9 @@ public:
 
 class environment
 {
-	friend class parser;
+	friend class lug::parser;
 
-	parser* parser_ = nullptr;
+	lug::parser* parser_ = nullptr;
 	std::vector<std::any> attributes_;
 
 	virtual void on_accept_started() {}
@@ -577,8 +577,9 @@ namespace language
 
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
-using parser = lug::parser; using environment = lug::environment; using syntax = lug::syntax; using csyntax = lug::syntax const;
-template <class T> using variable = lug::variable<T>;
+using parser = lug::parser; using syntax = lug::syntax; using csyntax = lug::syntax const;
+using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
+using environment = lug::environment; template <class T> using variable = lug::variable<T>;
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
 constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
@@ -972,6 +973,8 @@ public:
 	std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
 	std::size_t subject_index() const noexcept { return registers_.sr; }
 	std::size_t max_subject_index() const noexcept { return registers_.mr; }
+	syntax_position const& subject_position() { return position_at(registers_.sr); }
+	syntax_position const& max_subject_position() { return position_at(registers_.mr); }
 	parser_registers& registers() noexcept { return registers_; }
 	parser_registers const& registers() const noexcept { return registers_; }
 	bool available(std::size_t sn) { return available(registers_.sr, sn); }
@@ -1216,7 +1219,7 @@ public:
 template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, envr }.enqueue(first, last).parse();
+	return parser{grmr, envr}.enqueue(first, last).parse();
 }
 
 template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
@@ -1228,7 +1231,7 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 
 inline bool parse(std::istream& input, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, envr }.push_source([&input](std::string& line) {
+	return parser{grmr, envr}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
 			line.push_back('\n');
 			return true;
