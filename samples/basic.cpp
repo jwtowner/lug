@@ -84,7 +84,7 @@ public:
 
 		rule Stmnt	= "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[this]{ std::cout << std::endl; }
 					| "IF"_isx > r1_%Expr
-					    > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { semantics_.escape(); } }
+					    > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { environment_.escape(); } }
 					    > "THEN"_isx > Stmnt
 					| "FOR"_isx > id_%Var > "=" > r1_%Expr
 					    > "TO"_isx > r2_%Expr
@@ -122,7 +122,7 @@ public:
 
 	void repl()
 	{
-		lug::parser parser{grammar_, semantics_};
+		lug::parser parser{grammar_, environment_};
 		parser.push_source([this](std::string& out) {
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
@@ -277,12 +277,12 @@ private:
 
 	using RelOpFn = bool (*)(double, double);
 	lug::grammar grammar_;
-	lug::semantics semantics_;
-	lug::variable<std::string> id_{semantics_};
-	lug::variable<std::string_view> sv_{semantics_};
-	lug::variable<double> r1_{semantics_}, r2_{semantics_}, r3_{semantics_};
-	lug::variable<int> no_{semantics_};
-	lug::variable<RelOpFn> rop_{semantics_};
+	lug::environment environment_;
+	lug::variable<std::string> id_{environment_};
+	lug::variable<std::string_view> sv_{environment_};
+	lug::variable<double> r1_{environment_}, r2_{environment_}, r3_{environment_};
+	lug::variable<int> no_{environment_};
+	lug::variable<RelOpFn> rop_{environment_};
 	std::deque<double> data_;
 	std::deque<double>::const_iterator read_itr_;
 	std::unordered_map<std::string, double> vars_;

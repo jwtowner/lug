@@ -24,13 +24,13 @@ class encoder;
 class rule_encoder;
 class parser;
 class syntax;
-class semantics;
+class environment;
 
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
-using syntactic_capture = std::function<void(syntax const&)>;
-using semantic_action = std::function<void(semantics&)>;
+using syntactic_capture = std::function<void(environment&, syntax const&)>;
+using semantic_action = std::function<void(environment&)>;
 using semantic_predicate = std::function<bool(parser&)>;
 
 template <class E> constexpr bool is_callable_v =
@@ -184,110 +184,50 @@ public:
 
 class syntax
 {
-	lug::semantics& semantics_;
+	lug::parser& parser_;
 	syntax_range const range_;
 public:
-	syntax(lug::semantics& s, syntax_range const& r) : semantics_{s}, range_{r} {}
-	lug::semantics& semantics() const noexcept { return semantics_; }
-	template <class T> T& semantics() const { return dynamic_cast<T&>(semantics_); }
+	syntax(lug::parser& p, syntax_range const& r) : parser_{p}, range_{r} {}
+	lug::parser& parser() const noexcept { return parser_; }
 	syntax_range range() const noexcept { return range_; }
 	syntax_position const& start() const;
 	syntax_position const& end() const;
 	std::string_view capture() const;
 };
 
-class syntax_positions
-{
-	std::vector<std::pair<std::size_t, syntax_position>> positions_;
-
-public:
-	syntax_position const& position_at(std::size_t index, std::string_view subject)
-	{
-		using namespace unicode;
-		auto posit = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
-		if (posit != std::end(positions_) && index == posit->first)
-			return posit->second;
-		std::size_t start = 0;
-		syntax_position position{1, 1};
-		if (posit != std::begin(positions_) && posit != std::end(positions_)) {
-			auto prevposit = std::prev(posit);
-			start = prevposit->first;
-			position = prevposit->second;
-		}
-		auto const last = std::next(std::begin(subject), index);
-		auto curr = std::next(std::begin(subject), start);
-		auto newline = curr;
-		char32_t prevrune = U'\0';
-		while (curr < last) {
-			auto [next, rune] = utf8::decode_rune(curr, last);
-			if ((query(rune).properties() & ptype::Line_Ending) != ptype::None && (prevrune != 0x0d || rune != 0x0a))
-			{
-				position.column = 1;
-				position.line += rune;
-			}
-			curr = next;
-			prevrune = rune;
-		}
-		position.column += utf8::count_runes(newline, last);
-		return positions_.insert(posit, std::make_pair(index, position))->second;
-	}
-
-	void clear()
-	{
-		positions_.clear();
-	}
-};
-
-class semantics
+class environment
 {
 	friend class parser;
-	static constexpr unsigned short max_depth = (std::numeric_limits<unsigned short>::max)();
-	static constexpr std::size_t max_index = (std::numeric_limits<std::size_t>::max)();
-	std::string_view match_;
-	syntax_positions positions_;
-	unsigned short prune_depth_{max_depth}, call_depth_{0};
+
+	parser* parser_ = nullptr;
 	std::vector<std::any> attributes_;
-	std::vector<semantic_response> responses_;
 
-	virtual void on_accept_begin() {}
-	virtual void on_accept_end() {}
-	virtual void on_clear() {}
+	virtual void on_accept_started() {}
+	virtual void on_accept_ended() {}
 
-	void pop_responses_after(std::size_t n)
+	void start_accept(lug::parser& p)
 	{
-		if (n < responses_.size())
-			responses_.resize(n);
+		if (parser_)
+			throw reenterant_accept_error{};
+		parser_ = &p;
+		attributes_.clear();
+		on_accept_started();
 	}
 
-	auto drop_responses_after(std::size_t n)
+	void end_accept()
 	{
-		std::vector<semantic_response> dropped;
-		if (n < responses_.size()) {
-			dropped.assign(responses_.begin() + n, responses_.end());
-			responses_.resize(n);
-		}
-		return dropped;
-	}
-
-	auto restore_responses_after(std::size_t n, std::vector<semantic_response> const& restore)
-	{
-		pop_responses_after(n);
-		responses_.insert(responses_.end(), restore.begin(), restore.end());
-		return responses_.size();
-	}
-
-	auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_index, 0})
-	{
-		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), range});
-		return responses_.size();
+		on_accept_ended();
+		parser_ = nullptr;
 	}
 
 public:
-	virtual ~semantics() = default;
-	unsigned short call_depth() const { return call_depth_; }
-	void escape() { prune_depth_ = call_depth_; }
-	std::string_view match() const { return match_; }
-	syntax_position const& position_at(std::size_t index) { return positions_.position_at(index, match_); }
+	virtual ~environment() = default;
+	lug::parser& parser() { if (!parser_) throw accept_context_error{}; return *parser_; }
+	lug::parser const& parser() const { if (!parser_) throw accept_context_error{}; return *parser_; }
+	std::string_view match() const;
+	syntax_position const& position_at(std::size_t index);
+	unsigned short call_depth() const;
+	void escape();
 
 	template <class T>
 	void push_attribute(T&& x)
@@ -306,60 +246,19 @@ public:
 		T r{::std::any_cast<T>(detail::pop_back(attributes_))};
 		return r;
 	}
-	
-	void accept(grammar const& grmr, std::string_view match)
-	{
-		auto const& actions = grmr.program().actions;
-		auto const& captures = grmr.program().captures;
-		match_ = match;
-		on_accept_begin();
-		for (auto& response : responses_) {
-			if (prune_depth_ <= response.call_depth)
-				continue;
-			prune_depth_ = max_depth, call_depth_ = response.call_depth;
-			if (response.range.index < max_index)
-				captures[response.action_index](syntax{*this, response.range});
-			else
-				actions[response.action_index](*this);
-		}
-		on_accept_end();
-		clear();
-	}
-
-	void clear()
-	{
-		match_ = std::string_view{}, prune_depth_ = max_depth, call_depth_ = 0;
-		attributes_.clear(), responses_.clear(); positions_.clear();
-		on_clear();
-	}
 };
-
-inline std::string_view syntax::capture() const
-{
-	return semantics_.match().substr(range_.index, range_.size);
-}
-
-inline syntax_position const& syntax::start() const
-{
-	return semantics_.position_at(range_.index);
-}
-
-inline syntax_position const& syntax::end() const
-{
-	return semantics_.position_at(range_.index + range_.size);
-}
 
 template <class T>
 class variable
 {
-	semantics& semantics_;
+	environment& environment_;
 	std::unordered_map<unsigned short, T> state_;
 public:
-	variable(semantics& s) : semantics_{s} {}
-	T* operator->() { return &state_[semantics_.call_depth()]; }
-	T const* operator->() const { return &state_[semantics_.call_depth()]; }
-	T& operator*() { return state_[semantics_.call_depth()]; }
-	T const& operator*() const { return state_[semantics_.call_depth()]; }
+	variable(environment& e) : environment_{e} {}
+	T* operator->() { return &state_[environment_.call_depth()]; }
+	T const* operator->() const { return &state_[environment_.call_depth()]; }
+	T& operator*() { return state_[environment_.call_depth()]; }
+	T const& operator*() const { return state_[environment_.call_depth()]; }
 };
 
 class encoder
@@ -553,7 +452,7 @@ class basic_regular_expression
 
 	static grammar make_grammar();
 
-	struct generator : semantics
+	struct generator : environment
 	{
 		basic_regular_expression const& owner;
 		program_callees callees;
@@ -678,7 +577,7 @@ namespace language
 
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
-using parser = lug::parser; using semantics = lug::semantics; using syntax = lug::syntax; using csyntax = lug::syntax const;
+using parser = lug::parser; using environment = lug::environment; using syntax = lug::syntax; using csyntax = lug::syntax const;
 template <class T> using variable = lug::variable<T>;
 constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
 constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
@@ -796,33 +695,33 @@ constexpr auto operator>(E1 const& e1, E2 const& e2)
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(E const& e, A a)
 {
-	if constexpr (std::is_invocable_v<A, syntax>) {
+	if constexpr (std::is_invocable_v<A, environment&, syntax>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, syntactic_capture{a});
 		};
-	} else if constexpr (std::is_invocable_v<A, semantics&, syntax>) {
-		return e < [a = ::std::move(a)](csyntax& x) {
-			a(x.semantics(), x);
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>) {
+		return e < [a = ::std::move(a)](environment& envr, csyntax& x) {
+			a(detail::dynamic_cast_if_base_of<environment&>{envr}, x);
 		};
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>, syntax>) {
-		return e < [a = ::std::move(a)](csyntax& x) {
-			a(detail::dynamic_cast_if_base_of<semantics&>{x.semantics()}, x);
+	} else if constexpr (std::is_invocable_v<A, syntax>) {
+		return e < [a = ::std::move(a)](environment&, csyntax& x) {
+			a(x);
 		};
-	} else if constexpr (std::is_invocable_v<A, semantics&>) {
+	} else if constexpr (std::is_invocable_v<A, environment&>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
 			d.evaluate(e).encode(opcode::action, semantic_action{a});
 		};
-	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<semantics&>>) {
-		return e < [a = ::std::move(a)](semantics& s) {
-			a(detail::dynamic_cast_if_base_of<semantics&>{s});
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>) {
+		return e < [a = ::std::move(a)](environment& envr) {
+			a(detail::dynamic_cast_if_base_of<environment&>{envr});
 		};
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(e).encode(opcode::action, [a](semantics&) { a(); });
+			d.evaluate(e).encode(opcode::action, [a](environment&) { a(); });
 		};
 	} else if constexpr (std::is_invocable_v<A>) {
 		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
-			d.evaluate(e).encode(opcode::action, [a](semantics& s) { s.push_attribute(a()); });
+			d.evaluate(e).encode(opcode::action, [a](environment& envr) { envr.push_attribute(a()); });
 		};
 	}
 }
@@ -877,7 +776,7 @@ capture = {};
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 inline auto operator%(variable<T>& v, E const& e)
 {
-	return e < [&v](semantics& s) { *v = s.pop_attribute<T>(); };
+	return e < [&v](environment& s) { *v = s.pop_attribute<T>(); };
 }
 
 } // namespace language
@@ -939,22 +838,27 @@ struct parser_registers
 class parser
 {
 	enum class stack_frame_type : unsigned char { backtrack, call, capture, lrcall };
-	enum class subject : std::size_t {};
+	enum class subject_location : std::size_t {};
 	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
+	static constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
 	lug::grammar const& grammar_;
-	lug::semantics& semantics_;
+	lug::environment& environment_;
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::string input_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
+	std::vector<std::pair<std::size_t, syntax_position>> positions_;
 	parser_registers registers_{0, 0, 0, 0, 0};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::tuple<std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // sr, rc, pc
 	std::vector<std::ptrdiff_t> call_stack_; // pc
-	std::vector<subject> capture_stack_; // sr
+	std::vector<subject_location> capture_stack_; // sr
 	std::vector<lrmemo> lrmemo_stack_;
+	std::vector<semantic_response> responses_;
+	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
 
 	bool available(std::size_t sr, std::size_t sn)
 	{
@@ -1000,8 +904,20 @@ class parser
 
 	void accept(std::size_t& sr, std::size_t& mr, std::size_t& rc, std::ptrdiff_t& pc)
 	{
+		auto const& actions = grammar_.program().actions;
+		auto const& captures = grammar_.program().captures;
 		registers_ = {sr, mr, rc, pc, 0};
-		semantics_.accept(grammar_, input_);
+		environment_.start_accept(*this);
+		for (auto& response : responses_) {
+			if (prune_depth_ <= response.call_depth)
+				continue;
+			prune_depth_ = max_call_depth, call_depth_ = response.call_depth;
+			if (response.range.index < max_size)
+				captures[response.action_index](environment_, syntax{*this, response.range});
+			else
+				actions[response.action_index](environment_);
+		}
+		environment_.end_accept();
 		input_.erase(0, sr);
 		casefolded_subjects_.clear();
 		registers_.sr = 0, registers_.mr = 0, registers_.rc = 0;
@@ -1009,26 +925,90 @@ class parser
 		std::tie(sr, mr, rc, pc, std::ignore) = registers_.as_tuple();
 	}
 
+	void pop_responses_after(std::size_t n)
+	{
+		if (n < responses_.size())
+			responses_.resize(n);
+	}
+
+	auto drop_responses_after(std::size_t n)
+	{
+		std::vector<semantic_response> dropped;
+		if (n < responses_.size()) {
+			dropped.assign(responses_.begin() + n, responses_.end());
+			responses_.resize(n);
+		}
+		return dropped;
+	}
+
+	auto restore_responses_after(std::size_t n, std::vector<semantic_response> const& restore)
+	{
+		pop_responses_after(n);
+		responses_.insert(responses_.end(), restore.begin(), restore.end());
+		return responses_.size();
+	}
+
+	auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_size, 0})
+	{
+		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), range});
+		return responses_.size();
+	}
+
 	template <class Stack, class... Args>
 	void pop_stack_frame(Stack& stack, Args&... args)
 	{
 		stack.pop_back(), stack_frames_.pop_back();
 		cut_frame_ = (std::min)(cut_frame_, stack_frames_.size());
-		if constexpr (std::is_same_v<typename Stack::value_type, subject> || std::is_same_v<typename Stack::value_type, lrmemo>)
+		if constexpr (std::is_same_v<typename Stack::value_type, subject_location> || std::is_same_v<typename Stack::value_type, lrmemo>)
 			if (cut_deferred_ && capture_stack_.empty() && lrmemo_stack_.empty())
 				accept(args...);
 	}
 
 public:
-	parser(lug::grammar const& g, lug::semantics& s) : grammar_{g}, semantics_{s} {}
+	parser(lug::grammar const& g, lug::environment& e) : grammar_{g}, environment_{e} {}
 	lug::grammar const& grammar() const noexcept { return grammar_; }
-	lug::semantics& semantics() const noexcept { return semantics_; }
-	std::string_view input_view() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
-	std::size_t input_position() const noexcept { return registers_.sr; }
-	std::size_t max_input_position() const noexcept { return registers_.mr; }
+	lug::environment& environment() const noexcept { return environment_; }
+	std::string_view match() const noexcept { return {input_.data(), registers_.sr}; }
+	std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
+	std::size_t subject_index() const noexcept { return registers_.sr; }
+	std::size_t max_subject_index() const noexcept { return registers_.mr; }
 	parser_registers& registers() noexcept { return registers_; }
 	parser_registers const& registers() const noexcept { return registers_; }
 	bool available(std::size_t sn) { return available(registers_.sr, sn); }
+	unsigned short call_depth() const noexcept { return call_depth_; }
+	unsigned short prune_depth() const noexcept { return prune_depth_; }
+	void escape() { prune_depth_ = call_depth_; }
+
+	syntax_position const& position_at(std::size_t index)
+	{
+		using namespace unicode;
+		auto posit = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
+		if (posit != std::end(positions_) && index == posit->first)
+			return posit->second;
+		std::size_t start = 0;
+		syntax_position position{1, 1};
+		if (posit != std::begin(positions_) && posit != std::end(positions_)) {
+			auto prevposit = std::prev(posit);
+			start = prevposit->first;
+			position = prevposit->second;
+		}
+		auto const last = std::next(std::begin(input_), index);
+		auto curr = std::next(std::begin(input_), start);
+		auto newline = curr;
+		char32_t prevrune = U'\0';
+		while (curr < last) {
+			auto [next, rune] = utf8::decode_rune(curr, last);
+			if ((query(rune).properties() & ptype::Line_Ending) != ptype::None && (prevrune != 0x0d || rune != 0x0a))
+			{
+				position.column = 1;
+				position.line += rune;
+			}
+			curr = next;
+			prevrune = rune;
+		}
+		position.column += utf8::count_runes(newline, last);
+		return positions_.insert(posit, std::make_pair(index, position))->second;
+	}
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last)
@@ -1054,7 +1034,7 @@ public:
 		auto [sr, mr, rc, pc, fc] = registers_;
 		bool result = false, done = false;
 		rc = 0, pc = 0, fc = 0, cut_deferred_ = false, cut_frame_ = 0;
-		semantics_.clear();
+		prune_depth_ = max_call_depth, call_depth_ = 0;
 		while (!done) {
 			switch (auto [op, alt, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
@@ -1130,7 +1110,7 @@ public:
 						if (memo != lrmemo_stack_.crend()) {
 							if (memo->sra == lrfailcode || imm < memo->prec)
 								goto failure;
-							sr = memo->sra, rc = semantics_.restore_responses_after(rc, memo->responses);
+							sr = memo->sra, rc = restore_responses_after(rc, memo->responses);
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
@@ -1152,11 +1132,11 @@ public:
 						case stack_frame_type::lrcall: {
 							auto& memo = lrmemo_stack_.back();
 							if (memo.sra == lrfailcode || sr > memo.sra) {
-								memo.sra = sr, memo.responses = semantics_.drop_responses_after(memo.rcr);
+								memo.sra = sr, memo.responses = drop_responses_after(memo.rcr);
 								sr = memo.srr, pc = memo.pca, rc = memo.rcr;
 								continue;
 							}
-							sr = memo.sra, pc = memo.pcr, rc = semantics_.restore_responses_after(memo.rcr, memo.responses);
+							sr = memo.sra, pc = memo.pcr, rc = restore_responses_after(memo.rcr, memo.responses);
 							pop_stack_frame(lrmemo_stack_, sr, mr, rc, pc);
 						} break;
 						default: goto failure;
@@ -1185,7 +1165,7 @@ public:
 							} break;
 							case stack_frame_type::lrcall: {
 								if (auto& memo = lrmemo_stack_.back(); memo.sra != lrfailcode)
-									sr = memo.sra, pc = memo.pcr, rc = semantics_.restore_responses_after(memo.rcr, memo.responses);
+									sr = memo.sra, pc = memo.pcr, rc = restore_responses_after(memo.rcr, memo.responses);
 								else
 									++fc;
 								pop_stack_frame(lrmemo_stack_, sr, mr, rc, pc);
@@ -1193,7 +1173,7 @@ public:
 							default: break;
 						}
 					}
-					semantics_.pop_responses_after(rc);
+					pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
 					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
@@ -1206,16 +1186,16 @@ public:
 					registers_ = {sr, sr > mr ? sr : mr, rc, pc, 0};
 					bool accepted = prog.predicates[imm](*this);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
-					semantics_.pop_responses_after(rc);
+					pop_responses_after(rc);
 					if (!accepted)
 						goto failure;
 				} break;
 				case opcode::action: {
-					rc = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
+					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
 				case opcode::begin: {
 					stack_frames_.push_back(stack_frame_type::capture);
-					capture_stack_.push_back(static_cast<subject>(sr));
+					capture_stack_.push_back(static_cast<subject_location>(sr));
 				} break;
 				case opcode::end: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
@@ -1224,7 +1204,7 @@ public:
 					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
 					if (sr0 > sr1)
 						goto failure;
-					rc = semantics_.push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
+					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
 				} break;
 				default: registers_ = {sr, sr > mr ? sr : mr, rc, pc, 0}; throw bad_opcode{};
 			}
@@ -1234,21 +1214,21 @@ public:
 };
 
 template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
-inline bool parse(InputIt first, InputIt last, grammar const& grmr, semantics& sema)
+inline bool parse(InputIt first, InputIt last, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, sema}.enqueue(first, last).parse();
+	return parser{grmr, envr }.enqueue(first, last).parse();
 }
 
 template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 {
-	semantics sema;
-	return parse(first, last, grmr, sema);
+	environment envr;
+	return parse(first, last, grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, semantics& sema)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, sema}.push_source([&input](std::string& line) {
+	return parser{grmr, envr }.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
 			line.push_back('\n');
 			return true;
@@ -1259,13 +1239,13 @@ inline bool parse(std::istream& input, grammar const& grmr, semantics& sema)
 
 inline bool parse(std::istream& input, grammar const& grmr)
 {
-	semantics sema;
-	return parse(input, grmr, sema);
+	environment envr;
+	return parse(input, grmr, envr);
 }
 
-inline bool parse(std::string_view sv, grammar const& grmr, semantics& sema)
+inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
 {
-	return parse(sv.cbegin(), sv.cend(), grmr, sema);
+	return parse(sv.cbegin(), sv.cend(), grmr, envr);
 }
 
 inline bool parse(std::string_view sv, grammar const& grmr)
@@ -1273,15 +1253,24 @@ inline bool parse(std::string_view sv, grammar const& grmr)
 	return parse(sv.cbegin(), sv.cend(), grmr);
 }
 
-inline bool parse(grammar const& grmr, semantics& sema)
+inline bool parse(grammar const& grmr, environment& envr)
 {
-	return parse(std::cin, grmr, sema);
+	return parse(std::cin, grmr, envr);
 }
 
 inline bool parse(grammar const& grmr)
 {
 	return parse(std::cin, grmr);
 }
+
+inline std::string_view syntax::capture() const { return parser_.match().substr(range_.index, range_.size); }
+inline syntax_position const& syntax::start() const { return parser_.position_at(range_.index); }
+inline syntax_position const& syntax::end() const { return parser_.position_at(range_.index + range_.size); }
+
+inline unsigned short environment::call_depth() const { return parser().call_depth(); }
+inline void environment::escape() { parser().escape(); }
+inline std::string_view environment::match() const { return parser().match(); }
+inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 

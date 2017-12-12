@@ -14,10 +14,10 @@ void test_simple_predicates()
 	assert(lug::parse("ab", G));
 }
 
-void test_input_position_predicate()
+void test_subject_index_predicate()
 {
 	using namespace lug::language;
-	rule S = +("a"_sx > [](parser& p){ return p.input_position() <= 4; });
+	rule S = +("a"_sx > [](parser& p){ return p.subject_index() <= 4; });
 	grammar G = start(S > eoi);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));
@@ -32,7 +32,7 @@ int main()
 {
 	try {
 		test_simple_predicates();
-		test_input_position_predicate();
+		test_subject_index_predicate();
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;

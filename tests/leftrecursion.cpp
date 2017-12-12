@@ -45,7 +45,36 @@ namespace
 		assert(!lug::parse("b", G));
 	}
 
-	/*void test_hidden_left_recursion()
+	void test_association_and_precedence()
+	{
+		using namespace lug::language;
+		grammar::implicit_space = nop;
+		std::string out;
+		rule N	= chr('1') | chr('2') | chr('3');
+		rule E	= E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
+				| E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
+				| N <[&out](csyntax& x){ out += x.capture(); };
+		rule S = E > eoi;
+		grammar G = start(S);
+		out.clear();
+		assert(lug::parse("1", G) && out == "1");
+		out.clear();
+		assert(lug::parse("1+2", G) && out == "12+");
+		out.clear();
+		assert(lug::parse("3*1", G) && out == "31*");
+		out.clear();
+		assert(lug::parse("1*2+3*2", G) && out == "12*32*+");
+		out.clear();
+		assert(lug::parse("2+2*3+1", G) && out == "223*+1+");
+		out.clear();
+		assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*+1+");
+		assert(!lug::parse("", G));
+		assert(!lug::parse("a", G));
+		assert(!lug::parse("1+", G));
+	}
+
+	/* NOTE: Medeiros' algorithm doesn't appear to support hidden left recursion
+	void test_hidden_left_recursion()
 	{
 		using namespace lug::language;
 		grammar::implicit_space = nop;
@@ -69,34 +98,6 @@ namespace
 		assert(!lug::parse("", G));
 		assert(!lug::parse("z", G));
 	}*/
-	
-	void test_association_and_precedence()
-	{
-		using namespace lug::language;
-		grammar::implicit_space = nop;
-		std::string out;
-		rule N	= chr('1') | chr('2') | chr('3');
-		rule E	= E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
-				| E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
-				| N <[&out](semantics&, csyntax& x){ out += x.capture(); };
-		rule S = E > eoi;
-		grammar G = start(S);
-		out.clear();
-		assert(lug::parse("1", G) && out == "1");
-		out.clear();
-		assert(lug::parse("1+2", G) && out == "12+");
-		out.clear();
-		assert(lug::parse("3*1", G) && out == "31*");
-		out.clear();
-		assert(lug::parse("1*2+3*2", G) && out == "12*32*+");
-		out.clear();
-		assert(lug::parse("2+2*3+1", G) && out == "223*+1+");
-		out.clear();
-		assert(lug::parse("2+2*3+1*2*3+1", G) && out == "223*+12*3*+1+");
-		assert(!lug::parse("", G));
-		assert(!lug::parse("a", G));
-		assert(!lug::parse("1+", G));
-	}
 }
 
 int main()
@@ -104,7 +105,6 @@ int main()
 	try {
 		test_direct_left_recursion();
 		test_indirect_left_recursion();
-		//test_hidden_left_recursion();
 		test_association_and_precedence();
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << std::endl;

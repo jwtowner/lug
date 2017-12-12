@@ -9,10 +9,10 @@ namespace samples::calc
 {
 	using namespace lug::language;
 
-	semantics Sema;
-	variable<std::string_view> m{Sema};
-	variable<double> e{Sema}, l{Sema}, n{Sema}, r{Sema}, s{Sema};
-	variable<int> i{Sema};
+	environment Env;
+	variable<std::string_view> m{Env};
+	variable<double> e{Env}, l{Env}, n{Env}, r{Env}, s{Env};
+	variable<int> i{Env};
 	double v[26];
 
 	extern rule Expr;
@@ -48,7 +48,7 @@ namespace samples::calc
 int main()
 {
 	try {
-		while (lug::parse(samples::calc::Grammar, samples::calc::Sema)) ;
+		while (lug::parse(samples::calc::Grammar, samples::calc::Env)) ;
 	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << std::endl;
 		return -1;
