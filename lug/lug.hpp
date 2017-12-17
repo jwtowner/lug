@@ -499,7 +499,13 @@ public:
 	void operator()(encoder& d) const { d.match(expression_); }
 };
 
-template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>>
+template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class = std::enable_if_t<is_proper_expression_v<E>>>
+constexpr T const& make_expression(T const& t)
+{
+	return t;
+}
+
+template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class = std::enable_if_t<!is_proper_expression_v<E>>>
 constexpr auto make_expression(T&& t)
 {
 	static_assert(is_expression_v<E>, "T must be an expression type");
@@ -511,8 +517,6 @@ constexpr auto make_expression(T&& t)
 		return [p = semantic_predicate{[a = E{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<E>)
 		return string_expression{t};
-	else
-		return t;
 }
 
 template <class E>
