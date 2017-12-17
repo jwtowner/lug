@@ -1057,13 +1057,25 @@ public:
 		return *this;
 	}
 
-	template <class InputFunc>
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
 	parser& push_source(InputFunc&& func)
 	{
 		if (reading_)
 			throw reenterant_read_error{};
 		sources_.emplace_back(::std::forward<InputFunc>(func));
 		return *this;
+	}
+
+	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
+	bool parse(InputIt first, InputIt last)
+	{
+		return enqueue(first, last).parse();
+	}
+
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
+	bool parse(InputFunc&& func)
+	{
+		return push_source(::std::forward<InputFunc>(func)).parse();
 	}
 
 	bool parse()

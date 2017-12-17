@@ -43,15 +43,12 @@ void test_line_column_tracking()
 			| +alpha
 		];
 
-	rule Sentence = *(Word | punct);
-
-	grammar G = start(Sentence > eoi);
+	grammar G = start(*(Word | punct) > eoi);
 
 	lug::environment E;
 	lug::parser p{G, E};
-	p.enqueue(std::begin(text), std::end(text));
 
-	bool match = p.parse();
+	bool match = p.parse(std::begin(text), std::end(text));
 	assert(match);
 
 	assert(startpos[0].line == 1 && startpos[0].column == 14);
