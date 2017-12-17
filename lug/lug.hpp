@@ -1022,16 +1022,15 @@ public:
 
 	syntax_position const& position_at(std::size_t index)
 	{
-		using namespace unicode;
-		auto posit = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
-		if (posit != std::end(positions_) && index == posit->first)
-			return posit->second;
+		auto pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
+		if (pos != std::end(positions_) && index == pos->first)
+			return pos->second;
 		std::size_t start = 0;
 		syntax_position position{1, 1};
-		if (posit != std::begin(positions_) && posit != std::end(positions_)) {
-			auto prevposit = std::prev(posit);
-			start = prevposit->first;
-			position = prevposit->second;
+		if (pos != std::begin(positions_)) {
+			auto prevpos = std::prev(pos);
+			start = prevpos->first;
+			position = prevpos->second;
 		}
 		auto const last = std::next(std::begin(input_), index);
 		auto curr = std::next(std::begin(input_), start);
@@ -1039,16 +1038,16 @@ public:
 		char32_t prevrune = U'\0';
 		while (curr < last) {
 			auto [next, rune] = utf8::decode_rune(curr, last);
-			if ((query(rune).properties() & ptype::Line_Ending) != ptype::None && (prevrune != 0x0d || rune != 0x0a))
-			{
+			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != 0x0d || rune != 0x0a)) {
 				position.column = 1;
-				position.line += rune;
+				++position.line;
+				newline = next;
 			}
 			curr = next;
 			prevrune = rune;
 		}
 		position.column += utf8::count_runes(newline, last);
-		return positions_.insert(posit, std::make_pair(index, position))->second;
+		return positions_.insert(pos, std::make_pair(index, position))->second;
 	}
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>

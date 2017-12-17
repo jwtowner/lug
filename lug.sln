@@ -34,6 +34,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "makeunicode", "msvs\tools\m
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "nonterminals", "msvs\tests\nonterminals.vcxproj", "{CE04F1AE-137C-4EDB-90D3-0B157518F644}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "parser", "msvs\tests\parser.vcxproj", "{4831DCD8-6842-470B-90A1-9EFBBE46F42C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -106,6 +108,14 @@ Global
 		{CE04F1AE-137C-4EDB-90D3-0B157518F644}.Release|x64.Build.0 = Release|x64
 		{CE04F1AE-137C-4EDB-90D3-0B157518F644}.Release|x86.ActiveCfg = Release|Win32
 		{CE04F1AE-137C-4EDB-90D3-0B157518F644}.Release|x86.Build.0 = Release|Win32
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Debug|x64.ActiveCfg = Debug|x64
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Debug|x64.Build.0 = Debug|x64
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Debug|x86.ActiveCfg = Debug|Win32
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Debug|x86.Build.0 = Debug|Win32
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Release|x64.ActiveCfg = Release|x64
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Release|x64.Build.0 = Release|x64
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Release|x86.ActiveCfg = Release|Win32
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -119,6 +129,7 @@ Global
 		{C4172D26-CBE2-4728-B56C-21BDA42ABEB1} = {1B73BBCE-6D23-43C3-A9D2-961B38CFAE2C}
 		{EBEA573B-E6F0-49E6-96BA-1E7B6AAE6E2F} = {782A1B1F-82A2-4338-9246-15B0BB5820CB}
 		{CE04F1AE-137C-4EDB-90D3-0B157518F644} = {1B73BBCE-6D23-43C3-A9D2-961B38CFAE2C}
+		{4831DCD8-6842-470B-90A1-9EFBBE46F42C} = {1B73BBCE-6D23-43C3-A9D2-961B38CFAE2C}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {1B319B7B-4BFF-4035-BF15-978C129D686C}

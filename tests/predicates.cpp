@@ -8,7 +8,7 @@
 void test_simple_predicates()
 {
 	using namespace lug::language;
-	rule S = ("a"_sx > []{ return false; } | []{ return true; } > "ab");
+	rule S = "a"_sx > []{ return false; } | []{ return true; } > "ab";
 	grammar G = start(S > eoi);
 	assert(!lug::parse("a", G));
 	assert(lug::parse("ab", G));
