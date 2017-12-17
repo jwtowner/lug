@@ -895,14 +895,17 @@ class parser
 	{
 		if (!available(sr, 1))
 			return false;
-		auto const last = input_.cend();
-		auto const curr = input_.cbegin() + sr;
+		auto const curr = input_.cbegin() + sr, last = input_.cend();
 		auto [next, rune] = utf8::decode_rune(curr, last);
 		bool matched;
 		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>)
 			matched = match(curr, last, next, rune);
-		else
+		else if constexpr(std::is_invocable_v<Match, unicode::ucd_record const&>)
+			matched = match(unicode::query(rune));
+		else if constexpr(std::is_invocable_v<Match, char32_t>)
 			matched = match(rune);
+		else
+			matched = ((void)rune, match());
 		if (matched)
 			sr += std::distance(curr, next);
 		return matched;
@@ -1080,11 +1083,11 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_any: {
-					if (!match_single(sr, [this](auto) { return true; }))
+					if (!match_single(sr, []{ return true; }))
 						goto failure;
 				} break;
 				case opcode::match_eol: {
-					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, auto rune) {
+					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
 								return false;
 							if (0x0d == rune)
@@ -1094,25 +1097,25 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_set: {
-					if (!match_single(sr, [&runes = prog.runesets[imm]](auto rune) {
+					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
 							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
 						goto failure;
 				} break;
 				case opcode::match_ctype: {
-					if (!match_single(sr, [imm](auto rune) { return unicode::query(rune).any_of(static_cast<unicode::ctype>(imm)); }))
+					if (!match_single(sr, [imm](unicode::ucd_record const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
 						goto failure;
 				} break;
 				case opcode::match_ptype: {
-					if (!match_single(sr, [str](auto rune) { return unicode::query(rune).any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](unicode::ucd_record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_gctype: {
-					if (!match_single(sr, [str](auto rune) { return unicode::query(rune).any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](unicode::ucd_record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_sctype: {
-					if (!match_single(sr, [imm](auto rune) { return unicode::query(rune).script() == static_cast<unicode::sctype>(imm); }))
+					if (!match_single(sr, [imm](unicode::ucd_record const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
 						goto failure;
 				} break;
 				case opcode::choice: {
