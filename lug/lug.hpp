@@ -148,7 +148,8 @@ struct program
 
 class rule
 {
-	friend class encoder; friend class rule_encoder;
+	friend class encoder;
+	friend class rule_encoder;
 	friend grammar start(rule const&);
 	program program_;
 	program_callees callees_;
