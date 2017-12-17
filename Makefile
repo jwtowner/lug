@@ -2,7 +2,7 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.1
+VERSION = 0.2-pre
 
 # paths
 PREFIX = /usr/local
@@ -18,7 +18,7 @@ SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # tests
-TESTS = leftrecursion nonterminals predicates terminals
+TESTS = leftrecursion nonterminals parser predicates terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 
