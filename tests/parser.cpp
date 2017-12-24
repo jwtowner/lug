@@ -7,7 +7,7 @@
 
 using namespace std::string_view_literals;
 
-constexpr auto text =
+constexpr auto sentences1 =
 u8R"(The stranger officiates the meal.
 She was too short to see over the fence.
 This is the last random sentence I will be writing and I am going to stop mid-sent
@@ -29,27 +29,42 @@ She works two jobs to make ends meet; at least, that was her reason for not havi
 I want more detailed information.
 He told us a very exciting adventure story.)"sv;
 
+constexpr auto sentences2 =
+u8R"(
+There were white out conditions in the town; subsequently, the roads were impassable.
+He told us a very exciting adventure story.
+The sky is clear; the stars are twinkling.
+Let me help you with your baggage.
+The stranger officiates the meal.
+The rocks are approaching at high velocity.
+Abstraction is often one floor above you.
+)"sv;
+
 void test_line_column_tracking()
 {
-	using namespace lug::language;
+	std::array<lug::syntax_position, 4> startpos, endpos;
+	lug::grammar G;
 
-	std::array<syntax_position, 4> startpos, endpos;
+	{
+		using namespace lug::language;
 
-	rule Word = lexeme[
-			  str("officiates") < [&](csyntax& x) { startpos[0] = x.start(); endpos[0] = x.end(); }
-			| str("Everyone") < [&](csyntax& x) { endpos[1] = x.end(); startpos[1] = x.start();  }
-			| str("Friday") < [&](csyntax& x) { startpos[2] = x.start(); endpos[2] = x.end(); }
-			| str("story") < [&](csyntax& x) { endpos[3] = x.end(); startpos[3] = x.start(); }
-			| +alpha
-		];
+		rule Word = lexeme[
+				  str("officiates") < [&](csyntax& x) { startpos[0] = x.start(); endpos[0] = x.end(); }
+				| str("Everyone") < [&](csyntax& x) { endpos[1] = x.end(); startpos[1] = x.start();  }
+				| str("Friday") < [&](csyntax& x) { startpos[2] = x.start(); endpos[2] = x.end(); }
+				| str("story") < [&](csyntax& x) { endpos[3] = x.end(); startpos[3] = x.start(); }
+				| +alpha
+			];
 
-	grammar G = start(*(Word | punct) > eoi);
+		G = start(*(Word | punct) > eoi);
+	}
 
 	lug::environment E;
 	lug::parser p{G, E};
 
-	bool match = p.parse(std::begin(text), std::end(text));
-	assert(match);
+	bool success = p.parse(std::begin(sentences1), std::end(sentences1));
+	assert(success);
+	assert(p.match() == sentences1);
 
 	assert(startpos[0].line == 1 && startpos[0].column == 14);
 	assert(startpos[1].line == 10 && startpos[1].column == 1);
@@ -59,7 +74,22 @@ void test_line_column_tracking()
 	assert(endpos[0].line == 1 && endpos[0].column == 24);
 	assert(endpos[1].line == 10 && endpos[1].column == 9);
 	assert(endpos[2].line == 15 && endpos[2].column == 42);
-	assert(endpos[3].line == 20 && endpos[3].column == 30);
+	assert(endpos[3].line == 20 && endpos[3].column == 43);
+
+	assert(p.max_subject_index() == sentences1.size());
+	assert(p.max_subject_position().line == 20 && p.max_subject_position().column == 44);
+
+	success = p.parse(std::begin(sentences2), std::end(sentences2));
+	assert(success);
+	assert(p.match() == sentences2);
+
+	assert(startpos[0].line == 25 && startpos[0].column == 14);
+	assert(startpos[3].line == 22 && startpos[3].column == 38);
+	assert(endpos[0].line == 25 && endpos[0].column == 24);
+	assert(endpos[3].line == 22 && endpos[3].column == 43);
+
+	assert(p.max_subject_index() == sentences2.size());
+	assert(p.max_subject_position().line == 28 && p.max_subject_position().column == 1);
 }
 
 int main()

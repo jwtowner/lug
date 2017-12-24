@@ -841,6 +841,7 @@ class parser
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::string input_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
+	syntax_position origin_{1, 1};
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
 	parser_registers registers_{0, 0, 0, 0, 0};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
@@ -933,11 +934,11 @@ class parser
 		return true;
 	}
 
-	void accept(std::size_t& sr, std::size_t& mr, std::size_t& rc, std::ptrdiff_t& pc)
+	void accept(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
 	{
+		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
 		auto const& actions = grammar_.program().actions;
 		auto const& captures = grammar_.program().captures;
-		registers_ = {sr, mr, rc, pc, 0};
 		environment_.start_accept(*this);
 		for (auto& response : responses_) {
 			if (prune_depth_ <= response.call_depth)
@@ -949,19 +950,19 @@ class parser
 				actions[response.action_index](environment_);
 		}
 		environment_.end_accept();
-		input_.erase(0, sr);
-		casefolded_subjects_.clear();
-		registers_.sr = 0, registers_.mr = 0, registers_.rc = 0;
-		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
-		std::tie(sr, mr, rc, pc, std::ignore) = registers_.as_tuple();
 	}
 
-	bool try_accept(std::size_t& sr, std::size_t& mr, std::size_t& rc, std::ptrdiff_t& pc)
+	auto drain()
 	{
-		if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); cut_deferred_)
-			return false;
-		accept(sr, mr, rc, pc);
-		return true;
+		origin_ = position_at(registers_.sr);
+		input_.erase(0, registers_.sr);
+		casefolded_subjects_.clear();
+		positions_.clear();
+		responses_.clear();
+		registers_.mr -= registers_.sr;
+		registers_.sr = 0, registers_.rc = 0;
+		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
+		return registers_.as_tuple();
 	}
 
 	void pop_responses_after(std::size_t n)
@@ -1025,28 +1026,24 @@ public:
 		auto pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (pos != std::end(positions_) && index == pos->first)
 			return pos->second;
-		std::size_t start = 0;
-		syntax_position position{1, 1};
+		std::size_t startindex = 0;
+		syntax_position position = origin_;
 		if (pos != std::begin(positions_)) {
 			auto prevpos = std::prev(pos);
-			start = prevpos->first;
+			startindex = prevpos->first;
 			position = prevpos->second;
 		}
+		auto first = std::next(std::begin(input_), startindex);
 		auto const last = std::next(std::begin(input_), index);
-		auto curr = std::next(std::begin(input_), start);
-		auto newline = curr;
-		char32_t prevrune = U'\0';
-		while (curr < last) {
-			auto [next, rune] = utf8::decode_rune(curr, last);
-			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != 0x0d || rune != 0x0a)) {
-				position.column = 1;
-				++position.line;
-				newline = next;
+		char32_t rune, prevrune = U'\0';
+		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
+			std::tie(next, rune) = utf8::decode_rune(curr, last);
+			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
+				position.column = 1, ++position.line;
+				first = next;
 			}
-			curr = next;
-			prevrune = rune;
 		}
-		position.column += utf8::count_runes(newline, last);
+		position.column += utf8::count_runes(first, last);
 		return positions_.insert(pos, std::make_pair(index, position))->second;
 	}
 
@@ -1084,10 +1081,10 @@ public:
 		program const& prog = grammar_.program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
-		auto [sr, mr, rc, pc, fc] = registers_;
+		auto [sr, mr, rc, pc, fc] = drain();
 		bool result = false, done = false;
-		rc = 0, pc = 0, fc = 0, cut_deferred_ = false, cut_frame_ = 0;
 		prune_depth_ = max_call_depth, call_depth_ = 0;
+		pc = 0, fc = 0;
 		while (!done) {
 			switch (auto [op, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
 				case opcode::match: {
@@ -1106,8 +1103,8 @@ public:
 					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
 								return false;
-							if (0x0d == rune)
-								if (auto [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == 0x0a)
+							if (U'\r' == rune)
+								if (auto [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
 									next = next2;
 							return true; }))
 						goto failure;
@@ -1195,9 +1192,7 @@ public:
 				case opcode::fail: {
 					fc = imm;
 				failure:
-					if (sr > mr)
-						mr = sr;
-					for (++fc; fc > 0; --fc) {
+					for (mr = (std::max)(mr, sr), ++fc; fc > 0; --fc) {
 						if (done = cut_frame_ >= stack_frames_.size(); done) {
 							registers_ = {sr, mr, rc, pc, 0};
 							break;
@@ -1226,14 +1221,17 @@ public:
 					pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
-					try_accept(sr, mr, rc, pc);
+					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
+						accept(sr, mr, rc, pc);
+						std::tie(sr, mr, rc, pc, std::ignore) = drain();
+					}
 				} break;
 				case opcode::accept_final: {
-					if (try_accept(sr, mr, rc, pc))
-						result = done = true;
+					accept(sr, mr, rc, pc);
+					result = done = true;
 				} break;
 				case opcode::predicate: {
-					registers_ = {sr, sr > mr ? sr : mr, rc, pc, 0};
+					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
 					bool accepted = prog.predicates[imm](*this);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
 					pop_responses_after(rc);
@@ -1256,7 +1254,7 @@ public:
 						goto failure;
 					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
 				} break;
-				default: registers_ = {sr, sr > mr ? sr : mr, rc, pc, 0}; throw bad_opcode{};
+				default: registers_ = {sr, (std::max)(mr, sr), rc, pc, 0}; throw bad_opcode{};
 			}
 		}
 		return result;
