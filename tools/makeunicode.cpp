@@ -806,21 +806,22 @@ void compress_records()
 	recordstagetable = std::move(*smallest);
 }
 
-auto run_length_encode(std::vector<std::size_t> const& input, ucd_type_info const& info)
+template <class T>
+auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 {
 	// encode run-lengths
-	auto const maxseqlen = (std::size_t{1} << ((CHAR_BIT * info.szbytes) - 2)) - 2;
-	auto const seqmask = std::size_t{3} << ((CHAR_BIT * info.szbytes) - 2);
-	std::vector<std::size_t> pass1;
+	T const maxseqlen = (T{1} << ((CHAR_BIT * info.szbytes) - 2)) - 2;
+	T const seqmask = T{3} << ((CHAR_BIT * info.szbytes) - 2);
+	std::vector<T> pass1;
 
 	for (auto curr = std::begin(input), last = std::end(input); curr != last; ) {
-		auto value = *curr;
-		auto next = std::find_if_not(std::next(curr), last, [value](auto x) { return x == value; });
+		T const value = *curr;
+		auto const next = std::find_if_not(std::next(curr), last, [value](auto x) { return x == value; });
 		auto count = static_cast<std::size_t>(std::distance(curr, next));
 		if (count > 1 || (value & seqmask) == seqmask) {
 			do {
-				auto seqlen = (std::min)(count - 1, maxseqlen);
-				pass1.insert(std::end(pass1), {seqmask | static_cast<std::size_t>(seqlen), value});
+				T seqlen = (std::min)(static_cast<T>(count - 1), maxseqlen);
+				pass1.insert(std::end(pass1), {static_cast<T>(seqmask | seqlen), value});
 				count -= seqlen + 1;
 			} while (count > maxseqlen);
 		} else {
@@ -830,9 +831,9 @@ auto run_length_encode(std::vector<std::size_t> const& input, ucd_type_info cons
 	}
 
 	// encode interleave patterns
-	auto const ilseqcode = (std::size_t{1} << (CHAR_BIT * info.szbytes)) - 1;
-	auto const maxilseqlen = ilseqcode - 1;
-	std::vector<std::size_t> pass2;
+	T const ilseqcode = (T{1} << (CHAR_BIT * info.szbytes)) - 1;
+	T const maxilseqlen = ilseqcode - 1;
+	std::vector<T> pass2;
 
 	for (auto curr = std::begin(pass1), last = std::end(pass1); curr != last; ) {
 		std::size_t count = 0;
@@ -840,7 +841,7 @@ auto run_length_encode(std::vector<std::size_t> const& input, ucd_type_info cons
 			for (auto tail = curr + 2; last - tail >= 2 && count < maxilseqlen && curr[0] == tail[0] && curr[1] == tail[1]; tail += 2)
 				++count;
 		if (count > 1) {
-			pass2.insert(std::end(pass2), {ilseqcode, count + 1, curr[0], curr[1]});
+			pass2.insert(std::end(pass2), {ilseqcode, static_cast<T>(count + 1), curr[0], curr[1]});
 			curr += (count + 1) * 2;
 		} else {
 			pass2.push_back(*curr++);
@@ -848,6 +849,12 @@ auto run_length_encode(std::vector<std::size_t> const& input, ucd_type_info cons
 	}
 
 	return pass2;
+}
+
+template <class T>
+auto run_length_encode(std::vector<T> const& input)
+{
+	return run_length_encode(input, get_type_info<T>());
 }
 
 template <class InputIt>
@@ -1026,10 +1033,10 @@ public:
 		: records_{records} {}
 
 	friend std::ostream& operator<<(std::ostream& out, record_flyweight_printer const& p) {
+		print_table(out, "rleabfields", "std::uint_least16_t", "", run_length_encode(p.records_.abfields), 120, "\t", "\n\t\t") << "\n";
 		print_table(out, "flyweights", "std::uint_least8_t", "", p.records_.flyweights, 120, "\t", "\n\t\t") << "\n";
 		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", p.records_.pflag_values, 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "abfields", "std::uint_least16_t", "", p.records_.abfields, 120, "\t", "\n\t\t");
+		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t");
 		return out;
 	}
 };
@@ -1370,6 +1377,9 @@ inline std::int_least32_t record::case_mapping(std::size_t index) noexcept
 
 inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 {
+	using detail::run_length_decode;
+	using lug::detail::make_member_accessor;
+
 )c++"
 << rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n"
 
@@ -1378,13 +1388,14 @@ inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 << record_flyweight_printer(compressedrecords)
 << R"c++(
 	auto table = std::make_unique<raw_record_table>();
-	detail::run_length_decode(std::begin(rlestage1), std::end(rlestage1), std::begin(table->stage1));
-	detail::run_length_decode(std::begin(rlestage2), std::end(rlestage2), std::begin(table->stage2));
+	run_length_decode(std::cbegin(rlestage1), std::cend(rlestage1), std::begin(table->stage1));
+	run_length_decode(std::cbegin(rlestage2), std::cend(rlestage2), std::begin(table->stage2));
+	run_length_decode(std::cbegin(rleabfields), std::cend(rleabfields),
+		make_member_accessor<decltype(&raw_record::abfields), &raw_record::abfields>(std::begin(table->records)));
 	auto& records = table->records;
 	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 8) {
 		records[r].pflags = pflags[flyweights[f + 0]];
 		records[r].cflags = cflags[flyweights[f + 1]];
-		records[r].abfields = abfields[r];
 		records[r].gcindex = flyweights[f + 2];
 		records[r].scindex = flyweights[f + 3];
 		records[r].wfields = flyweights[f + 4];

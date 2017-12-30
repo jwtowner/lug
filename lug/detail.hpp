@@ -84,29 +84,28 @@ constexpr T& operator^=(T& x, T y) noexcept
 namespace detail
 {
 
-template <class T> struct member_pointer_value {};
-template <class T, class U> struct member_pointer_value<T U::*> { typedef T type; };
 template <class T> struct member_pointer_object {};
 template <class T, class U> struct member_pointer_object<T U::*> { typedef U type; };
+template <class T> struct member_pointer_value {};
+template <class T, class U> struct member_pointer_value<T U::*> { typedef T type; };
 
-template <class MemberPtr, class ObjectIterator>
+template <class ObjectIterator, class MemberPtrType, MemberPtrType MemberPtr>
 class member_access_iterator
 {
 public:
-	typedef MemberPtr member_ptr;
 	typedef ObjectIterator base_type;
-	typedef typename member_pointer_object<member_ptr>::type object_type;
-	typedef typename member_pointer_value<member_ptr>::type value_type;
-	typedef value_type const& reference;
-	typedef value_type const* pointer;
+	typedef typename member_pointer_object<MemberPtrType>::type object_type;
+	typedef typename member_pointer_value<MemberPtrType>::type value_type;
+	typedef value_type& reference;
+	typedef value_type* pointer;
 	typedef typename std::iterator_traits<base_type>::difference_type difference_type;
 	typedef typename std::iterator_traits<base_type>::iterator_category iterator_category;
 	constexpr member_access_iterator() noexcept : object_{} {};
 	constexpr explicit member_access_iterator(ObjectIterator obj) : object_{obj} {}
 	constexpr base_type base() const { return object_; }
-	constexpr pointer operator->() const { return object_->*MemberPtr; }
-	constexpr reference operator*() const { return object_->*MemberPtr; }
-	constexpr reference operator[](difference_type n) const { return (object_ + n)->*MemberPtr; }
+	constexpr pointer operator->() const { return (*object_).*MemberPtr; }
+	constexpr reference operator*() const { return (*object_).*MemberPtr; }
+	constexpr reference operator[](difference_type n) const { return (object_[n]).*MemberPtr; }
 	member_access_iterator& operator++() { ++object_; return *this; }
 	member_access_iterator& operator--() { --object_; return *this; }
 	member_access_iterator operator++(int) { member_access_iterator i{object_}; ++object_; return i; }
@@ -127,10 +126,10 @@ private:
 	ObjectIterator object_;
 };
 
-template <class MemberPtr, class ObjectIterator>
+template <class MemberPtrType, MemberPtrType MemberPtr, class ObjectIterator>
 constexpr auto make_member_accessor(ObjectIterator b)
 {
-	return member_access_iterator<MemberPtr, ObjectIterator>{b};
+	return member_access_iterator<ObjectIterator, MemberPtrType, MemberPtr>{b};
 }
 
 template <class T>
