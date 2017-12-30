@@ -115,7 +115,7 @@ auto build_namemap(List const& namelist)
 
 static std::vector<std::string> const binary_property_names =
 {
-	// Custom names
+	// Custom
 	"Any", "Ascii", "Assigned", "Line_Ending",
 	// PropList.txt
 	"White_Space", "Bidi_Control", "Join_Control", "Dash", "Quotation_Mark", "Terminal_Punctuation",
@@ -204,18 +204,88 @@ static std::vector<std::string> const script_names =
 
 static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
 
+static std::vector<std::string> const block_names =
+{
+	"No_block", "Basic Latin", "Latin-1 Supplement", "Latin Extended-A", "Latin Extended-B", "IPA Extensions",
+	"Spacing Modifier Letters", "Combining Diacritical Marks", "Greek and Coptic", "Cyrillic", "Cyrillic Supplement",
+	"Armenian", "Hebrew", "Arabic", "Syriac", "Arabic Supplement", "Thaana", "NKo", "Samaritan", "Mandaic", "Syriac Supplement",
+	"Arabic Extended-A", "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam",
+	"Sinhala", "Thai", "Lao", "Tibetan", "Myanmar", "Georgian", "Hangul Jamo", "Ethiopic", "Ethiopic Supplement", "Cherokee",
+	"Unified Canadian Aboriginal Syllabics", "Ogham", "Runic", "Tagalog", "Hanunoo", "Buhid", "Tagbanwa", "Khmer", "Mongolian",
+	"Unified Canadian Aboriginal Syllabics Extended", "Limbu", "Tai Le", "New Tai Lue", "Khmer Symbols", "Buginese", "Tai Tham",
+	"Combining Diacritical Marks Extended", "Balinese", "Sundanese", "Batak", "Lepcha", "Ol Chiki", "Cyrillic Extended-C",
+	"Sundanese Supplement", "Vedic Extensions", "Phonetic Extensions", "Phonetic Extensions Supplement",
+	"Combining Diacritical Marks Supplement", "Latin Extended Additional", "Greek Extended", "General Punctuation",
+	"Superscripts and Subscripts", "Currency Symbols", "Combining Diacritical Marks for Symbols", "Letterlike Symbols",
+	"Number Forms", "Arrows", "Mathematical Operators", "Miscellaneous Technical", "Control Pictures",
+	"Optical Character Recognition", "Enclosed Alphanumerics", "Box Drawing", "Block Elements", "Geometric Shapes",
+	"Miscellaneous Symbols", "Dingbats", "Miscellaneous Mathematical Symbols-A", "Supplemental Arrows-A", "Braille Patterns",
+	"Supplemental Arrows-B", "Miscellaneous Mathematical Symbols-B", "Supplemental Mathematical Operators",
+	"Miscellaneous Symbols and Arrows", "Glagolitic", "Latin Extended-C", "Coptic", "Georgian Supplement", "Tifinagh",
+	"Ethiopic Extended", "Cyrillic Extended-A", "Supplemental Punctuation", "CJK Radicals Supplement", "Kangxi Radicals",
+	"Ideographic Description Characters", "CJK Symbols and Punctuation", "Hiragana", "Katakana", "Bopomofo",
+	"Hangul Compatibility Jamo", "Kanbun", "Bopomofo Extended", "CJK Strokes", "Katakana Phonetic Extensions",
+	"Enclosed CJK Letters and Months", "CJK Compatibility", "CJK Unified Ideographs Extension A", "Yijing Hexagram Symbols",
+	"CJK Unified Ideographs", "Yi Syllables", "Yi Radicals", "Lisu", "Vai", "Cyrillic Extended-B", "Bamum",
+	"Modifier Tone Letters", "Latin Extended-D", "Syloti Nagri", "Common Indic Number Forms", "Phags-pa", "Saurashtra",
+	"Devanagari Extended", "Kayah Li", "Rejang", "Hangul Jamo Extended-A", "Javanese", "Myanmar Extended-B", "Cham",
+	"Myanmar Extended-A", "Tai Viet", "Meetei Mayek Extensions", "Ethiopic Extended-A", "Latin Extended-E",
+	"Cherokee Supplement", "Meetei Mayek", "Hangul Syllables", "Hangul Jamo Extended-B", "High Surrogates",
+	"High Private Use Surrogates", "Low Surrogates", "Private Use Area", "CJK Compatibility Ideographs",
+	"Alphabetic Presentation Forms", "Arabic Presentation Forms-A", "Variation Selectors", "Vertical Forms",
+	"Combining Half Marks", "CJK Compatibility Forms", "Small Form Variants", "Arabic Presentation Forms-B",
+	"Halfwidth and Fullwidth Forms", "Specials", "Linear B Syllabary", "Linear B Ideograms", "Aegean Numbers",
+	"Ancient Greek Numbers", "Ancient Symbols", "Phaistos Disc", "Lycian", "Carian", "Coptic Epact Numbers", "Old Italic",
+	"Gothic", "Old Permic", "Ugaritic", "Old Persian", "Deseret", "Shavian", "Osmanya", "Osage", "Elbasan",
+	"Caucasian Albanian", "Linear A", "Cypriot Syllabary", "Imperial Aramaic", "Palmyrene", "Nabataean", "Hatran",
+	"Phoenician", "Lydian", "Meroitic Hieroglyphs", "Meroitic Cursive", "Kharoshthi", "Old South Arabian",
+	"Old North Arabian", "Manichaean", "Avestan", "Inscriptional Parthian", "Inscriptional Pahlavi", "Psalter Pahlavi",
+	"Old Turkic", "Old Hungarian", "Rumi Numeral Symbols", "Brahmi", "Kaithi", "Sora Sompeng", "Chakma", "Mahajani",
+	"Sharada", "Sinhala Archaic Numbers", "Khojki", "Multani", "Khudawadi", "Grantha", "Newa", "Tirhuta", "Siddham",
+	"Modi", "Mongolian Supplement", "Takri", "Ahom", "Warang Citi", "Zanabazar Square", "Soyombo", "Pau Cin Hau",
+	"Bhaiksuki", "Marchen", "Masaram Gondi", "Cuneiform", "Cuneiform Numbers and Punctuation", "Early Dynastic Cuneiform",
+	"Egyptian Hieroglyphs", "Anatolian Hieroglyphs", "Bamum Supplement", "Mro", "Bassa Vah", "Pahawh Hmong", "Miao",
+	"Ideographic Symbols and Punctuation", "Tangut", "Tangut Components", "Kana Supplement", "Kana Extended-A", "Nushu",
+	"Duployan", "Shorthand Format Controls", "Byzantine Musical Symbols", "Musical Symbols", "Ancient Greek Musical Notation",
+	"Tai Xuan Jing Symbols", "Counting Rod Numerals", "Mathematical Alphanumeric Symbols", "Sutton SignWriting",
+	"Glagolitic Supplement", "Mende Kikakui", "Adlam", "Arabic Mathematical Alphabetic Symbols", "Mahjong Tiles",
+	"Domino Tiles", "Playing Cards", "Enclosed Alphanumeric Supplement", "Enclosed Ideographic Supplement",
+	"Miscellaneous Symbols and Pictographs", "Emoticons", "Ornamental Dingbats", "Transport and Map Symbols",
+	"Alchemical Symbols", "Geometric Shapes Extended", "Supplemental Arrows-C", "Supplemental Symbols and Pictographs",
+	"CJK Unified Ideographs Extension B", "CJK Unified Ideographs Extension C", "CJK Unified Ideographs Extension D",
+	"CJK Unified Ideographs Extension E", "CJK Unified Ideographs Extension F", "CJK Compatibility Ideographs Supplement",
+	"Tags", "Variation Selectors Supplement", "Supplementary Private Use Area-A", "Supplementary Private Use Area-B"
+};
+
+static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(block_names);
+
+static std::vector<std::string> const age_names =
+{
+	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2",
+	"6.0", "6.1", "6.2", "6.3", "7.0", "8.0", "9.0", "10.0"
+};
+
+static auto const ages = build_namemap<enum_type::index, std::uint_least8_t>(age_names);
+
+static std::vector<std::string> const eawidth_names = { "N", "A", "F", "H", "Na", "W" };
+
+static auto const eawidths = build_namemap<enum_type::index, std::uint_least8_t>(eawidth_names);
+
 template <class T> using ucd_array = std::array<T, 0x110000>;
 static ucd_array<std::uint_least64_t> ptable; // Binary Properties table
 static ucd_array<std::uint_least16_t> ctable; // POSIX Compatibility table
 static ucd_array<std::uint_least8_t> gctable; // General Category table
 static ucd_array<std::uint_least8_t> sctable; // Script table
+static ucd_array<std::uint_least8_t> agetable; // Character age
+static ucd_array<std::uint_least16_t> blocktable; // Block table
+static ucd_array<std::uint_least8_t> widthtable; // Combined East Asian width and monospace column width table
 static ucd_array<std::int_least32_t> cfoldtable; // Simple case folding offset table
 static ucd_array<std::int_least32_t> clowertable; // Simple lowercase conversion offset table
 static ucd_array<std::int_least32_t> cuppertable; // Simple uppercase conversion offset table
 
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
 static std::regex const rx_ucd_version(R"(^#\s*\w+-(\d+(\.\d+)+).*)", default_rx_options);
-static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*(\w+)\s*.*)", default_rx_options);
+static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*([\w_.-]+)\s*.*)", default_rx_options);
 static std::regex const rx_ucd_case_folding(R"(^\s*([0-9A-Fa-f]+);\s*(C|S);\s*([0-9A-Fa-f]+);.*)", default_rx_options);
 
 std::ifstream open_ucd_file_and_read_version(stdfs::path const& filepath, std::string& version)
@@ -363,6 +433,15 @@ void read_and_build_tables()
 			});
 		});
 
+		// read in East Asian width table
+		auto pending_eawidthversion = std::async(std::launch::async, [] {
+			std::fill(std::execution::par_unseq, widthtable.begin(), widthtable.end(), eawidths.find("N")->second);
+			return read_ucd_case_array("EastAsianWidth.txt", [](auto start, auto end, auto const& value) {
+				if (auto eawidth = eawidths.find(value); eawidth != eawidths.end())
+					std::fill(std::execution::par_unseq, widthtable.begin() + start, widthtable.begin() + end + 1, eawidth->second);
+			});
+		});
+
 		// setup compatibility filter maps while reading tables, see Unicode TR#18,
 		// Annex C: Compatibility Properties
 		using compat_filter_map = std::unordered_map<std::string, std::vector<compat_filter>>;
@@ -461,6 +540,10 @@ void read_and_build_tables()
 			}
 		);
 
+		prop_versions.push_back(pending_eawidthversion.get());
+
+
+
 		pending_caseconversion_task.wait();
 		return prop_versions;
 	});
@@ -474,9 +557,29 @@ void read_and_build_tables()
 		});
 	});
 
+	// load in the age table
+	auto pending_ageversion = std::async(std::launch::async, [] {
+		std::fill(std::execution::par_unseq, agetable.begin(), agetable.end(), ages.find("Unassigned")->second);
+		return read_ucd_prop_array("DerivedAge.txt", [](auto start, auto end, auto const& value) {
+			if (auto age = ages.find(value); age != ages.end())
+				std::fill(std::execution::par_unseq, agetable.begin() + start, agetable.begin() + end + 1, age->second);
+		});
+	});
+
+	// load in the blocks table
+	auto pending_blockversion = std::async(std::launch::async, [] {
+		std::fill(std::execution::par_unseq, blocktable.begin(), blocktable.end(), blocks.find("No_block")->second);
+		return read_ucd_prop_array("Blocks.txt", [](auto start, auto end, auto const& value) {
+			if (auto block = blocks.find(value); block != blocks.end())
+				std::fill(std::execution::par_unseq, blocktable.begin() + start, blocktable.begin() + end + 1, block->second);
+		});
+	});
+
 	// make sure versions from all ucd files match one another
 	auto versions = pending_versions.get();
 	versions.push_back(pending_scversion.get());
+	versions.push_back(pending_ageversion.get());
+	versions.push_back(pending_blockversion.get());
 	if (std::any_of(versions.begin(), versions.end(), [&versions](auto const& v) { return v != versions.front(); }))
 		throw makeunicode_error("unicode version mismatch between input files");
 }
@@ -535,8 +638,10 @@ struct ucd_record
 {
 	std::uint_least64_t pflags;
 	std::uint_least16_t cflags;
+	std::uint_least16_t abfields;
 	std::uint_least8_t gcindex;
 	std::uint_least8_t scindex;
+	std::uint_least8_t wfields;
 	std::int_least32_t cfoffset;
 	std::int_least32_t cloffset;
 	std::int_least32_t cuoffset;
@@ -544,7 +649,8 @@ struct ucd_record
 
 constexpr bool operator==(ucd_record const& x, ucd_record const& y) noexcept
 {
-	return x.pflags == y.pflags && x.cflags == y.cflags && x.gcindex == y.gcindex && x.scindex == y.scindex &&
+	return x.pflags == y.pflags && x.cflags == y.cflags && x.abfields == y.abfields &&
+		x.gcindex == y.gcindex && x.scindex == y.scindex && x.wfields == y.wfields &&
 		x.cfoffset == y.cfoffset && x.cloffset == y.cloffset && x.cuoffset == y.cuoffset;
 }
 
@@ -558,9 +664,10 @@ struct ucd_record_hash
 	std::size_t operator()(ucd_record const& record) const noexcept {
 		return hash_combine(
 			std::hash<std::uint_least64_t>{}(record.pflags), std::hash<std::uint_least16_t>{}(record.cflags),
-			std::hash<std::uint_least8_t>{}(record.gcindex), std::hash<std::uint_least8_t>{}(record.scindex),
-			std::hash<std::int_least32_t>{}(record.cfoffset), std::hash<std::int_least32_t>{}(record.cloffset),
-			std::hash<std::int_least32_t>{}(record.cuoffset));
+			std::hash<std::uint_least16_t>{}(record.abfields), std::hash<std::uint_least8_t>{}(record.gcindex),
+			std::hash<std::uint_least8_t>{}(record.scindex),
+			std::hash<std::uint_least8_t>{}(record.wfields), std::hash<std::int_least32_t>{}(record.cfoffset),
+			std::hash<std::int_least32_t>{}(record.cloffset), std::hash<std::int_least32_t>{}(record.cuoffset));
 	}
 };
 
@@ -594,16 +701,19 @@ struct ucd_flyweight_compressed_records
 	std::vector<std::uint_least64_t> pflag_values;
 	std::vector<std::uint_least16_t> cflag_values;
 	std::vector<std::int_least32_t> cmapping_values;
+	std::vector<std::uint_least16_t> abfields;
 	std::vector<std::uint_least8_t> flyweights;
 
 	ucd_flyweight_compressed_records() = default;
 
 	explicit ucd_flyweight_compressed_records(std::vector<ucd_record> const& records) {
 		for (auto const& record : records) {
+			abfields.push_back(record.abfields);
 			flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
 			flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
 			flyweights.push_back(record.gcindex);
 			flyweights.push_back(record.scindex);
+			flyweights.push_back(record.wfields);
 			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cfoffset)->second);
 			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cloffset)->second);
 			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cuoffset)->second);
@@ -618,6 +728,12 @@ static ucd_array<std::size_t> recordtable;
 static ucd_record_stage_table recordstagetable;
 static ucd_flyweight_compressed_records compressedrecords;
 
+auto make_abfield(std::uint_least8_t age, std::uint_least16_t block)
+{
+	assert((age < ((1u << 6) - 1)) && (block <= ((1u << 10) - 1)));
+	return static_cast<std::uint_least16_t>((static_cast<std::uint_least16_t>(age) << 10) | block);
+}
+
 std::size_t combine_record(ucd_record const& record)
 {
 	auto emplacement = recordindices.try_emplace(record, recordvalues.size());
@@ -628,9 +744,18 @@ std::size_t combine_record(ucd_record const& record)
 
 void combine_records()
 {
-	for (std::size_t i = 0, n = ptable.size(); i < n; ++i)
-		recordtable[i] = combine_record({ptable[i], ctable[i], gctable[i], sctable[i], cfoldtable[i], clowertable[i], cuppertable[i]});
-	ucd_record invalidrecord{binary_properties.find("Any")->second, 0, general_categories.find("Cn")->second, scripts.find("Unknown")->second, 0};
+	ucd_record invalidrecord{
+		binary_properties.find("Any")->second, 0, make_abfield(ages.find("Unassigned")->second, blocks.find("No_block")->second),
+		general_categories.find("Cn")->second, scripts.find("Unknown")->second, eawidths.find("N")->second,
+		0, 0, 0};
+
+	for (std::size_t i = 0, n = ptable.size(); i < n; ++i) {
+		recordtable[i] = combine_record({
+			ptable[i], ctable[i], make_abfield(agetable[i], blocktable[i]),
+			gctable[i], sctable[i], widthtable[i],
+			cfoldtable[i], clowertable[i], cuppertable[i]});
+	}
+
 	invalidrecordindex = combine_record(invalidrecord);
 	compressedrecords = ucd_flyweight_compressed_records(recordvalues);
 }
@@ -720,13 +845,32 @@ inline int align_padding(Integral value) noexcept
 	return ((static_cast<int>(value) + 3) / 4) * 4;
 }
 
-auto normalize_property_label(std::string_view id)
+auto make_version_identifier(std::string_view version)
+{
+	if (!std::isdigit(version.front()))
+		return std::string{version};
+	std::string versionid;
+	versionid.push_back('v');
+	for (char c : version)
+		versionid.push_back(c == '.' ? '_' : c);
+	return versionid;
+}
+
+auto normalize_property_identifier(std::string_view id)
 {
 	std::string normid;
 	for (char c : id)
-		if (c != ' ' && c != '\t' && c != '_' && c != '-')
-			normid.push_back(static_cast<char>(std::tolower(c)));
+		normid.push_back(c == ' ' || c == '\t' || c == '-' || c == '.' ? '_' : c);
 	return normid;
+}
+
+auto normalize_property_label(std::string_view label)
+{
+	std::string normlabel;
+	for (char c : label)
+		if (c != ' ' && c != '\t' && c != '_' && c != '-' && c != '.')
+			normlabel.push_back(static_cast<char>(std::tolower(c)));
+	return normlabel;
 }
 
 template <class ValueSequence>
@@ -787,12 +931,17 @@ public:
 class enum_parser_printer
 {
 	std::string_view name_, abbr_;
+	std::size_t maxcolwidth_{120};
 	std::function<std::vector<std::pair<std::string, std::string>>()> label_source_;
 
 public:
 	template <class LabelSource>
 	enum_parser_printer(std::string_view name, std::string_view abbr, LabelSource label_source)
 		: name_{name}, abbr_{abbr}, label_source_{std::move(label_source)} {}
+
+	template <class LabelSource>
+	enum_parser_printer(std::string_view name, std::string_view abbr, std::size_t colwidth, LabelSource label_source)
+		: name_{name}, abbr_{abbr}, maxcolwidth_{colwidth}, label_source_{std::move(label_source)} {}
 
 	friend std::ostream& operator<<(std::ostream& out, enum_parser_printer const& p)
 	{
@@ -808,20 +957,19 @@ public:
 			<< "\t{ {\n";
 
 		std::string line, segment;
-		line.reserve(150);
+		line.reserve(p.maxcolwidth_ * 2);
 		segment.reserve(80);
 
 		for (std::size_t i = 0, n = labels.size(); i < n; ++i) {
 			segment = "{ \"" + labels[i].first + "\"sv, ";
 			segment.append(p.abbr_.data(), p.abbr_.size());
 			segment += "::" + labels[i].second + " }";
-			if (i < n - 1) {
+			if (i < n - 1)
 				segment += ',';
-				if (segment.size() + line.size() > 120) {
-					out << "\t\t" << line << "\n";
-					line = segment;
-					continue;
-				}
+			if (segment.size() + line.size() > p.maxcolwidth_) {
+				out << "\t\t" << line << "\n";
+				line = segment;
+				continue;
 			}
 			if (i > 0)
 				line += ' ';
@@ -863,7 +1011,8 @@ public:
 	friend std::ostream& operator<<(std::ostream& out, record_flyweight_printer const& p) {
 		print_table(out, "flyweights", "std::uint_least8_t", "", p.records_.flyweights, 120, "\t", "\n\t\t") << "\n";
 		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", p.records_.pflag_values, 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t");
+		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "abfields", "std::uint_least16_t", "", p.records_.abfields, 120, "\t", "\n\t\t");
 		return out;
 	}
 };
@@ -901,24 +1050,23 @@ namespace lug::unicode
 << "\n"
 << enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatibility properties", [](std::ostream& out) {
 	auto const& cnames = compatibility_property_names;
-	auto const cpad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
+	auto const pad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
 	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(cpad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
-	out << "\t" << std::left << std::setw(cpad) << "none" << " = 0\n";
+		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
+	out << "\t" << std::left << std::setw(pad) << "none" << " = 0\n";
 })
 << "\n"
-<< enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Unicode binary properties", [](std::ostream& out) {
+<< enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Binary properties", [](std::ostream& out) {
 	auto const& pnames = binary_property_names;
-	auto const ppad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
+	auto const pad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
 	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(ppad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
-	out << "\t" << std::left << std::setw(ppad) << "None" << " = 0\n";
+		out << "\t" << std::left << std::setw(pad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
+	out << "\t" << std::left << std::setw(pad) << "None" << " = 0\n";
 })
 << "\n"
-<< enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "Unicode general categories", [](std::ostream& out) {
+<< enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "General categories", [](std::ostream& out) {
 	auto const& gcnames = general_category_names;
 	auto const& gclnames = general_category_long_names;
-	auto const gclpad = align_padding(max_element_size(gclnames.cbegin(), gclnames.cend()));
 	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
 		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    " << gclnames[i] << " = " << gcnames[i] << ",\n";
 	for (auto const& compound : compound_general_categories) {
@@ -938,26 +1086,50 @@ namespace lug::unicode
 	out << "\t" << "None = 0\n";
 })
 << "\n"
-<< enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Unicode scripts", [](std::ostream& out) {
-	auto const& scnames = script_names;
-	auto const scpad = align_padding(max_element_size(scnames.cbegin(), scnames.cend()));
-	for (std::size_t i = 0, n = scnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(scpad) << scnames[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+<< enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Scripts", [](std::ostream& out) {
+	auto const pad = align_padding(max_element_size(script_names.cbegin(), script_names.cend()));
+	for (std::size_t i = 0, n = script_names.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(pad) << script_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+})
+<< "\n"
+<< enum_printer(enum_type::index, "blktype", "std::uint_least16_t", "Blocks", [](std::ostream& out) {
+	std::vector<std::string> names;
+	names.reserve(block_names.size());
+	std::transform(std::cbegin(block_names), std::cend(block_names), std::back_inserter(names), normalize_property_identifier);
+	auto const pad = align_padding(max_element_size(std::begin(names), std::end(names)));
+	for (std::size_t i = 0, n = names.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(pad) << names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+})
+<< "\n"
+<< enum_printer(enum_type::index, "agetype", "std::uint_least8_t", "Character Age", [](std::ostream& out) {
+	std::vector<std::string> age_enums;
+	std::transform(age_names.begin(), age_names.end(), std::back_inserter(age_enums), [](auto& name) { return make_version_identifier(name); });
+	auto const pad = align_padding(max_element_size(age_enums.cbegin(), age_enums.cend()));
+	for (std::size_t i = 0, n = age_enums.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(pad) << age_enums[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+})
+<< "\n"
+<< enum_printer(enum_type::index, "eawtype", "std::uint_least8_t", "East Asian Width", [](std::ostream& out) {
+	auto const pad = align_padding(max_element_size(eawidth_names.cbegin(), eawidth_names.cend()));
+	for (std::size_t i = 0, n = eawidth_names.size(); i < n; ++i)
+		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
 })
 << R"c++(
 // Unicode Character Database (UCD) record
-class ucd_record
+class record
 {
 	struct raw_record {
 		std::uint_least64_t pflags;
 		std::uint_least16_t cflags;
+		std::uint_least16_t abfields;
 		std::uint_least8_t gcindex;
 		std::uint_least8_t scindex;
+		std::uint_least8_t wfields;
 		std::uint_least8_t cfindex;
 		std::uint_least8_t clindex;
 		std::uint_least8_t cuindex;
-	} const* record_;
-	explicit ucd_record(raw_record const* r) noexcept : record_(r) {}
+	} const* raw_;
+	explicit record(raw_record const* r) noexcept : raw_(r) {}
 	struct raw_record_table {)c++"
 		<< "\n\t\tstd::array<" << recordstagetable.typeinfo1.name << ", " << std::dec << recordstagetable.stage1.size() << "> stage1;\n"
 		<< "\t\tstd::array<" << recordstagetable.typeinfo2.name << ", " << std::dec << recordstagetable.stage2.size() << "> stage2;\n"
@@ -965,30 +1137,34 @@ class ucd_record
 	};
 	static std::int_least32_t case_mapping(std::size_t index) noexcept;
 	static std::unique_ptr<raw_record_table> decompress_table();
-	friend ucd_record query(char32_t r);
+	friend record query(char32_t r);
 public:
-	ctype compatibility() const noexcept { return static_cast<ctype>(record_->cflags); }
-	ptype properties() const noexcept { return static_cast<ptype>(record_->pflags); }
-	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << record_->gcindex); }
-	sctype script() const noexcept { return static_cast<sctype>(record_->scindex); }
+	ctype compatibility() const noexcept { return static_cast<ctype>(raw_->cflags); }
+	ptype properties() const noexcept { return static_cast<ptype>(raw_->pflags); }
+	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << raw_->gcindex); }
+	sctype script() const noexcept { return static_cast<sctype>(raw_->scindex); }
+	blktype block() const noexcept { return static_cast<blktype>(raw_->abfields & 0x3ff); }
+	agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10); }
+	eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0f); }
+	int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4) - 1; }
 	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
 	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
 	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
-	std::int_least32_t casefold_mapping() const noexcept { return case_mapping(record_->cfindex); }
-	std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(record_->clindex); }
-	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(record_->cuindex); }
+	std::int_least32_t casefold_mapping() const noexcept { return case_mapping(raw_->cfindex); }
+	std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(raw_->clindex); }
+	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
 };
 
 // Retrieves the UCD record for the given Unicode codepoint
-inline ucd_record query(char32_t r)
+inline record query(char32_t r)
 {
-	static auto const table = ucd_record::decompress_table();
+	static auto const table = record::decompress_table();
 	std::size_t index = )c++" << std::dec << invalidrecordindex << R"c++(;
 	if (r < 0x)c++" << std::hex << ptable.size() << R"c++() {
 		index = table->stage1[r >> )c++" << std::dec << block_shift << R"c++(];
 		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
 	}
-	return ucd_record{table->records.data() + index};
+	return record{table->records.data() + index};
 }
 
 // Simple casefold conversion
@@ -1078,16 +1254,19 @@ inline std::string normalize_property_label(std::string_view id)
 } // namespace detail
 
 )c++" << enum_parser_printer("ctype", "ct", [] {
+	auto const& cnames = compatibility_property_names;
 	std::vector<std::pair<std::string, std::string>> labels;
-	std::transform(compatibility_property_names.begin(), compatibility_property_names.end(), std::back_inserter(labels),
-			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
+	std::transform(cnames.begin(), cnames.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
 	return labels;
 })
 << "\n"
 << enum_parser_printer("ptype", "pt", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels),
-			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
+	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
 	return labels;
 })
 << "\n"
@@ -1102,8 +1281,33 @@ inline std::string normalize_property_label(std::string_view id)
 << "\n"
 << enum_parser_printer("sctype", "sc", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
-	std::transform(script_names.begin(), script_names.end(), std::back_inserter(labels),
-			[](auto& label) { return std::make_pair(normalize_property_label(label), label); });
+	std::transform(script_names.begin(), script_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("blktype", "blk", 138, [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	std::transform(block_names.begin(), block_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), normalize_property_identifier(label));
+	});
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("agetype", "at", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	std::transform(age_names.begin(), age_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), make_version_identifier(label));
+	});
+	return labels;
+})
+<< "\n"
+<< enum_parser_printer("eawtype", "eaw", [] {
+	std::vector<std::pair<std::string, std::string>> labels;
+	std::transform(eawidth_names.begin(), eawidth_names.end(), std::back_inserter(labels), [](auto& label) {
+		return std::make_pair(normalize_property_label(label), label);
+	});
 	return labels;
 })
 << R"c++(
@@ -1126,7 +1330,7 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 } // namespace detail
 
-inline std::int_least32_t ucd_record::case_mapping(std::size_t index) noexcept
+inline std::int_least32_t record::case_mapping(std::size_t index) noexcept
 {
 )c++"
 << function_table_printer<decltype(compressedrecords.cmapping_values)>("casemappings", "std::int_least32_t", compressedrecords.cmapping_values)
@@ -1134,7 +1338,7 @@ inline std::int_least32_t ucd_record::case_mapping(std::size_t index) noexcept
 	return casemappings[index];
 }
 
-inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_table()
+inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 {
 )c++"
 << rle_stage_table_printer("rlestage1", recordstagetable.stage1, recordstagetable.typeinfo1) << "\n"
@@ -1147,14 +1351,16 @@ inline std::unique_ptr<ucd_record::raw_record_table> ucd_record::decompress_tabl
 	detail::run_length_decode(std::begin(rlestage1), std::end(rlestage1), std::begin(table->stage1));
 	detail::run_length_decode(std::begin(rlestage2), std::end(rlestage2), std::begin(table->stage2));
 	auto& records = table->records;
-	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 7) {
+	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 8) {
 		records[r].pflags = pflags[flyweights[f + 0]];
 		records[r].cflags = cflags[flyweights[f + 1]];
+		records[r].abfields = abfields[r];
 		records[r].gcindex = flyweights[f + 2];
 		records[r].scindex = flyweights[f + 3];
-		records[r].cfindex = flyweights[f + 4];
-		records[r].clindex = flyweights[f + 5];
-		records[r].cuindex = flyweights[f + 6];
+		records[r].wfields = flyweights[f + 4];
+		records[r].cfindex = flyweights[f + 5];
+		records[r].clindex = flyweights[f + 6];
+		records[r].cuindex = flyweights[f + 7];
 	}
 	return table;
 }

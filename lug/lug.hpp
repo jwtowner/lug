@@ -906,7 +906,7 @@ class parser
 		bool matched;
 		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>)
 			matched = match(curr, last, next, rune);
-		else if constexpr(std::is_invocable_v<Match, unicode::ucd_record const&>)
+		else if constexpr(std::is_invocable_v<Match, unicode::record const&>)
 			matched = match(unicode::query(rune));
 		else if constexpr(std::is_invocable_v<Match, char32_t>)
 			matched = match(rune);
@@ -1116,19 +1116,19 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_ctype: {
-					if (!match_single(sr, [imm](unicode::ucd_record const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
+					if (!match_single(sr, [imm](unicode::record const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
 						goto failure;
 				} break;
 				case opcode::match_ptype: {
-					if (!match_single(sr, [str](unicode::ucd_record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](unicode::record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_gctype: {
-					if (!match_single(sr, [str](unicode::ucd_record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](unicode::record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_sctype: {
-					if (!match_single(sr, [imm](unicode::ucd_record const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
+					if (!match_single(sr, [imm](unicode::record const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
 						goto failure;
 				} break;
 				case opcode::choice: {
