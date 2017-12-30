@@ -808,29 +808,46 @@ void compress_records()
 
 auto run_length_encode(std::vector<std::size_t> const& input, ucd_type_info const& info)
 {
-	auto const maxseqlen = (std::size_t{1} << ((CHAR_BIT * info.szbytes) - 2)) - 1;
+	// encode run-lengths
+	auto const maxseqlen = (std::size_t{1} << ((CHAR_BIT * info.szbytes) - 2)) - 2;
 	auto const seqmask = std::size_t{3} << ((CHAR_BIT * info.szbytes) - 2);
+	std::vector<std::size_t> pass1;
 
-	std::vector<std::size_t> output;
-
-	for (auto first = input.begin(), last = input.end(); first != last; ) {
-		auto value = *first;
-		auto next = std::find_if_not(std::next(first), last, [value](auto x) { return x == value; });
-		auto count = static_cast<std::size_t>(std::distance(first, next));
+	for (auto curr = std::begin(input), last = std::end(input); curr != last; ) {
+		auto value = *curr;
+		auto next = std::find_if_not(std::next(curr), last, [value](auto x) { return x == value; });
+		auto count = static_cast<std::size_t>(std::distance(curr, next));
 		if (count > 1 || (value & seqmask) == seqmask) {
 			do {
 				auto seqlen = (std::min)(count - 1, maxseqlen);
-				output.push_back(seqmask | static_cast<std::size_t>(seqlen));
-				output.push_back(value);
+				pass1.insert(std::end(pass1), {seqmask | static_cast<std::size_t>(seqlen), value});
 				count -= seqlen + 1;
 			} while (count > maxseqlen);
 		} else {
-			output.push_back(value);
+			pass1.push_back(value);
 		}
-		first = next;
+		curr = next;
 	}
 
-	return output;
+	// encode interleave patterns
+	auto const ilseqcode = (std::size_t{1} << (CHAR_BIT * info.szbytes)) - 1;
+	auto const maxilseqlen = ilseqcode - 1;
+	std::vector<std::size_t> pass2;
+
+	for (auto curr = std::begin(pass1), last = std::end(pass1); curr != last; ) {
+		std::size_t count = 0;
+		if (last - curr >= 4)
+			for (auto tail = curr + 2; last - tail >= 2 && count < maxilseqlen && curr[0] == tail[0] && curr[1] == tail[1]; tail += 2)
+				++count;
+		if (count > 1) {
+			pass2.insert(std::end(pass2), {ilseqcode, count + 1, curr[0], curr[1]});
+			curr += (count + 1) * 2;
+		} else {
+			pass2.push_back(*curr++);
+		}
+	}
+
+	return pass2;
 }
 
 template <class InputIt>
@@ -1318,13 +1335,26 @@ template <class InputIt, class OutputIt>
 void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 {
 	using value_type = typename std::iterator_traits<InputIt>::value_type;
+	constexpr auto ilseqcode = (std::numeric_limits<value_type>::max)();
 	constexpr auto seqmask = static_cast<value_type>(0x03ull << (std::numeric_limits<value_type>::digits - 2));
 	while (first != last) {
-		auto const lead = *first++;
-		if ((lead & seqmask) == seqmask)
+		if (auto const lead = *first++; lead == ilseqcode) {
+			auto const count = static_cast<std::size_t>(*first++);
+			auto const head = *first++;
+			auto const tail = *first++;
+			for (std::size_t i = 0; i < count; ++i) {
+				if ((head & seqmask) == seqmask) {
+					dest = ::std::fill_n(dest, static_cast<std::size_t>(head & ~seqmask) + 1, tail);
+				} else {
+					*dest++ = head;
+					*dest++ = tail;
+				}
+			}
+		} else if ((lead & seqmask) == seqmask) {
 			dest = ::std::fill_n(dest, static_cast<std::size_t>(lead & ~seqmask) + 1, *first++);
-		else
+		} else {
 			*dest++ = lead;
+		}
 	}
 }
 
