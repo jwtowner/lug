@@ -701,22 +701,38 @@ struct ucd_flyweight_compressed_records
 	std::vector<std::uint_least64_t> pflag_values;
 	std::vector<std::uint_least16_t> cflag_values;
 	std::vector<std::int_least32_t> cmapping_values;
+	std::vector<std::uint_least8_t> pflag_flyweights;
+	std::vector<std::uint_least8_t> cflag_flyweights;
+	std::vector<std::uint_least8_t> cfindices;
+	std::vector<std::uint_least8_t> clindices;
+	std::vector<std::uint_least8_t> cuindices;
+	std::vector<std::uint_least8_t> gcindices;
+	std::vector<std::uint_least8_t> scindices;
 	std::vector<std::uint_least16_t> abfields;
-	std::vector<std::uint_least8_t> flyweights;
+	std::vector<std::uint_least8_t> wfields;
 
 	ucd_flyweight_compressed_records() = default;
 
 	explicit ucd_flyweight_compressed_records(std::vector<ucd_record> const& records) {
+		pflag_flyweights.reserve(records.size());
+		cflag_flyweights.reserve(records.size());
+		cfindices.reserve(records.size());
+		clindices.reserve(records.size());
+		cuindices.reserve(records.size());
+		gcindices.reserve(records.size());
+		scindices.reserve(records.size());
+		abfields.reserve(records.size());
+		wfields.reserve(records.size());
 		for (auto const& record : records) {
+			pflag_flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
+			cflag_flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
+			cfindices.push_back(intern_value(cmapping_indices, cmapping_values, record.cfoffset)->second);
+			clindices.push_back(intern_value(cmapping_indices, cmapping_values, record.cloffset)->second);
+			cuindices.push_back(intern_value(cmapping_indices, cmapping_values, record.cuoffset)->second);
+			gcindices.push_back(record.gcindex);
+			scindices.push_back(record.scindex);
 			abfields.push_back(record.abfields);
-			flyweights.push_back(intern_value(pflag_indices, pflag_values, record.pflags)->second);
-			flyweights.push_back(intern_value(cflag_indices, cflag_values, record.cflags)->second);
-			flyweights.push_back(record.gcindex);
-			flyweights.push_back(record.scindex);
-			flyweights.push_back(record.wfields);
-			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cfoffset)->second);
-			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cloffset)->second);
-			flyweights.push_back(intern_value(cmapping_indices, cmapping_values, record.cuoffset)->second);
+			wfields.push_back(record.wfields);
 		}
 	}
 };
@@ -837,7 +853,7 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 
 	for (auto curr = std::begin(pass1), last = std::end(pass1); curr != last; ) {
 		std::size_t count = 0;
-		if (last - curr >= 4)
+		if (last - curr >= 4 && (curr[1] & seqmask) != seqmask)
 			for (auto tail = curr + 2; last - tail >= 2 && count < maxilseqlen && curr[0] == tail[0] && curr[1] == tail[1]; tail += 2)
 				++count;
 		if (count > 1) {
@@ -1033,8 +1049,15 @@ public:
 		: records_{records} {}
 
 	friend std::ostream& operator<<(std::ostream& out, record_flyweight_printer const& p) {
+		print_table(out, "rlepflagindices", "std::uint_least8_t", "", run_length_encode(p.records_.pflag_flyweights), 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlecflagindices", "std::uint_least8_t", "", run_length_encode(p.records_.cflag_flyweights), 120, "\t", "\n\t\t") << "\n";
 		print_table(out, "rleabfields", "std::uint_least16_t", "", run_length_encode(p.records_.abfields), 120, "\t", "\n\t\t") << "\n";
-		print_table(out, "flyweights", "std::uint_least8_t", "", p.records_.flyweights, 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlegcindices", "std::uint_least8_t", "", run_length_encode(p.records_.gcindices), 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlescindices", "std::uint_least8_t", "", run_length_encode(p.records_.scindices), 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlewfields", "std::uint_least8_t", "", run_length_encode(p.records_.wfields), 120, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlecfindices", "std::uint_least8_t", "", run_length_encode(p.records_.cfindices), 122, "\t", "\n\t\t") << "\n";
+		print_table(out, "rleclindices", "std::uint_least8_t", "", run_length_encode(p.records_.clindices), 122, "\t", "\n\t\t") << "\n";
+		print_table(out, "rlecuindices", "std::uint_least8_t", "", run_length_encode(p.records_.cuindices), 122, "\t", "\n\t\t") << "\n";
 		print_table(out, "pflags", "std::uint_least64_t", "UINT64_C", p.records_.pflag_values, 120, "\t", "\n\t\t") << "\n";
 		print_table(out, "cflags", "std::uint_least16_t", "", p.records_.cflag_values, 120, "\t", "\n\t\t");
 		return out;
@@ -1386,23 +1409,37 @@ inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 << rle_stage_table_printer("rlestage2", recordstagetable.stage2, recordstagetable.typeinfo2) << "\n"
 
 << record_flyweight_printer(compressedrecords)
+<< "\n\tstd::array<std::uint_least8_t, " << compressedrecords.pflag_flyweights.size() << "> flyweights;"
 << R"c++(
 	auto table = std::make_unique<raw_record_table>();
+	auto& records = table->records;
+
 	run_length_decode(std::cbegin(rlestage1), std::cend(rlestage1), std::begin(table->stage1));
 	run_length_decode(std::cbegin(rlestage2), std::cend(rlestage2), std::begin(table->stage2));
+
+	run_length_decode(std::cbegin(rlepflagindices), std::cend(rlepflagindices), std::begin(flyweights));
+	for (std::size_t r = 0, e = records.size(); r < e; ++r)
+		records[r].pflags = pflags[flyweights[r]];
+
+	run_length_decode(std::cbegin(rlecflagindices), std::cend(rlecflagindices), std::begin(flyweights));
+	for (std::size_t r = 0, e = records.size(); r < e; ++r)
+		records[r].cflags = cflags[flyweights[r]];
+
 	run_length_decode(std::cbegin(rleabfields), std::cend(rleabfields),
-		make_member_accessor<decltype(&raw_record::abfields), &raw_record::abfields>(std::begin(table->records)));
-	auto& records = table->records;
-	for (std::size_t r = 0, f = 0, e = flyweights.size(); f < e; ++r, f += 8) {
-		records[r].pflags = pflags[flyweights[f + 0]];
-		records[r].cflags = cflags[flyweights[f + 1]];
-		records[r].gcindex = flyweights[f + 2];
-		records[r].scindex = flyweights[f + 3];
-		records[r].wfields = flyweights[f + 4];
-		records[r].cfindex = flyweights[f + 5];
-		records[r].clindex = flyweights[f + 6];
-		records[r].cuindex = flyweights[f + 7];
-	}
+		make_member_accessor<decltype(&raw_record::abfields), &raw_record::abfields>(std::begin(records)));
+	run_length_decode(std::cbegin(rlegcindices), std::cend(rlegcindices),
+		make_member_accessor<decltype(&raw_record::gcindex), &raw_record::gcindex>(std::begin(records)));
+	run_length_decode(std::cbegin(rlescindices), std::cend(rlescindices),
+		make_member_accessor<decltype(&raw_record::scindex), &raw_record::scindex>(std::begin(records)));
+	run_length_decode(std::cbegin(rlewfields), std::cend(rlewfields),
+		make_member_accessor<decltype(&raw_record::wfields), &raw_record::wfields>(std::begin(records)));
+	run_length_decode(std::cbegin(rlecfindices), std::cend(rlecfindices),
+		make_member_accessor<decltype(&raw_record::cfindex), &raw_record::cfindex>(std::begin(records)));
+	run_length_decode(std::cbegin(rleclindices), std::cend(rleclindices),
+		make_member_accessor<decltype(&raw_record::clindex), &raw_record::clindex>(std::begin(records)));
+	run_length_decode(std::cbegin(rlecuindices), std::cend(rlecuindices),
+		make_member_accessor<decltype(&raw_record::cuindex), &raw_record::cuindex>(std::begin(records)));
+
 	return table;
 }
 
