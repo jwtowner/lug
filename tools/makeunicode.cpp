@@ -1186,7 +1186,7 @@ namespace lug::unicode
 		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
 })
 << R"c++(
-// Unicode Character Database (UCD) record
+// Unicode Character Database record
 class record
 {
 	struct raw_record {
@@ -1226,7 +1226,7 @@ public:
 	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
 };
 
-// Retrieves the UCD record for the given Unicode codepoint
+// Retrieves the UCD record for the given codepoint
 inline record query(char32_t r)
 {
 	static auto const table = record::decompress_table();
@@ -1236,6 +1236,19 @@ inline record query(char32_t r)
 		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
 	}
 	return record{table->records.data() + index};
+}
+
+// Column width (-1 = non-displayable, 0 = non-spacing, 1 = normal, 2 = wide)
+inline int cwidth(char32_t r)
+{
+	return query(r).cwidth();
+}
+
+// Absolute column width
+inline unsigned int ucwidth(char32_t r)
+{
+	auto const cw = query(r).cwidth();
+	return static_cast<unsigned int>(cw >= 0 ? cw : -cw);
 }
 
 // Simple casefold conversion

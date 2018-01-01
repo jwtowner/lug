@@ -196,6 +196,8 @@ class environment
 
 	lug::parser* parser_ = nullptr;
 	std::vector<std::any> attributes_;
+	unsigned int tab_width_ = 8;
+	unsigned int tab_alignment_ = 8;
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
@@ -219,9 +221,14 @@ public:
 	virtual ~environment() = default;
 	lug::parser& parser() { if (!parser_) throw accept_context_error{}; return *parser_; }
 	lug::parser const& parser() const { if (!parser_) throw accept_context_error{}; return *parser_; }
+	unsigned int tab_width() const { return tab_width_; }
+	void tab_width(unsigned int w) { tab_width_ = w; }
+	unsigned int tab_alignment() const { return tab_alignment_; }
+	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
 	std::string_view match() const;
 	syntax_position const& position_at(std::size_t index);
 	unsigned short call_depth() const;
+	unsigned short prune_depth() const;
 	void escape();
 
 	template <class T>
@@ -1043,7 +1050,17 @@ public:
 				first = next;
 			}
 		}
-		position.column += utf8::count_runes(first, last);
+		for (auto curr = first, next = curr; curr < last; curr = next) {
+			std::tie(next, rune) = utf8::decode_rune(curr, last);
+			if (rune != U'\t') {
+				position.column += unicode::ucwidth(rune);
+			} else {
+				auto oldcolumn = position.column;
+				auto newcolumn = oldcolumn + environment_.tab_width();
+				auto alignedcolumn = newcolumn - ((newcolumn - 1) % environment_.tab_alignment());
+				position.column = (std::max)((std::min)(newcolumn, alignedcolumn), oldcolumn);
+			}
+		}
 		return positions_.insert(pos, std::make_pair(index, position))->second;
 	}
 
@@ -1316,6 +1333,7 @@ inline syntax_position const& syntax::start() const { return parser_.position_at
 inline syntax_position const& syntax::end() const { return parser_.position_at(range_.index + range_.size); }
 
 inline unsigned short environment::call_depth() const { return parser().call_depth(); }
+inline unsigned short environment::prune_depth() const { return parser().prune_depth(); }
 inline void environment::escape() { parser().escape(); }
 inline std::string_view environment::match() const { return parser().match(); }
 inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
