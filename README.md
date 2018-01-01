@@ -16,10 +16,10 @@ Features
 - Cut operator to commit to currently matched parse prefix and prune all backtrack entries
 - Deferred evaluation of semantic actions, ensuring actions do not execute on failed branches or invalid input
 - Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine
-- UTF-8 text parsing with near-complete Level 1 support of the UTS #18 Unicode Regular Expressions technical standard
-- Case insensitive matching mode
-- Header only library using C++17 language and library features
+- UTF-8 text parsing with complete Level 1 and partial Level 2 support of the UTS #18 Unicode Regular Expressions technical standard
+- Automatic line and column tracking with customizable tab width and alignment
 - Uses expression template functors to implement the rules of the domain specific language
+- Header only library using C++17 language and library features
 - Relatively small with the intent of parser core to remain under 1500 lines of terse code
 
 It is based on research introduced in the following papers:
@@ -97,7 +97,6 @@ TODO
 - parser error recovery
 - add an interactive processing mode flag to input sources?
 - handle exceptions thrown from semantic actions in semantics::accept?
-- automatic line/column tracking during semantic action phase
 - feature: symbol tables and parsing conditions
 - feature: Adams-Nestra grammars and whitespace alignment
 - feature: syntax to specify number range of allowed iteration
