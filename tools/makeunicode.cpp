@@ -283,6 +283,8 @@ static ucd_array<std::int_least32_t> cfoldtable; // Simple case folding offset t
 static ucd_array<std::int_least32_t> clowertable; // Simple lowercase conversion offset table
 static ucd_array<std::int_least32_t> cuppertable; // Simple uppercase conversion offset table
 
+// Functions and data for loading in and parsing UCD files
+
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
 static std::regex const rx_ucd_version(R"(^#\s*\w+-(\d+(\.\d+)+).*)", default_rx_options);
 static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*([\w_.-]+)\s*.*)", default_rx_options);
@@ -433,15 +435,6 @@ void read_and_build_tables()
 			});
 		});
 
-		// read in East Asian width table
-		auto pending_eawidthversion = std::async(std::launch::async, [] {
-			std::fill(std::execution::par_unseq, widthtable.begin(), widthtable.end(), eawidths.find("N")->second);
-			return read_ucd_case_array("EastAsianWidth.txt", [](auto start, auto end, auto const& value) {
-				if (auto eawidth = eawidths.find(value); eawidth != eawidths.end())
-					std::fill(std::execution::par_unseq, widthtable.begin() + start, widthtable.begin() + end + 1, eawidth->second);
-			});
-		});
-
 		// setup compatibility filter maps while reading tables, see Unicode TR#18,
 		// Annex C: Compatibility Properties
 		using compat_filter_map = std::unordered_map<std::string, std::vector<compat_filter>>;
@@ -508,6 +501,36 @@ void read_and_build_tables()
 			}
 		});
 
+		// read in East Asian width and setup column width values in width table
+		auto pending_eawidthversion = std::async(std::launch::async, [] {
+			std::fill(std::execution::par_unseq, widthtable.begin(), widthtable.end(), eawidths.find("N")->second);
+			auto width = read_ucd_case_array("EastAsianWidth.txt", [](auto start, auto end, auto const& value) {
+				if (auto eawidth = eawidths.find(value); eawidth != eawidths.end())
+					std::fill(std::execution::par_unseq, widthtable.begin() + start, widthtable.begin() + end + 1, eawidth->second);
+			});
+			auto const Me = general_categories.find("Me")->second;
+			auto const Mn = general_categories.find("Mn")->second;
+			auto const W = eawidths.find("W")->second;
+			auto const F = eawidths.find("F")->second;
+			for (std::size_t r = 0; r < widthtable.size(); ++r) {
+				int colwidth = 1;
+				if ((0x01 <= r && r <= 0x1f) || (0x7f <= r && r <= 0xa0))   // C0/C1 control characters
+					colwidth = -1;
+				else if (r == 0x00 || r == 0x034f ||                        // NULL, COMBINING GRAPHEME JOINER
+							(0x1160 <= r && r <= 0x11ff) ||                 // Hangul Jamo medial vowels and final consonants
+							(0x200b <= r && r <= 0x200f) ||                 // ZERO-WIDTH SPACE through RIGHT-TO-LEFT MARK
+							(0x2028 <= r && r <= 0x202e) ||                 // LINE SEPARATOR through RIGHT-TO-LEFT OVERRIDE
+							(0x2060 <= r && r <= 0x2063) ||                 // WORD JOINER through INVISIBLE SEPARATOR
+							(r != 0x00ad && (                               // SOFT-HYPHEN
+								gctable[r] == Me || gctable[r] == Mn)))     // Non-spacing characters
+					colwidth = 0;
+				else if (widthtable[r] == W || widthtable[r] == F)
+					colwidth = 2;
+				widthtable[r] |= static_cast<std::uint_least8_t>(colwidth + 1) << 4;
+			}
+			return width;
+		});
+
 		// for all non-unassigned codepoints on gctable, set Assigned flag in ptable
 		auto const gcunassignedindex = general_categories.find("Cn")->second;
 		auto const passignedflag = binary_properties.find("Assigned")->second;
@@ -540,11 +563,9 @@ void read_and_build_tables()
 			}
 		);
 
-		prop_versions.push_back(pending_eawidthversion.get());
-
-
-
+		// wait for other tasks
 		pending_caseconversion_task.wait();
+		prop_versions.push_back(pending_eawidthversion.get());
 		return prop_versions;
 	});
 
@@ -557,15 +578,6 @@ void read_and_build_tables()
 		});
 	});
 
-	// load in the age table
-	auto pending_ageversion = std::async(std::launch::async, [] {
-		std::fill(std::execution::par_unseq, agetable.begin(), agetable.end(), ages.find("Unassigned")->second);
-		return read_ucd_prop_array("DerivedAge.txt", [](auto start, auto end, auto const& value) {
-			if (auto age = ages.find(value); age != ages.end())
-				std::fill(std::execution::par_unseq, agetable.begin() + start, agetable.begin() + end + 1, age->second);
-		});
-	});
-
 	// load in the blocks table
 	auto pending_blockversion = std::async(std::launch::async, [] {
 		std::fill(std::execution::par_unseq, blocktable.begin(), blocktable.end(), blocks.find("No_block")->second);
@@ -575,11 +587,20 @@ void read_and_build_tables()
 		});
 	});
 
+	// load in the age table
+	auto pending_ageversion = std::async(std::launch::async, [] {
+		std::fill(std::execution::par_unseq, agetable.begin(), agetable.end(), ages.find("Unassigned")->second);
+		return read_ucd_prop_array("DerivedAge.txt", [](auto start, auto end, auto const& value) {
+			if (auto age = ages.find(value); age != ages.end())
+				std::fill(std::execution::par_unseq, agetable.begin() + start, agetable.begin() + end + 1, age->second);
+		});
+	});
+
 	// make sure versions from all ucd files match one another
 	auto versions = pending_versions.get();
 	versions.push_back(pending_scversion.get());
-	versions.push_back(pending_ageversion.get());
 	versions.push_back(pending_blockversion.get());
+	versions.push_back(pending_ageversion.get());
 	if (std::any_of(versions.begin(), versions.end(), [&versions](auto const& v) { return v != versions.front(); }))
 		throw makeunicode_error("unicode version mismatch between input files");
 }
@@ -850,17 +871,20 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 	T const ilseqcode = (T{1} << (CHAR_BIT * info.szbytes)) - 1;
 	T const maxilseqlen = ilseqcode - 1;
 	std::vector<T> pass2;
+	T lastval = 0;
 
 	for (auto curr = std::begin(pass1), last = std::end(pass1); curr != last; ) {
 		std::size_t count = 0;
-		if (last - curr >= 4 && (curr[1] & seqmask) != seqmask)
+		if (last - curr >= 4 && (curr[1] & seqmask) != seqmask && (lastval & seqmask) != seqmask)
 			for (auto tail = curr + 2; last - tail >= 2 && count < maxilseqlen && curr[0] == tail[0] && curr[1] == tail[1]; tail += 2)
 				++count;
 		if (count > 1) {
 			pass2.insert(std::end(pass2), {ilseqcode, static_cast<T>(count + 1), curr[0], curr[1]});
 			curr += (count + 1) * 2;
+			lastval = 0;
 		} else {
 			pass2.push_back(*curr++);
+			lastval = pass2.back();
 		}
 	}
 
