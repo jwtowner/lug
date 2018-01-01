@@ -24,7 +24,7 @@ namespace lug::unicode
 // POSIX compatibility properties
 enum class ctype : std::uint_least16_t
 {
-	is_bitfield_enum,
+	none     = 0,
 	alpha    = UINT16_C(1) <<  0,
 	lower    = UINT16_C(1) <<  1,
 	upper    = UINT16_C(1) <<  2,
@@ -38,13 +38,13 @@ enum class ctype : std::uint_least16_t
 	graph    = UINT16_C(1) << 10,
 	print    = UINT16_C(1) << 11,
 	word     = UINT16_C(1) << 12,
-	none     = 0
+	is_bitfield_enum
 };
 
 // Binary properties
 enum class ptype : std::uint_least64_t
 {
-	is_bitfield_enum,
+	None                                 = 0,
 	Any                                  = UINT64_C(1) <<  0,
 	Ascii                                = UINT64_C(1) <<  1,
 	Assigned                             = UINT64_C(1) <<  2,
@@ -99,13 +99,13 @@ enum class ptype : std::uint_least64_t
 	ID_Continue                          = UINT64_C(1) << 51,
 	XID_Start                            = UINT64_C(1) << 52,
 	XID_Continue                         = UINT64_C(1) << 53,
-	None                                 = 0
+	is_bitfield_enum
 };
 
 // General categories
 enum class gctype : std::uint_least32_t
 {
-	is_bitfield_enum,
+	None = 0,
 	Ll = UINT32_C(1) <<  0,    Lowercase_Letter = Ll,
 	Lm = UINT32_C(1) <<  1,    Modifier_Letter = Lm,
 	Lo = UINT32_C(1) <<  2,    Other_Letter = Lo,
@@ -144,7 +144,7 @@ enum class gctype : std::uint_least32_t
 	P  = Pc|Pd|Pe|Pf|Pi|Po|Ps, Punctuation = P,
 	S  = Sc|Sm|Sk|So,          Symbol = S,
 	Z  = Zl|Zp|Zs,             Separator = Z,
-	None = 0
+	is_bitfield_enum
 };
 
 // Scripts

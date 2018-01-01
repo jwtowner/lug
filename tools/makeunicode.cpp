@@ -985,9 +985,9 @@ public:
 	friend std::ostream& operator<<(std::ostream& out, enum_printer const& p) {
 		out << "// " << p.comment_ << "\n";
 		out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
-		if (p.enum_type_ == enum_type::bitfield)
-			out << "\tis_bitfield_enum,\n";
 		p.body_(out);
+		if (p.enum_type_ == enum_type::bitfield)
+			out << "\tis_bitfield_enum\n";
 		return out << "};\n";
 	}
 };
@@ -1122,22 +1122,23 @@ namespace lug::unicode
 << enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatibility properties", [](std::ostream& out) {
 	auto const& cnames = compatibility_property_names;
 	auto const pad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
+	out << "\t" << std::left << std::setw(pad) << "none" << " = 0,\n";
 	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
 		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
-	out << "\t" << std::left << std::setw(pad) << "none" << " = 0\n";
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Binary properties", [](std::ostream& out) {
 	auto const& pnames = binary_property_names;
 	auto const pad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
+	out << "\t" << std::left << std::setw(pad) << "None" << " = 0,\n";
 	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
 		out << "\t" << std::left << std::setw(pad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
-	out << "\t" << std::left << std::setw(pad) << "None" << " = 0\n";
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "General categories", [](std::ostream& out) {
 	auto const& gcnames = general_category_names;
 	auto const& gclnames = general_category_long_names;
+	out << "\t" << "None = 0,\n";
 	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
 		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    " << gclnames[i] << " = " << gcnames[i] << ",\n";
 	for (auto const& compound : compound_general_categories) {
@@ -1154,7 +1155,6 @@ namespace lug::unicode
 		}
 		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << ",\n";
 	}
-	out << "\t" << "None = 0\n";
 })
 << "\n"
 << enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Scripts", [](std::ostream& out) {
