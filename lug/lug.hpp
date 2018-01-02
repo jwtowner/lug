@@ -911,14 +911,16 @@ class parser
 		auto const curr = input_.cbegin() + sr, last = input_.cend();
 		auto [next, rune] = utf8::decode_rune(curr, last);
 		bool matched;
-		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>)
+		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
 			matched = match(curr, last, next, rune);
-		else if constexpr(std::is_invocable_v<Match, unicode::record const&>)
+		} else if constexpr(std::is_invocable_v<Match, unicode::record const&>) {
 			matched = match(unicode::query(rune));
-		else if constexpr(std::is_invocable_v<Match, char32_t>)
+		} else if constexpr(std::is_invocable_v<Match, char32_t>) {
 			matched = match(rune);
-		else
-			matched = ((void)rune, match());
+		} else {
+			matched = match();
+			detail::ignore(rune);
+		}
 		if (matched)
 			sr += std::distance(curr, next);
 		return matched;
@@ -927,12 +929,12 @@ class parser
 	template <opcode Opcode>
 	bool commit(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc, int off)
 	{
-		(void)(sr, rc);
 		if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 			return false;
 		if constexpr (Opcode == opcode::commit_partial) {
 			detail::make_tuple_view<0, 1>(backtrack_stack_.back()) = {sr, rc};
 		} else {
+			detail::ignore(sr, rc);
 			if constexpr (Opcode == opcode::commit_back)
 				sr = std::get<0>(backtrack_stack_.back());
 			pop_stack_frame(backtrack_stack_);
