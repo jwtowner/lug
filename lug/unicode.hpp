@@ -616,6 +616,20 @@ enum class eawtype : std::uint_least8_t
 	W    =   5
 };
 
+// Property traits
+namespace detail
+{
+
+template <class T>
+struct is_property_enum_impl : std::disjunction<
+		std::is_same<T, ctype>, std::is_same<T, ptype>, std::is_same<T, gctype>, std::is_same<T, sctype>,
+		std::is_same<T, blktype>, std::is_same<T, agetype>, std::is_same<T, eawtype>> {};
+
+} // namespace detail
+
+template <class T> struct is_property_enum : std::bool_constant<detail::is_property_enum_impl<std::decay_t<T>>::value> {};
+template <class T> constexpr bool is_property_enum_v = is_property_enum<T>::value;
+
 // Unicode Character Database record
 class record
 {

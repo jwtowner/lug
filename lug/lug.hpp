@@ -49,7 +49,8 @@ enum class opcode : unsigned char
 {
 	match,          match_casefold, match_any,      match_eol,
 	match_set,      match_ctype,    match_ptype,    match_gctype,
-	match_sctype,   match_scxtype,  choice,         commit,
+	match_sctype,   match_scxtype,  match_blktype,  match_agetype,
+	match_eawtype,                  choice,         commit,
 	commit_back,    commit_partial, jump,           call,
 	ret,            fail,           accept,         accept_final,
 	predicate,      action,         begin,          end
@@ -324,10 +325,6 @@ public:
 	directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	directives mode() const noexcept { return mode_.back(); }
 	encoder& match(unicode::rune_set runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
-	encoder& match(unicode::ctype flags) { return skip().encode(opcode::match_ctype, immediate{ static_cast<unsigned short>(flags) }); }
-	encoder& match(unicode::ptype flags) { return skip().encode(opcode::match_ptype, 1, detail::string_pack(flags)); }
-	encoder& match(unicode::gctype flags) { return skip().encode(opcode::match_gctype, 1, detail::string_pack(flags)); }
-	encoder& match(unicode::sctype type) { return skip().encode(opcode::match_sctype, immediate{ static_cast<unsigned short>(type) }); }
 	encoder& match_any() { return skip().encode(opcode::match_any); }
 	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 
@@ -380,6 +377,15 @@ public:
 			return do_match(opcode::match_casefold, utf8::tocasefold(subject));
 		else
 			return do_match(opcode::match, subject);
+	}
+
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	encoder& match_any(T flags)
+	{
+		if constexpr (sizeof(std::decay_t<T>) <= sizeof(unsigned short))
+			return skip().encode(opcode::match_ctype, immediate{static_cast<unsigned short>(flags)});
+		else
+			return skip().encode(opcode::match_ptype, 1, detail::string_pack(flags));
 	}
 };
 
@@ -486,7 +492,7 @@ class basic_regular_expression
 			if (!runes.empty())
 				encoder.match(unicode::sort_and_optimize(std::move(runes)));
 			if (classes != unicode::ctype::none)
-				encoder.match(classes);
+				encoder.match_any(classes);
 			if (circumflex)
 				encoder.encode(opcode::commit, 0).encode(opcode::fail).match_any();
 			runes.clear(), classes = unicode::ctype::none, circumflex = false;
@@ -517,11 +523,11 @@ constexpr auto make_expression(T&& t)
 {
 	static_assert(is_expression_v<E>, "T must be an expression type");
 	if constexpr (is_callable_v<E>)
-		return [&target = t](encoder& d){ d.call(target, 0); };
+		return [&target = t](encoder& d) { d.call(target, 0); };
 	else if constexpr (std::is_invocable_r_v<bool, E, parser&>)
 		return [p = semantic_predicate{t}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (std::is_invocable_r_v<bool, E>)
-		return [p = semantic_predicate{[a = E{t}](parser&){ return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
+		return [p = semantic_predicate{[a = E{t}](parser&) { return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<E>)
 		return string_expression{t};
 }
@@ -569,13 +575,14 @@ constexpr auto matches_eps = directive_modifier<directives::none, directives::no
 constexpr auto relays_eps = directive_modifier<directives::none, directives::none, directives::eps>{};
 constexpr auto skip_after = directive_modifier<directives::postskip, directives::none, directives::eps>{};
 constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
-template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match(Property); } };
+template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
 
 namespace language
 {
 
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
+using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 using parser = lug::parser; using syntax = lug::syntax; using csyntax = lug::syntax const;
 using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
 using environment = lug::environment; template <class T> using variable = lug::variable<T>;
@@ -597,10 +604,7 @@ constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<
 constexpr struct
 {
 	void operator()(encoder& d) const { d.match_any(); }
-	auto operator()(ctype c) const { return [c](encoder& d) { d.match(c); }; }
-	auto operator()(ptype p) const { return [p](encoder& d) { d.match(p); }; }
-	auto operator()(gctype gc) const { return [gc](encoder& d) { d.match(gc); }; }
-	auto operator()(sctype sc) const { return [sc](encoder& d) { d.match(sc); }; }
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>> auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
 }
 any = {};
 
@@ -889,7 +893,7 @@ class parser
 	{
 		auto& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
-			subject = utf8::tocasefold(std::string_view{ input_.data() + sr, sn });
+			subject = utf8::tocasefold(std::string_view{input_.data() + sr, sn});
 		return subject.compare(0, sn, str);
 	}
 
@@ -1135,19 +1139,31 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_ctype: {
-					if (!match_single(sr, [imm](unicode::record const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
+					if (!match_single(sr, [imm](auto const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
 						goto failure;
 				} break;
 				case opcode::match_ptype: {
-					if (!match_single(sr, [str](unicode::record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](auto const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_gctype: {
-					if (!match_single(sr, [str](unicode::record const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
+					if (!match_single(sr, [str](auto const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
 						goto failure;
 				} break;
 				case opcode::match_sctype: {
-					if (!match_single(sr, [imm](unicode::record const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
+					if (!match_single(sr, [imm](auto const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
+						goto failure;
+				} break;
+				case opcode::match_blktype: {
+					if (!match_single(sr, [imm](auto const& r) { return r.block() == static_cast<unicode::blktype>(imm); }))
+						goto failure;
+				} break;
+				case opcode::match_agetype: {
+					if (!match_single(sr, [imm](auto const& r) { return r.age() == static_cast<unicode::agetype>(imm); }))
+						goto failure;
+				} break;
+				case opcode::match_eawtype: {
+					if (!match_single(sr, [imm](auto const& r) { return r.eawidth() == static_cast<unicode::eawtype>(imm); }))
 						goto failure;
 				} break;
 				case opcode::choice: {
@@ -1172,7 +1188,7 @@ public:
 				case opcode::call: {
 					if (imm != 0) {
 						auto memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
-								[sr = sr, pca = pc + off](auto const& m) { return m.srr == sr && m.pca == pca ? 1 : (m.srr < sr ? 0 : -1); });
+								[sr = sr, pca = pc + off](auto const& m){ return m.srr == sr && m.pca == pca ? 1 : (m.srr < sr ? 0 : -1); });
 						if (memo != lrmemo_stack_.crend()) {
 							if (memo->sra == lrfailcode || imm < memo->prec)
 								goto failure;

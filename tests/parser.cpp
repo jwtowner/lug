@@ -27,7 +27,7 @@ How was the math test?
 The mysterious diary records the voice.
 She works two jobs to make ends meet; at least, that was her reason for not having time to join us.
 I want more detailed information.
-He told us a very exciting adventure story.)"sv;
+	He told us a very exciting adventure story.)"sv;
 
 constexpr auto sentences2 =
 u8R"(
@@ -69,15 +69,15 @@ void test_line_column_tracking()
 	assert(startpos[0].line == 1 && startpos[0].column == 14);
 	assert(startpos[1].line == 10 && startpos[1].column == 1);
 	assert(startpos[2].line == 15 && startpos[2].column == 36);
-	assert(startpos[3].line == 20 && startpos[3].column == 38);
+	assert(startpos[3].line == 20 && startpos[3].column == 46);
 
 	assert(endpos[0].line == 1 && endpos[0].column == 24);
 	assert(endpos[1].line == 10 && endpos[1].column == 9);
 	assert(endpos[2].line == 15 && endpos[2].column == 42);
-	assert(endpos[3].line == 20 && endpos[3].column == 43);
+	assert(endpos[3].line == 20 && endpos[3].column == 51);
 
 	assert(p.max_subject_index() == sentences1.size());
-	assert(p.max_subject_position().line == 20 && p.max_subject_position().column == 44);
+	assert(p.max_subject_position().line == 20 && p.max_subject_position().column == 52);
 
 	success = p.parse(std::begin(sentences2), std::end(sentences2));
 	assert(success);

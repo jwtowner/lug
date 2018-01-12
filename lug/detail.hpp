@@ -84,7 +84,8 @@ constexpr T& operator^=(T& x, T y) noexcept
 namespace detail
 {
 
-template <class... Args> constexpr void ignore(Args&&...) noexcept {}
+template <class... Args>
+constexpr void ignore(Args&&...) noexcept {}
 
 template <class T> struct member_pointer_object {};
 template <class T, class U> struct member_pointer_object<T U::*> { typedef U type; };
