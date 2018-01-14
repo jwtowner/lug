@@ -216,13 +216,13 @@ inline auto pop_back(Sequence& s)
 }
 
 template <class Integral>
-inline std::string string_pack(Integral n) noexcept
+inline std::string string_pack(Integral n)
 {
 	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)};
 }
 
 template <class Integral>
-inline Integral string_unpack(std::string_view s) noexcept
+inline Integral string_unpack(std::string_view s)
 {
 	return *reinterpret_cast<Integral const*>(s.data());
 }

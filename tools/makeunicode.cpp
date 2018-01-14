@@ -1186,19 +1186,29 @@ namespace lug::unicode
 		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
 })
 << R"c++(
-// Property traits
-namespace detail
+// Property Traits
+enum class property_enum
 {
+	invalid,
+	ctype,
+	ptype,
+	gctype,
+	sctype,
+	blktype,
+	agetype,
+	eawtype
+};
 
-template <class T>
-struct is_property_enum_impl : std::disjunction<
-		std::is_same<T, ctype>, std::is_same<T, ptype>, std::is_same<T, gctype>, std::is_same<T, sctype>,
-		std::is_same<T, blktype>, std::is_same<T, agetype>, std::is_same<T, eawtype>> {};
+template <class T> constexpr property_enum to_property_enum_v = property_enum::invalid;
+template <> constexpr property_enum to_property_enum_v<ctype> = property_enum::ctype;
+template <> constexpr property_enum to_property_enum_v<ptype> = property_enum::ptype;
+template <> constexpr property_enum to_property_enum_v<gctype> = property_enum::gctype;
+template <> constexpr property_enum to_property_enum_v<sctype> = property_enum::sctype;
+template <> constexpr property_enum to_property_enum_v<blktype> = property_enum::blktype;
+template <> constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
+template <> constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
-} // namespace detail
-
-template <class T> struct is_property_enum : std::bool_constant<detail::is_property_enum_impl<std::decay_t<T>>::value> {};
-template <class T> constexpr bool is_property_enum_v = is_property_enum<T>::value;
+template <class T> constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
 
 // Unicode Character Database record
 class record
@@ -1232,12 +1242,18 @@ public:
 	agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10); }
 	eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0f); }
 	int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4) - 1; }
-	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
-	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
-	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
 	std::int_least32_t casefold_mapping() const noexcept { return case_mapping(raw_->cfindex); }
 	std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(raw_->clindex); }
 	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
+	bool all_of(ctype c) const noexcept { return (compatibility() & c) == c; }
+	bool all_of(ptype p) const noexcept { return (properties() & p) == p; }
+	bool all_of(gctype gc) const noexcept { return (general_category() & gc) == gc; }
+	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
+	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
+	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
+	bool none_of(ctype c) const noexcept { return (compatibility() & c) == ctype::none; }
+	bool none_of(ptype p) const noexcept { return (properties() & p) == ptype::None; }
+	bool none_of(gctype gc) const noexcept { return (general_category() & gc) == gctype::None; }
 };
 
 // Retrieves the UCD record for the given codepoint
@@ -1250,6 +1266,57 @@ inline record query(char32_t r)
 		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
 	}
 	return record{table->records.data() + index};
+}
+
+// Checks if the rune matches all of the string-packed property classes
+inline bool all_of(record const& r, property_enum penum, std::string_view str)
+{
+	bool result;
+	switch (penum) {
+		case property_enum::ctype: result = r.all_of(lug::detail::string_unpack<ctype>(str)); break;
+		case property_enum::ptype: result = r.all_of(lug::detail::string_unpack<ptype>(str)); break;
+		case property_enum::gctype: result = r.all_of(lug::detail::string_unpack<gctype>(str)); break;
+		case property_enum::sctype: result = r.script() == lug::detail::string_unpack<sctype>(str); break;
+		case property_enum::blktype: result = r.block() == lug::detail::string_unpack<blktype>(str); break;
+		case property_enum::agetype: result = r.age() == lug::detail::string_unpack<agetype>(str); break;
+		case property_enum::eawtype: result = r.eawidth() == lug::detail::string_unpack<eawtype>(str); break;
+		default: result = false; break;
+	}
+	return result;
+}
+
+// Checks if the rune matches any of the string-packed property classes
+inline bool any_of(record const& r, property_enum penum, std::string_view str)
+{
+	bool result;
+	switch (penum) {
+		case property_enum::ctype: result = r.any_of(lug::detail::string_unpack<ctype>(str)); break;
+		case property_enum::ptype: result = r.any_of(lug::detail::string_unpack<ptype>(str)); break;
+		case property_enum::gctype: result = r.any_of(lug::detail::string_unpack<gctype>(str)); break;
+		case property_enum::sctype: result = r.script() == lug::detail::string_unpack<sctype>(str); break;
+		case property_enum::blktype: result = r.block() == lug::detail::string_unpack<blktype>(str); break;
+		case property_enum::agetype: result = r.age() == lug::detail::string_unpack<agetype>(str); break;
+		case property_enum::eawtype: result = r.eawidth() == lug::detail::string_unpack<eawtype>(str); break;
+		default: result = false; break;
+	}
+	return result;
+}
+
+// Checks if the rune matches none of the string-packed property classes
+inline bool none_of(record const& r, property_enum penum, std::string_view str)
+{
+	bool result;
+	switch (penum) {
+		case property_enum::ctype: result = r.none_of(lug::detail::string_unpack<ctype>(str)); break;
+		case property_enum::ptype: result = r.none_of(lug::detail::string_unpack<ptype>(str)); break;
+		case property_enum::gctype: result = r.none_of(lug::detail::string_unpack<gctype>(str)); break;
+		case property_enum::sctype: result = r.script() != lug::detail::string_unpack<sctype>(str); break;
+		case property_enum::blktype: result = r.block() != lug::detail::string_unpack<blktype>(str); break;
+		case property_enum::agetype: result = r.age() != lug::detail::string_unpack<agetype>(str); break;
+		case property_enum::eawtype: result = r.eawidth() != lug::detail::string_unpack<eawtype>(str); break;
+		default: result = false; break;
+	}
+	return result;
 }
 
 // Column width (-1 = non-displayable, 0 = non-spacing, 1 = normal, 2 = wide)

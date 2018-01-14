@@ -47,13 +47,12 @@ grammar start(rule const& start_rule);
 
 enum class opcode : unsigned char
 {
-	match,          match_casefold, match_any,      match_eol,
-	match_set,      match_ctype,    match_ptype,    match_gctype,
-	match_sctype,   match_scxtype,  match_blktype,  match_agetype,
-	match_eawtype,                  choice,         commit,
-	commit_back,    commit_partial, jump,           call,
-	ret,            fail,           accept,         accept_final,
-	predicate,      action,         begin,          end
+	match,          match_casefold, match_any,      match_any_of,
+	match_all_of,   match_none_of,  match_eol,      match_set,
+	choice,         commit,         commit_back,    commit_partial,
+	jump,           call,           ret,            fail,
+	accept,         accept_final,   predicate,      action,
+	begin,          end
 };
 
 enum class immediate : unsigned short {};
@@ -79,7 +78,7 @@ union instruction
 		if ((pf.aux & operands::str) != operands::none) {
 			str = std::string_view{code[pc].str.data(), static_cast<unsigned int>((imm & 0xff) + 1)};
 			pc += ((imm & 0xff) + 4) >> 2;
-			imm = (imm >> 8) + 1;
+			imm >>= 8;
 		}
 		return std::make_tuple(pf.op, imm, off, str);
 	}
@@ -294,10 +293,17 @@ protected:
 			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
 				subsequence.remove_suffix(1);
 			subsequence.remove_suffix(!subsequence.empty());
-			encode(op, utf8::count_runes(subsequence.cbegin(), subsequence.cend()), subsequence);
+			encode(op, subsequence);
 			sequence.remove_prefix(subsequence.size());
 		}
-		return encode(op, utf8::count_runes(sequence.cbegin(), sequence.cend()), sequence);
+		return encode(op, sequence);
+	}
+
+	template <class T>
+	encoder& do_match_class(opcode op, T value)
+	{
+		constexpr auto penum = immediate{static_cast<unsigned short>(unicode::to_property_enum_v<std::decay_t<T>>)};
+		return encode(op, detail::string_pack(value), penum);
 	}
 
 	void do_skip()
@@ -309,6 +315,8 @@ protected:
 public:
 	explicit encoder(directives initial) : mandate_{directives::none}, mode_{initial} {}
 	virtual ~encoder() = default;
+	template <class E> auto evaluate(E const& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
+	template <class E> auto evaluate_length(E const& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t>;
 	encoder& dpsh(directives enable, directives disable) { directives prev = mode_.back(); mode_.push_back((prev & ~disable) | enable); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(program const& p) { do_append(p); return *this; }
@@ -319,14 +327,18 @@ public:
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, syntactic_capture c) { return append(instruction{op, operands::none, do_add_syntactic_capture(std::move(c))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
-	template <class E> auto evaluate(E const& e) -> std::enable_if_t<is_expression_v<E>, encoder&>;
-	template <class E> auto evaluate_length(E const& e) -> std::enable_if_t<is_expression_v<E>, std::ptrdiff_t>;
 	std::ptrdiff_t length() const noexcept { return do_length(); }
 	directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	directives mode() const noexcept { return mode_.back(); }
 	encoder& match(unicode::rune_set runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
-	encoder& match_any() { return skip().encode(opcode::match_any); }
 	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
+	encoder& match_any() { return skip().encode(opcode::match_any); }
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	encoder& match_any(T properties) { return skip().do_match_class(opcode::match_any_of, properties); }
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	encoder& match_all(T properties) { return skip().do_match_class(opcode::match_all_of, properties); }
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	encoder& match_none(T properties) { return skip().do_match_class(opcode::match_none_of, properties); }
 
 	encoder& dpop(directives relay)
 	{
@@ -356,12 +368,12 @@ public:
 		return do_call(&r, &r.program_, 0, prec);
 	}
 
-	encoder& encode(opcode op, std::size_t val, std::string_view subsequence)
+	encoder& encode(opcode op, std::string_view subsequence, immediate imm = immediate{0})
 	{
 		if (!subsequence.empty()) {
-			detail::assure_in_range<resource_limit_error>(val, 1u, instruction::maxstrlen);
+			detail::assure_in_range<resource_limit_error>(static_cast<unsigned short>(imm), 0u, instruction::maxstrlen - 1);
 			detail::assure_in_range<resource_limit_error>(subsequence.size(), 1u, instruction::maxstrlen);
-			do_append(instruction{op, operands::str, static_cast<immediate>(((val - 1) << 8) | (subsequence.size() - 1))});
+			do_append(instruction{op, operands::str, static_cast<immediate>((static_cast<unsigned short>(imm) << 8) | (subsequence.size() - 1))});
 			do {
 				do_append(instruction{subsequence});
 				subsequence.remove_prefix((std::min)(std::size_t{4}, subsequence.size()));
@@ -377,15 +389,6 @@ public:
 			return do_match(opcode::match_casefold, utf8::tocasefold(subject));
 		else
 			return do_match(opcode::match, subject);
-	}
-
-	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	encoder& match_any(T flags)
-	{
-		if constexpr (sizeof(std::decay_t<T>) <= sizeof(unsigned short))
-			return skip().encode(opcode::match_ctype, immediate{static_cast<unsigned short>(flags)});
-		else
-			return skip().encode(opcode::match_ptype, 1, detail::string_pack(flags));
 	}
 };
 
@@ -611,9 +614,24 @@ constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<
 constexpr struct
 {
 	void operator()(encoder& d) const { d.match_any(); }
-	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>> auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
 }
 any = {};
+
+constexpr struct
+{
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	auto operator()(T p) const { return [p](encoder& d) { d.match_all(p); }; }
+}
+all = {};
+
+constexpr struct
+{
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	auto operator()(T p) const { return [p](encoder& d) { d.match_none(p); }; }
+}
+none = {};
 
 constexpr struct
 {
@@ -1129,6 +1147,18 @@ public:
 					if (!match_single(sr, []{ return true; }))
 						goto failure;
 				} break;
+				case opcode::match_any_of: {
+					if (!match_single(sr, [imm, str](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(imm), str); }))
+						goto failure;
+				} break;
+				case opcode::match_all_of: {
+					if (!match_single(sr, [imm, str](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(imm), str); }))
+						goto failure;
+				} break;
+				case opcode::match_none_of: {
+					if (!match_single(sr, [imm, str](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(imm), str); }))
+						goto failure;
+				} break;
 				case opcode::match_eol: {
 					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
@@ -1143,34 +1173,6 @@ public:
 					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
 							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
-						goto failure;
-				} break;
-				case opcode::match_ctype: {
-					if (!match_single(sr, [imm](auto const& r) { return r.any_of(static_cast<unicode::ctype>(imm)); }))
-						goto failure;
-				} break;
-				case opcode::match_ptype: {
-					if (!match_single(sr, [str](auto const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
-						goto failure;
-				} break;
-				case opcode::match_gctype: {
-					if (!match_single(sr, [str](auto const& r) { return r.any_of(detail::string_unpack<unicode::ptype>(str)); }))
-						goto failure;
-				} break;
-				case opcode::match_sctype: {
-					if (!match_single(sr, [imm](auto const& r) { return r.script() == static_cast<unicode::sctype>(imm); }))
-						goto failure;
-				} break;
-				case opcode::match_blktype: {
-					if (!match_single(sr, [imm](auto const& r) { return r.block() == static_cast<unicode::blktype>(imm); }))
-						goto failure;
-				} break;
-				case opcode::match_agetype: {
-					if (!match_single(sr, [imm](auto const& r) { return r.age() == static_cast<unicode::agetype>(imm); }))
-						goto failure;
-				} break;
-				case opcode::match_eawtype: {
-					if (!match_single(sr, [imm](auto const& r) { return r.eawidth() == static_cast<unicode::eawtype>(imm); }))
 						goto failure;
 				} break;
 				case opcode::choice: {
