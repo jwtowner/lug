@@ -151,13 +151,16 @@ struct reentrancy_sentinel
 {
 	bool& value;
 
-	reentrancy_sentinel(bool& x) : value{x} {
+	reentrancy_sentinel(bool& x)
+		: value{x}
+	{
 		if (value)
 			throw Error{};
 		value = true;
 	}
 
-	~reentrancy_sentinel() {
+	~reentrancy_sentinel()
+	{
 		value = false;
 	}
 };
