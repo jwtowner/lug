@@ -757,14 +757,38 @@ inline rune_set sort_and_optimize(rune_set runes)
 	rune_set optimized_runes;
 	auto out = optimized_runes.end();
 	std::sort_heap(std::begin(runes), std::end(runes));
-	for (auto next = std::cbegin(runes), last = std::cend(runes); next != last; ++next) {
-		if (out == optimized_runes.end() || next->first < out->first || out->second < next->first)
-			out = optimized_runes.insert(optimized_runes.end(), *next);
+	for (auto curr = std::cbegin(runes), last = std::cend(runes); curr != last; ++curr) {
+		if (out == optimized_runes.end() || curr->first < out->first || out->second < curr->first)
+			out = optimized_runes.insert(optimized_runes.end(), *curr);
 		else
-			out->second = out->second < next->second ? next->second : out->second;
+			out->second = out->second < curr->second ? curr->second : out->second;
 	}
 	optimized_runes.shrink_to_fit();
 	return optimized_runes;
+}
+
+inline rune_set negate(rune_set const& runes)
+{
+	rune_set negated_runes;
+	if (!runes.empty()) {
+		if (char32_t front = runes.front().first; U'\0' < front)
+			negated_runes.push_back({U'\0', front - 1});
+		if (runes.size() > 1) {
+			auto const last = std::cend(runes);
+			auto left = std::cbegin(runes);
+			for (;;) {
+				auto right = std::next(left);
+				if (right == last)
+					break;
+				negated_runes.push_back({left->second + 1, right->first - 1});
+				left = right;
+			}
+		}
+		if (char32_t back = runes.back().second; back < U'\xFFFFFFFF')
+			negated_runes.push_back({back + 1, U'\xFFFFFFFF'});
+		negated_runes.shrink_to_fit();
+	}
+	return negated_runes;
 }
 
 namespace detail

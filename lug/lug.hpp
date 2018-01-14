@@ -487,14 +487,21 @@ class basic_regular_expression
 
 		void bracket_commit()
 		{
-			if (circumflex)
-				encoder.encode(opcode::choice, 3 + (!runes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0));
-			if (!runes.empty())
-				encoder.match(unicode::sort_and_optimize(std::move(runes)));
-			if (classes != unicode::ctype::none)
-				encoder.match_any(classes);
-			if (circumflex)
-				encoder.encode(opcode::commit, 0).encode(opcode::fail).match_any();
+			runes = unicode::sort_and_optimize(std::move(runes));
+			if (!runes.empty() && classes == unicode::ctype::none) {
+				if (circumflex)
+					runes = unicode::negate(runes);
+				encoder.match(std::move(runes));
+			} else {
+				if (circumflex)
+					encoder.encode(opcode::choice, 3 + (!runes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0));
+				if (!runes.empty())
+					encoder.match(std::move(runes));
+				if (classes != unicode::ctype::none)
+					encoder.match_any(classes);
+				if (circumflex)
+					encoder.encode(opcode::commit, 0).encode(opcode::fail).match_any();
+			}
 			runes.clear(), classes = unicode::ctype::none, circumflex = false;
 		}
 	};
