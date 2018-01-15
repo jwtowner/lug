@@ -48,7 +48,7 @@ grammar start(rule const& start_rule);
 enum class opcode : unsigned char
 {
 	match,          match_casefold, match_any,      match_any_of,
-	match_all_of,   match_none_of,  match_eol,      match_set,
+	match_all_of,   match_none_of,  match_set,      match_eol,
 	choice,         commit,         commit_back,    commit_partial,
 	jump,           call,           ret,            fail,
 	accept,         accept_final,   predicate,      action,
@@ -1159,6 +1159,12 @@ public:
 					if (!match_single(sr, [imm, str](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(imm), str); }))
 						goto failure;
 				} break;
+				case opcode::match_set: {
+					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
+							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
+							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
+						goto failure;
+				} break;
 				case opcode::match_eol: {
 					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
@@ -1167,12 +1173,6 @@ public:
 								if (auto [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
 									next = next2;
 							return true; }))
-						goto failure;
-				} break;
-				case opcode::match_set: {
-					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
-							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
-							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
 						goto failure;
 				} break;
 				case opcode::choice: {
