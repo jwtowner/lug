@@ -168,7 +168,7 @@ inline std::string toupper(std::string_view src)
 {
 	std::string result;
 	result.reserve(src.size());
-	tolower(std::begin(src), std::end(src), std::back_inserter(result));
+	toupper(std::begin(src), std::end(src), std::back_inserter(result));
 	return result;
 }
 
