@@ -49,11 +49,14 @@ public:
 					| "<>"                            <[]() -> RelOpFn { return [](double x, double y) { return x != y; }; }
 					| "<"                             <[]() -> RelOpFn { return std::isless; };
 
-		rule Factor	= !("[A-Z][A-Z][A-Z]"_irx > "(")
-					> (   id_%Var                               <[this]{ return vars_[*id_]; }
-					    | r1_%Real > ~(u8"[↑^]"_rx > r2_%Real   <[this]{ *r1_ = std::pow(*r1_, *r2_); }
-					    )                                       <[this]{ return *r1_; }
-					    | "(" > Expr > ")" )
+		rule Ref	= id_%Var > "(" > r1_%Expr > ","
+					                > r2_%Expr > ")"            <[this]{ return &at(tables_[*id_], *r1_, *r2_); }
+					| id_%Var > "(" > r1_%Expr > ")"            <[this]{ return &at(lists_[*id_], *r1_); }
+					| id_%Var                                   <[this]{ return &vars_[*id_]; };
+
+		rule Value	= !("[A-Z][A-Z][A-Z]"_irx > "(")
+					> ( ref_%Ref                                <[this]{ return **ref_; }
+						| Real | "(" > Expr > ")" )
 					| "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(*r1_); }
 					| "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(*r1_); }
 					| "TAN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::tan(*r1_); }
@@ -64,6 +67,9 @@ public:
 					| "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(*r1_); }
 					| "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
 					| "RND"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::rand() / static_cast<double>(RAND_MAX); };
+
+		rule Factor	= r1_%Value > ~(u8"[↑^]"_rx > r2_%Value     <[this]{ *r1_ = std::pow(*r1_, *r2_); }
+					)                                           <[this]{ return *r1_; };
 
 		rule Term	= r1_%Factor > *(
 					      "*"_sx > r2_%Factor                   <[this]{ *r1_ *= *r2_; }
@@ -76,14 +82,16 @@ public:
 					     | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
 					)                                           <[this]{ return *r1_; };
 
-		rule ReadEl = id_%Var                                   <[this]{ read(*id_); };
-		rule DataEl = r1_%Real                                  <[this]{ data_.push_back(*r1_); };
-		rule InptEl	= id_%Var                                   <[this]{ std::cin >> vars_[*id_]; };
+		rule DimEl	= id_%Var > "(" > r1_%Expr > ","
+					                > r2_%Expr > ")"            <[this]{ dimension(tables_[*id_], *r1_, *r2_); }
+					| id_%Var > "(" > r1_%Expr > ")"            <[this]{ dimension(lists_[*id_], *r1_); };
+		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
+		rule DataEl	= r1_%Real                                  <[this]{ data_.push_back(*r1_); };
+		rule InptEl	= ref_%Ref                                  <[this]{ std::cin >> **ref_; };
 		rule PrntEl	= sv_%String                                <[this]{ std::cout << *sv_; }
 					| r1_%Expr                                  <[this]{ std::cout << *r1_; };
 
-		rule Stmnt	= "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[this]{ std::cout << std::endl; }
-					| "IF"_isx > r1_%Expr
+		rule Stmnt	= "IF"_isx > r1_%Expr
 					    > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { environment_.escape(); } }
 					    > "THEN"_isx > Stmnt
 					| "FOR"_isx > id_%Var > "=" > r1_%Expr
@@ -92,10 +100,12 @@ public:
 					      | eps < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
 					| "NEXT"_isx > id_%Var                      <[this]{ next(*id_); }
 					| "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(*no_); }
-					| "READ"_isx > ReadEl > *("," > ReadEl)
+					| "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ **ref_ = *r1_; }
+					| "DIM"_isx > DimEl > *("," > DimEl)
 					| "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
+					| "READ"_isx > ReadEl > *("," > ReadEl)
 					| "INPUT"_isx > InptEl > *("," > InptEl)
-					| "LET"_isx > id_%Var > "=" > r1_%Expr      <[this]{ vars_[*id_] = *r1_; }
+					| "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[this]{ std::cout << std::endl; }
 					| "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
 					| "RETURN"_isx                              <[this]{ retsub(); }
 					| "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
@@ -159,6 +169,10 @@ public:
 	}
 
 private:
+	struct List { std::vector<double> values = std::vector<double>(11, 0.0); };
+	struct Table { std::vector<double> values = std::vector<double>(121, 0.0); std::size_t width = 11, height = 11; };
+	using RelOpFn = bool(*)(double, double);
+
 	std::string filename_with_ext(std::string_view name)
 	{
 		std::string filename{name};
@@ -245,9 +259,11 @@ private:
 			if ((step >= 0 && v <= to) || (step < 0 && v >= to))
 				return;
 			for_stack_.pop_back();
-			for ( ; line_ != lines_.end(); ++line_) {
-				if (auto& t = line_->second; t.compare(0, 4, "NEXT") == 0) {
-					if (auto i = t.find_first_not_of(" \t", 4); i != std::string::npos && t.compare(i, id.size(), id) == 0) {
+			for (auto k = id.size(); line_ != lines_.end(); ++line_) {
+				auto& t = line_->second;
+				if (auto n = t.size(); n > 4 && !strncasecmp(t.data(), "NEXT", 4)) {
+					if (auto i = t.find_first_not_of(" \t", 4); i != std::string::npos &&
+								i + k <= n && !strncasecmp(t.data() + i, id.data(), k)) {
 						lastline_ = line_++;
 						return;
 					}
@@ -267,29 +283,69 @@ private:
 		}
 	}
 
-	void read(std::string const& id)
+	void read(double* ref)
 	{
 		if (read_itr_ != data_.cend())
-			vars_[id] = *(read_itr_++);
+			*ref = *(read_itr_++);
 		else
 			print_error("NO DATA");
 	}
 
-	using RelOpFn = bool (*)(double, double);
+	double& at(List& lst, double i)
+	{
+		auto const index = static_cast<std::size_t>(i);
+		if (index < lst.values.size())
+			return lst.values[index];
+		print_error("ARRAY INDEX OUT OF RANGE");
+		return (invalid_value_ = std::numeric_limits<double>::quiet_NaN());
+	}
+
+	double& at(Table& tab, double i, double j)
+	{
+		auto const row = static_cast<std::size_t>(i), col = static_cast<std::size_t>(j);
+		if (row < tab.height || col < tab.width)
+			return tab.values[tab.width * row + col];
+		print_error("ARRAY INDEX OUT OF RANGE");
+		return (invalid_value_ = std::numeric_limits<double>::quiet_NaN());
+	}
+
+	void dimension(List& lst, double n)
+	{
+		if (n < 0.0)
+			print_error("ARRAY SIZE OUT OF RANGE");
+		else
+			lst.values = std::vector<double>(static_cast<std::size_t>(n) + 1, 0.0);
+	}
+
+	void dimension(Table& tab, double m, double n)
+	{
+		if (m < 0.0 || n < 0.0) {
+			print_error("ARRAY SIZE OUT OF RANGE");
+		} else {
+			tab.width = static_cast<std::size_t>(m) + 1;
+			tab.height = static_cast<std::size_t>(n) + 1;
+			tab.values = std::vector<double>(tab.width * tab.height, 0.0);
+		}
+	}
+
 	lug::grammar grammar_;
 	lug::environment environment_;
 	lug::variable<std::string> id_{environment_};
 	lug::variable<std::string_view> sv_{environment_};
 	lug::variable<double> r1_{environment_}, r2_{environment_}, r3_{environment_};
 	lug::variable<int> no_{environment_};
+	lug::variable<double*> ref_{environment_};
 	lug::variable<RelOpFn> rop_{environment_};
 	std::deque<double> data_;
 	std::deque<double>::const_iterator read_itr_;
 	std::unordered_map<std::string, double> vars_;
+	std::unordered_map<std::string, List> lists_;
+	std::unordered_map<std::string, Table> tables_;
 	std::map<int, std::string> lines_;
 	std::map<int, std::string>::iterator line_{lines_.end()}, lastline_{lines_.end()}, haltline_{lines_.end()};
 	std::vector<std::map<int, std::string>::iterator> stack_;
 	std::vector<std::pair<std::string, std::map<int, std::string>::iterator>> for_stack_;
+	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
 	bool const stdin_tty_{isatty(fileno(stdin)) != 0};
 };
 
