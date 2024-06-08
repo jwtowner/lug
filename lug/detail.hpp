@@ -185,7 +185,7 @@ inline auto checked_add(T x, U y)
 template <std::size_t... Indices, class Tuple>
 constexpr auto make_tuple_view(Tuple&& t) noexcept
 {
-	return ::std::forward_as_tuple(::std::get<Indices>(::std::forward<Tuple>(t))...);
+	return std::forward_as_tuple(std::get<Indices>(std::forward<Tuple>(t))...);
 }
 
 template<class InputIt, class UnaryPredicate>
@@ -203,16 +203,16 @@ inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
 template <class Sequence, class T>
 inline std::size_t push_back_unique(Sequence& s, T&& x)
 {
-	if (auto i = ::std::find(::std::cbegin(s), ::std::cend(s), x); i != ::std::cend(s))
-		return static_cast<std::size_t>(::std::distance(::std::cbegin(s), i));
-	s.push_back(::std::forward<T>(x));
+	if (auto i = std::find(std::cbegin(s), std::cend(s), x); i != std::cend(s))
+		return static_cast<std::size_t>(std::distance(std::cbegin(s), i));
+	s.push_back(std::forward<T>(x));
 	return s.size() - 1;
 }
 
 template <class Sequence>
 inline auto pop_back(Sequence& s)
 {
-	typename Sequence::value_type result{::std::move(s.back())};
+	typename Sequence::value_type result{std::move(s.back())};
 	s.pop_back();
 	return result;
 }

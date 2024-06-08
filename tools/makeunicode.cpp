@@ -1519,14 +1519,14 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 			auto const tail = *first++;
 			for (std::size_t i = 0; i < count; ++i) {
 				if ((head & seqmask) == seqmask) {
-					dest = ::std::fill_n(dest, static_cast<std::size_t>(head & ~seqmask) + 1, tail);
+					dest = std::fill_n(dest, static_cast<std::size_t>(head & ~seqmask) + 1, tail);
 				} else {
 					*dest++ = head;
 					*dest++ = tail;
 				}
 			}
 		} else if ((lead & seqmask) == seqmask) {
-			dest = ::std::fill_n(dest, static_cast<std::size_t>(lead & ~seqmask) + 1, *first++);
+			dest = std::fill_n(dest, static_cast<std::size_t>(lead & ~seqmask) + 1, *first++);
 		} else {
 			*dest++ = lead;
 		}

@@ -234,18 +234,18 @@ public:
 	template <class T>
 	void push_attribute(T&& x)
 	{
-		attributes_.emplace_back(std::in_place_type<T>, ::std::forward<T>(x));
+		attributes_.emplace_back(std::in_place_type<T>, std::forward<T>(x));
 	}
 
 	template <class T, class... Args>
 	void push_attribute(Args&&... args)
 	{
-		attributes_.emplace_back(std::in_place_type<T>, ::std::forward<Args>(args)...);
+		attributes_.emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
 	}
 
 	template <class T> T pop_attribute()
 	{
-		T r{::std::any_cast<T>(detail::pop_back(attributes_))};
+		T r{std::any_cast<T>(detail::pop_back(attributes_))};
 		return r;
 	}
 };
@@ -420,7 +420,7 @@ class program_encoder : public encoder
 	immediate add_item(std::vector<Item>& items, Item&& item)
 	{
 		detail::assure_in_range<resource_limit_error>(items.size(), 0u, (std::numeric_limits<unsigned short>::max)() - 1u);
-		items.push_back(::std::forward<Item>(item));
+		items.push_back(std::forward<Item>(item));
 		return static_cast<immediate>(items.size() - 1);
 	}
 
@@ -446,7 +446,7 @@ inline auto&& add_rune_range(RuneSet&& runes, directives mode, char32_t first, c
 		unicode::push_casefolded_range(runes, first, last);
 	else
 		unicode::push_range(runes, first, last);
-	return ::std::move(runes);
+	return std::move(runes);
 }
 
 class basic_regular_expression
@@ -725,31 +725,31 @@ template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 constexpr auto operator<(E const& e, A a)
 {
 	if constexpr (std::is_invocable_v<A, environment&, syntax>) {
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+		return [e = make_expression(e), a = std::move(a)](encoder& d) {
 			d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, syntactic_capture{a});
 		};
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>) {
-		return e < [a = ::std::move(a)](environment& envr, csyntax& x) {
+		return e < [a = std::move(a)](environment& envr, csyntax& x) {
 			a(detail::dynamic_cast_if_base_of<environment&>{envr}, x);
 		};
 	} else if constexpr (std::is_invocable_v<A, syntax>) {
-		return e < [a = ::std::move(a)](environment&, csyntax& x) {
+		return e < [a = std::move(a)](environment&, csyntax& x) {
 			a(x);
 		};
 	} else if constexpr (std::is_invocable_v<A, environment&>) {
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+		return [e = make_expression(e), a = std::move(a)](encoder& d) {
 			d.evaluate(e).encode(opcode::action, semantic_action{a});
 		};
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>) {
-		return e < [a = ::std::move(a)](environment& envr) {
+		return e < [a = std::move(a)](environment& envr) {
 			a(detail::dynamic_cast_if_base_of<environment&>{envr});
 		};
 	} else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>) {
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+		return [e = make_expression(e), a = std::move(a)](encoder& d) {
 			d.evaluate(e).encode(opcode::action, [a](environment&) { a(); });
 		};
 	} else if constexpr (std::is_invocable_v<A>) {
-		return [e = make_expression(e), a = ::std::move(a)](encoder& d) {
+		return [e = make_expression(e), a = std::move(a)](encoder& d) {
 			d.evaluate(e).encode(opcode::action, [a](environment& envr) { envr.push_attribute(a()); });
 		};
 	}
@@ -1107,7 +1107,7 @@ public:
 	{
 		if (reading_)
 			throw reenterant_read_error{};
-		sources_.emplace_back(::std::forward<InputFunc>(func));
+		sources_.emplace_back(std::forward<InputFunc>(func));
 		return *this;
 	}
 
@@ -1120,7 +1120,7 @@ public:
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
 	bool parse(InputFunc&& func)
 	{
-		return push_source(::std::forward<InputFunc>(func)).parse();
+		return push_source(std::forward<InputFunc>(func)).parse();
 	}
 
 	bool parse()

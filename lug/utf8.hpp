@@ -73,15 +73,15 @@ inline std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
 	char32_t rune = U'\0';
 	unsigned int state = decode_accept;
 	while (first != last && state != decode_reject)
-		if (state = ::lug::utf8::decode_rune_octet(rune, *first++, state); state == decode_accept)
-			return ::std::make_pair(first, rune);
-	return ::std::make_pair(::std::find_if(first, last, ::lug::utf8::is_lead), U'\U0000fffd');
+		if (state = lug::utf8::decode_rune_octet(rune, *first++, state); state == decode_accept)
+			return std::make_pair(first, rune);
+	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), U'\U0000fffd');
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
 inline InputIt next_rune(InputIt first, InputIt last)
 {
-	return ::lug::utf8::decode_rune(first, last).first;
+	return lug::utf8::decode_rune(first, last).first;
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
@@ -89,7 +89,7 @@ inline std::size_t count_runes(InputIt first, InputIt last)
 {
 	std::size_t count = 0;
 	for (; first != last; ++count)
-		first = ::lug::utf8::next_rune(first, last);
+		first = lug::utf8::next_rune(first, last);
 	return count;
 }
 
@@ -100,7 +100,7 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 		*dst++ = static_cast<char>(rune);
 	} else {
 		if (0x00110000U <= rune || (rune & 0xfffff800U) == 0x0000d800U)
-			return {::std::copy_n(u8"\U0000fffd", 3, dst), false};
+			return {std::copy_n(u8"\U0000fffd", 3, dst), false};
 		unsigned int const n = rune >= 0x00010000U ? 4 : rune >= 0x00000800U ? 3 : 2;
 		for (unsigned int i = 0, c = (0xf0 << (4 - n)) & 0xf0; i < n; ++i, c = 0x80)
 			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3f) | c);
@@ -119,8 +119,8 @@ template <class InputIt, class OutputIt>
 inline OutputIt tocasefold(InputIt first, InputIt last, OutputIt dst)
 {
 	while (first != last) {
-		auto [next, rune] = ::lug::utf8::decode_rune(first, last);
-		dst = ::lug::utf8::encode_rune(dst, unicode::tocasefold(rune)).first;
+		auto [next, rune] = lug::utf8::decode_rune(first, last);
+		dst = lug::utf8::encode_rune(dst, unicode::tocasefold(rune)).first;
 		first = next;
 	}
 	return dst;
@@ -138,8 +138,8 @@ template <class InputIt, class OutputIt>
 inline OutputIt tolower(InputIt first, InputIt last, OutputIt dst)
 {
 	while (first != last) {
-		auto [next, rune] = ::lug::utf8::decode_rune(first, last);
-		dst = ::lug::utf8::encode_rune(dst, unicode::tolower(rune)).first;
+		auto [next, rune] = lug::utf8::decode_rune(first, last);
+		dst = lug::utf8::encode_rune(dst, unicode::tolower(rune)).first;
 		first = next;
 	}
 	return dst;
@@ -157,8 +157,8 @@ template <class InputIt, class OutputIt>
 inline OutputIt toupper(InputIt first, InputIt last, OutputIt dst)
 {
 	while (first != last) {
-		auto [next, rune] = ::lug::utf8::decode_rune(first, last);
-		dst = ::lug::utf8::encode_rune(dst, unicode::toupper(rune)).first;
+		auto [next, rune] = lug::utf8::decode_rune(first, last);
+		dst = lug::utf8::encode_rune(dst, unicode::toupper(rune)).first;
 		first = next;
 	}
 	return dst;
