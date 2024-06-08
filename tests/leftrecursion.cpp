@@ -9,8 +9,9 @@ void test_direct_left_recursion()
 {
 	using namespace lug::language;
 	grammar::implicit_space = nop;
-	rule R = R > chr('a') | chr('a');
-	rule S = R > !chr('a');
+	rule R, S;
+	R = R > chr('a') | chr('a');
+	S = R > !chr('a');
 	grammar G = start(S);
 	assert(lug::parse("a", G));
 	assert(lug::parse("aa", G));
@@ -48,11 +49,12 @@ void test_association_and_precedence()
 	using namespace lug::language;
 	grammar::implicit_space = nop;
 	std::string out;
-	rule N	= chr('1') | chr('2') | chr('3');
-	rule E	= E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
-			| E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
-			| N <[&out](csyntax& x){ out += x.capture(); };
-	rule S = E > eoi;
+	rule N, E, S;
+	N = chr('1') | chr('2') | chr('3');
+	E = E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
+	  | E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
+	  | N <[&out](csyntax& x){ out += x.capture(); };
+	S = E > eoi;
 	grammar G = start(S);
 	out.clear();
 	assert(lug::parse("1", G) && out == "1");

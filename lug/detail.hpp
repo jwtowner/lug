@@ -19,6 +19,8 @@
 _Pragma("GCC diagnostic push") \
 _Pragma("GCC diagnostic ignored \"-Wparentheses\"") \
 _Pragma("GCC diagnostic ignored \"-Wlogical-not-parentheses\"") \
+_Pragma("GCC diagnostic ignored \"-Wuninitialized\"") \
+_Pragma("GCC diagnostic ignored \"-Wunused-variable\"")
 _Pragma("GCC diagnostic ignored \"-Wunused-but-set-variable\"")
 
 #define LUG_DIAGNOSTIC_POP \
