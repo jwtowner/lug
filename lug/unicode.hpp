@@ -6,8 +6,8 @@
 // Do not modify this file by hand. Instead, modify and run the
 // tool to regenerate this file.
 
-#ifndef LUG_UNICODE_HPP__
-#define LUG_UNICODE_HPP__
+#ifndef LUG_UNICODE_HPP
+#define LUG_UNICODE_HPP
 
 #include <lug/detail.hpp>
 #include <cctype>

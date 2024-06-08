@@ -2,8 +2,8 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifndef LUG_ERROR_HPP__
-#define LUG_ERROR_HPP__
+#ifndef LUG_ERROR_HPP
+#define LUG_ERROR_HPP
 
 #include <stdexcept>
 

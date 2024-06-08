@@ -2,8 +2,8 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifndef LUG_DETAIL_HPP__
-#define LUG_DETAIL_HPP__
+#ifndef LUG_DETAIL_HPP
+#define LUG_DETAIL_HPP
 
 #include <algorithm>
 #include <functional>
