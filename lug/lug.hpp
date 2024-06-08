@@ -831,10 +831,13 @@ inline grammar start(rule const& start_rule)
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
 			if (auto top_rule = callstack.back().first; top_rule) {
 				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
+					// Make a local copy of callee_rule that can be lambda-captured
+					auto rule = callee_rule;
+
 					calls.emplace_back(callee_program, address + instr_offset);
 					if (callee_rule && (mode & directives::eps) != directives::none && detail::escaping_find_if(
-							callstack.crbegin(), callstack.crend(), [callee_rule](auto& caller) {
-								return caller.first == callee_rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
+							callstack.crbegin(), callstack.crend(), [rule](auto& caller) {
+								return caller.first == rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
 						left_recursive.insert(callee_program);
 					} else {
 						auto callee_callstack = callstack;
@@ -1134,7 +1137,12 @@ public:
 		prune_depth_ = max_call_depth, call_depth_ = 0;
 		pc = 0, fc = 0;
 		while (!done) {
-			switch (auto [op, imm, off, str] = instruction::decode(prog.instructions, pc); op) {
+			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
+
+			auto pe = static_cast<unicode::property_enum>(imm);
+			auto s = str;    // local copy for lambda capture
+
+			switch (op) {
 				case opcode::match: {
 					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
 						goto failure;
@@ -1148,25 +1156,26 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_any_of: {
-					if (!match_single(sr, [imm, str](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(imm), str); }))
+					if (!match_single(sr, [pe, s](auto const& r) { return unicode::any_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_all_of: {
-					if (!match_single(sr, [imm, str](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(imm), str); }))
+					if (!match_single(sr, [pe, s](auto const& r) { return unicode::all_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_none_of: {
-					if (!match_single(sr, [imm, str](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(imm), str); }))
+					if (!match_single(sr, [pe, s](auto const& r) { return unicode::none_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_set: {
-					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
+					auto imm_copy = imm;
+					if (!match_single(sr, [&runes = prog.runesets[imm_copy]](char32_t rune) {
 							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
 						goto failure;
 				} break;
 				case opcode::match_eol: {
-					if (!match_single(sr, [&prog](auto curr, auto last, auto& next, char32_t rune) {
+					if (!match_single(sr, [](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
 								return false;
 							if (U'\r' == rune)
