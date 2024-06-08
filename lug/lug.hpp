@@ -831,12 +831,9 @@ inline grammar start(rule const& start_rule)
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
 			if (auto top_rule = callstack.back().first; top_rule) {
 				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
-					// Make a local copy of callee_rule that can be lambda-captured
-					auto rule = callee_rule;
-
 					calls.emplace_back(callee_program, address + instr_offset);
 					if (callee_rule && (mode & directives::eps) != directives::none && detail::escaping_find_if(
-							callstack.crbegin(), callstack.crend(), [rule](auto& caller) {
+							callstack.crbegin(), callstack.crend(), [rule = callee_rule](auto& caller) {
 								return caller.first == rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
 						left_recursive.insert(callee_program);
 					} else {
@@ -1138,10 +1135,6 @@ public:
 		pc = 0, fc = 0;
 		while (!done) {
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
-
-			auto pe = static_cast<unicode::property_enum>(imm);
-			auto s = str;    // local copy for lambda capture
-
 			switch (op) {
 				case opcode::match: {
 					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
@@ -1156,15 +1149,15 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_any_of: {
-					if (!match_single(sr, [pe, s](auto const& r) { return unicode::any_of(r, pe, s); }))
+					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::any_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_all_of: {
-					if (!match_single(sr, [pe, s](auto const& r) { return unicode::all_of(r, pe, s); }))
+					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::all_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_none_of: {
-					if (!match_single(sr, [pe, s](auto const& r) { return unicode::none_of(r, pe, s); }))
+					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::none_of(r, pe, s); }))
 						goto failure;
 				} break;
 				case opcode::match_set: {
