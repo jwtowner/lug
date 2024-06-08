@@ -23,7 +23,7 @@ TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 
 # tools
-TOOLS = makeunicodem
+TOOLS = makeunicode
 TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
