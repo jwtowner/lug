@@ -44,7 +44,7 @@ As a baseline, the following compiler versions are known to work with lug.
 
 | Compiler | Language Mode |
 | --- | --- |
-| Clang 5.0.0 (September 2017) | -std=c++17 or -std=gnu++17 |
+| Clang 14.0.0 (March 2022) | -std=c++17 or -std=gnu++17 |
 | GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
 | Microsoft Visual C++ 2017 15.5 (December 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 
