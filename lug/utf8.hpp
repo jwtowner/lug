@@ -12,8 +12,7 @@
 
 #include <lug/unicode.hpp>
 
-namespace lug::utf8
-{
+namespace lug::utf8 {
 
 template <class InputIt, class T = void>
 using enable_if_char_input_iterator_t = std::enable_if_t<!std::is_integral_v<InputIt> &&

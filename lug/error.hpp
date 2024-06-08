@@ -7,8 +7,7 @@
 
 #include <stdexcept>
 
-namespace lug
-{
+namespace lug {
 
 class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
 class program_limit_error : public lug_error { public: program_limit_error() : lug_error{"length or offset of program exceeds internal limit"} {} };

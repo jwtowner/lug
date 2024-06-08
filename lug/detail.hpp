@@ -33,11 +33,9 @@ _Pragma("GCC diagnostic pop")
 
 #endif
 
-namespace lug
-{
+namespace lug {
 
-inline namespace bitfield_ops
-{
+inline namespace bitfield_ops {
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T operator~(T x) noexcept
@@ -83,8 +81,7 @@ constexpr T& operator^=(T& x, T y) noexcept
 
 } // namespace bitfield_ops
 
-namespace detail
-{
+namespace detail {
 
 template <class... Args>
 constexpr void ignore(Args&&...) noexcept {}

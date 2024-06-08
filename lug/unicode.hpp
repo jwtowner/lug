@@ -19,8 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace lug::unicode
-{
+namespace lug::unicode {
 
 // POSIX compatibility properties
 enum class ctype : std::uint_least16_t
@@ -790,8 +789,7 @@ inline void push_range(rune_set& runes, char32_t start, char32_t end)
 	std::push_heap(std::begin(runes), std::end(runes));
 }
 
-namespace detail
-{
+namespace detail {
 
 inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t start, char32_t end)
 {
@@ -859,8 +857,7 @@ inline rune_set negate(rune_set const& runes)
 	return negated_runes;
 }
 
-namespace detail
-{
+namespace detail {
 
 inline std::string normalize_property_label(std::string_view id)
 {
@@ -1189,8 +1186,7 @@ inline std::optional<eawtype> stoeawtype(std::string_view s)
 	return c != labels.end() && c->first == l ? std::optional<eawtype>{static_cast<eawtype>(c->second)} : std::nullopt;
 }
 
-namespace detail
-{
+namespace detail {
 
 template <class InputIt, class OutputIt>
 void run_length_decode(InputIt first, InputIt last, OutputIt dest)

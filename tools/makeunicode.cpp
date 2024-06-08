@@ -344,12 +344,13 @@ std::string read_ucd_case_array(stdfs::path filepath, StoreFunc store)
 // Filters for deriving POSIX compatibility table from binary properties and general
 // categories, based on Unicode TR#18, Annex C: Compatibility Properties.
 
-namespace compat_filter_arg
-{
-	constexpr std::size_t cflags = 0;
-	constexpr std::size_t pflags = 1;
-	constexpr std::size_t gcindex = 2;
-};
+namespace compat_filter_arg {
+
+constexpr std::size_t cflags = 0;
+constexpr std::size_t pflags = 1;
+constexpr std::size_t gcindex = 2;
+
+} // namespace compat_filter_arg
 
 using compat_filter_args = std::tuple<std::uint_least16_t, std::uint_least64_t, std::uint_least8_t>;
 using compat_filter = std::function<bool(compat_filter_args const&)>;
@@ -1118,8 +1119,7 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #include <utility>
 #include <vector>
 
-namespace lug::unicode
-{
+namespace lug::unicode {
 )c++"
 << "\n"
 << enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatibility properties", [](std::ostream& out) {
@@ -1362,8 +1362,7 @@ inline void push_range(rune_set& runes, char32_t start, char32_t end)
 	std::push_heap(std::begin(runes), std::end(runes));
 }
 
-namespace detail
-{
+namespace detail {
 
 inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t start, char32_t end)
 {
@@ -1431,8 +1430,7 @@ inline rune_set negate(rune_set const& runes)
 	return negated_runes;
 }
 
-namespace detail
-{
+namespace detail {
 
 inline std::string normalize_property_label(std::string_view id)
 {
@@ -1503,8 +1501,7 @@ inline std::string normalize_property_label(std::string_view id)
 	return labels;
 })
 << R"c++(
-namespace detail
-{
+namespace detail {
 
 template <class InputIt, class OutputIt>
 void run_length_decode(InputIt first, InputIt last, OutputIt dest)

@@ -14,8 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace lug
-{
+namespace lug {
 
 struct program;
 class rule;
@@ -587,8 +586,7 @@ constexpr auto skip_after = directive_modifier<directives::postskip, directives:
 constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
 
-namespace language
-{
+namespace language {
 
 using lug::grammar; using lug::rule; using lug::start;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype;
