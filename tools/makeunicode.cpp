@@ -44,11 +44,11 @@ template <class Integer>
 class integer_iterator
 {
 public:
-	typedef Integer value_type;
-	typedef value_type const& reference;
-	typedef value_type const* pointer;
-	typedef std::common_type_t<std::ptrdiff_t, std::make_signed_t<Integer>> difference_type;
-	typedef std::random_access_iterator_tag iterator_category;
+	using value_type = Integer;
+	using reference = value_type const&;
+	using pointer = value_type const*;
+	using difference_type = std::common_type_t<std::ptrdiff_t, std::make_signed_t<Integer>>;
+	using iterator_category = std::random_access_iterator_tag;
 	constexpr integer_iterator() noexcept : value_{0} {}
 	constexpr explicit integer_iterator(Integer value) : value_{value} {}
 	reference operator*() const { return value_; }

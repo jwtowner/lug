@@ -87,21 +87,21 @@ template <class... Args>
 constexpr void ignore(Args&&...) noexcept {}
 
 template <class T> struct member_pointer_object {};
-template <class T, class U> struct member_pointer_object<T U::*> { typedef U type; };
+template <class T, class U> struct member_pointer_object<T U::*> { using type = U; };
 template <class T> struct member_pointer_value {};
-template <class T, class U> struct member_pointer_value<T U::*> { typedef T type; };
+template <class T, class U> struct member_pointer_value<T U::*> { using type = T; };
 
 template <class ObjectIterator, class MemberPtrType, MemberPtrType MemberPtr>
 class member_access_iterator
 {
 public:
-	typedef ObjectIterator base_type;
-	typedef typename member_pointer_object<MemberPtrType>::type object_type;
-	typedef typename member_pointer_value<MemberPtrType>::type value_type;
-	typedef value_type& reference;
-	typedef value_type* pointer;
-	typedef typename std::iterator_traits<base_type>::difference_type difference_type;
-	typedef typename std::iterator_traits<base_type>::iterator_category iterator_category;
+	using base_type = ObjectIterator;
+	using object_type = typename member_pointer_object<MemberPtrType>::type;
+	using value_type = typename member_pointer_value<MemberPtrType>::type;
+	using reference = value_type&;
+	using pointer = value_type*;
+	using difference_type = typename std::iterator_traits<base_type>::difference_type;
+	using iterator_category = typename std::iterator_traits<base_type>::iterator_category;
 	constexpr member_access_iterator() noexcept : object_{} {}
 	constexpr explicit member_access_iterator(ObjectIterator obj) : object_{obj} {}
 	constexpr base_type base() const { return object_; }
