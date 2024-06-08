@@ -9,7 +9,7 @@ PREFIX = /usr/local
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wextra -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wextra -Wextra-semi -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
 LDFLAGS = $(CXXSTD) -s
 
 # samples
@@ -23,7 +23,7 @@ TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 
 # tools
-TOOLS = makeunicode
+TOOLS = makeunicodem
 TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
@@ -70,7 +70,7 @@ options:
 	@echo lug build options:
 	@echo "CXX       = $(CXX)"
 	@echo "CXXSTD    = $(CXXSTD)"
-	@echo "CXXLAGS   = $(CXXFLAGS)"
+	@echo "CXXFLAGS  = $(CXXFLAGS)"
 	@echo "LDFLAGS   = $(LDFLAGS)"
 
 clean:

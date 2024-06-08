@@ -49,10 +49,10 @@ public:
 	typedef value_type const* pointer;
 	typedef std::common_type_t<std::ptrdiff_t, std::make_signed_t<Integer>> difference_type;
 	typedef std::random_access_iterator_tag iterator_category;
-	constexpr integer_iterator() noexcept : value_{0} {};
+	constexpr integer_iterator() noexcept : value_{0} {}
 	constexpr explicit integer_iterator(Integer value) : value_{value} {}
 	reference operator*() const { return value_; }
-	value_type operator[](difference_type n) const { return static_cast<value_type>(value_ + n); }
+	value_type operator[](difference_type n) const { return static_cast<value_type>(static_cast<difference_type>(value_) + n); }
 	integer_iterator& operator++() { ++value_; return *this; }
 	integer_iterator& operator--() { --value_; return *this; }
 	integer_iterator operator++(int) { integer_iterator i{value_}; ++value_; return i; }
@@ -65,9 +65,9 @@ public:
 	friend constexpr bool operator<=(integer_iterator const& x, integer_iterator const& y) noexcept { return x.value_ <= y.value_; }
 	friend constexpr bool operator>(integer_iterator const& x, integer_iterator const& y) noexcept { return x.value_ > y.value_; }
 	friend constexpr bool operator>=(integer_iterator const& x, integer_iterator const& y) noexcept { return x.value_ >= y.value_; }
-	friend constexpr integer_iterator operator+(integer_iterator const& x, difference_type n) noexcept { return integer_iterator{static_cast<value_type>(x.value_ + n)}; }
-	friend constexpr integer_iterator operator+(difference_type n, integer_iterator const& x) noexcept { return integer_iterator{static_cast<value_type>(x.value_ + n)}; }
-	friend constexpr integer_iterator operator-(integer_iterator const& x, difference_type n) noexcept { return integer_iterator{static_cast<value_type>(x.value_ - n)}; }
+	friend constexpr integer_iterator operator+(integer_iterator const& x, difference_type n) noexcept { return integer_iterator{static_cast<value_type>(static_cast<difference_type>(x.value_) + n)}; }
+	friend constexpr integer_iterator operator+(difference_type n, integer_iterator const& x) noexcept { return integer_iterator{static_cast<value_type>(static_cast<difference_type>(x.value_) + n)}; }
+	friend constexpr integer_iterator operator-(integer_iterator const& x, difference_type n) noexcept { return integer_iterator{static_cast<value_type>(static_cast<difference_type>(x.value_) - n)}; }
 	friend constexpr difference_type operator-(integer_iterator const& x, integer_iterator const& y) noexcept { return static_cast<difference_type>(x.value_) - static_cast<difference_type>(y.value_); }
 private:
 	Integer value_;
@@ -817,13 +817,13 @@ void compress_records()
 
 		auto blockit = recordtable.cbegin(), endblockit = recordtable.cend();
 		while (blockit < endblockit) {
-			auto blockfirst = blockit, blocklast = std::next(blockit, trial.block_size);
+			auto blockfirst = blockit, blocklast = std::next(blockit, static_cast<std::ptrdiff_t>(trial.block_size));
 			auto blockhash = std::accumulate(blockfirst, blocklast, std::size_t{0}, [](std::size_t x, std::size_t y) {
 				return hash_combine(std::hash<std::size_t>{}(y), x);
 			});
 			auto [match, lastmatch] = stagedblockmap.equal_range(blockhash);
 			for ( ; match != lastmatch; ++match) {
-				if (std::equal(blockfirst, blocklast, std::next(trial.stage2.cbegin(), match->second * trial.block_size)))
+				if (std::equal(blockfirst, blocklast, std::next(trial.stage2.cbegin(), static_cast<std::ptrdiff_t>(match->second * trial.block_size))))
 					break;
 			}
 			if (match == lastmatch) {
@@ -883,7 +883,7 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 				++count;
 		if (count > 1) {
 			pass2.insert(std::end(pass2), {ilseqcode, static_cast<T>(count + 1), curr[0], curr[1]});
-			curr += (count + 1) * 2;
+			curr += static_cast<std::ptrdiff_t>((count + 1) * 2);
 			lastval = 0;
 		} else {
 			pass2.push_back(*curr++);
@@ -1202,14 +1202,14 @@ enum class property_enum
 	eawtype
 };
 
-template <class T> constexpr property_enum to_property_enum_v = property_enum::invalid;
-template <> constexpr property_enum to_property_enum_v<ctype> = property_enum::ctype;
-template <> constexpr property_enum to_property_enum_v<ptype> = property_enum::ptype;
-template <> constexpr property_enum to_property_enum_v<gctype> = property_enum::gctype;
-template <> constexpr property_enum to_property_enum_v<sctype> = property_enum::sctype;
-template <> constexpr property_enum to_property_enum_v<blktype> = property_enum::blktype;
-template <> constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
-template <> constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
+template <class T> inline constexpr property_enum to_property_enum_v = property_enum::invalid;
+template <> inline constexpr property_enum to_property_enum_v<ctype> = property_enum::ctype;
+template <> inline constexpr property_enum to_property_enum_v<ptype> = property_enum::ptype;
+template <> inline constexpr property_enum to_property_enum_v<gctype> = property_enum::gctype;
+template <> inline constexpr property_enum to_property_enum_v<sctype> = property_enum::sctype;
+template <> inline constexpr property_enum to_property_enum_v<blktype> = property_enum::blktype;
+template <> inline constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
+template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
 template <class T> constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
 

@@ -32,15 +32,11 @@ using syntactic_capture = std::function<void(environment&, syntax const&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_predicate = std::function<bool(parser&)>;
 
-template <class E> constexpr bool is_callable_v =
-	std::is_same_v<grammar, std::decay_t<E>> ||
-	std::is_same_v<rule, std::decay_t<E>> ||
-	std::is_same_v<program, std::decay_t<E>>;
-
-template <class E> constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
-template <class E> constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
-template <class E> constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
-template <class E> constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
+template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
+template <class E> inline constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
+template <class E> inline constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
+template <class E> inline constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
 
 grammar start(rule const& start_rule);
 
@@ -70,12 +66,12 @@ union instruction
 
 	static auto decode(std::vector<instruction> const& code, std::ptrdiff_t& pc)
 	{
-		auto pf = code[pc++].pf;
-		auto imm = pf.val;
-		auto off = (pf.aux & operands::off) != operands::none ? code[pc++].off : 0;
+		const prefix pf = code[static_cast<std::size_t>(pc++)].pf;
+		const int off = ((pf.aux & operands::off) != operands::none) ? code[static_cast<std::size_t>(pc++)].off : 0;
+		unsigned short imm = pf.val;
 		std::string_view str;
 		if ((pf.aux & operands::str) != operands::none) {
-			str = std::string_view{code[pc].str.data(), static_cast<unsigned int>((imm & 0xff) + 1)};
+			str = std::string_view{code[static_cast<std::size_t>(pc)].str.data(), static_cast<unsigned int>((imm & 0xff) + 1)};
 			pc += ((imm & 0xff) + 4) >> 2;
 			imm >>= 8;
 		}
@@ -85,10 +81,8 @@ union instruction
 	static std::ptrdiff_t length(prefix pf) noexcept
 	{
 		std::ptrdiff_t len = 1;
-		if ((pf.aux & operands::off) != operands::none)
-			++len;
-		if ((pf.aux & operands::str) != operands::none)
-			len += static_cast<std::ptrdiff_t>(((pf.val & 0xff) >> 2) + 1);
+		len += ((pf.aux & operands::off) != operands::none) ? 1 : 0;
+		len += ((pf.aux & operands::str) != operands::none) ? static_cast<std::ptrdiff_t>(((pf.val & 0xff) >> 2) + 1) : 0;
 		return len;
 	}
 };
@@ -172,7 +166,7 @@ class grammar
 public:
 	grammar() = default;
 	void swap(grammar& g) { program_.swap(g.program_); }
-	lug::program const& program() const noexcept { return program_; };
+	lug::program const& program() const noexcept { return program_; }
 	static thread_local std::function<void(encoder&)> implicit_space;
 };
 
@@ -372,7 +366,7 @@ public:
 		if (!subsequence.empty()) {
 			detail::assure_in_range<resource_limit_error>(static_cast<unsigned short>(imm), 0u, instruction::maxstrlen - 1);
 			detail::assure_in_range<resource_limit_error>(subsequence.size(), 1u, instruction::maxstrlen);
-			do_append(instruction{op, operands::str, static_cast<immediate>((static_cast<unsigned short>(imm) << 8) | (subsequence.size() - 1))});
+			do_append(instruction{op, operands::str, static_cast<immediate>((static_cast<unsigned short>(imm) << 8) | static_cast<unsigned short>(subsequence.size() - 1))});
 			do {
 				do_append(instruction{subsequence});
 				subsequence.remove_prefix((std::min)(std::size_t{4}, subsequence.size()));
@@ -394,26 +388,27 @@ public:
 class instruction_length_evaluator final : public encoder
 {
 	std::ptrdiff_t length_;
-	void do_append(instruction) override { length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
-	void do_append(program const& p) override { length_ = detail::checked_add<program_limit_error>(length_, static_cast<std::ptrdiff_t>(p.instructions.size())); }
-	bool do_should_evaluate_length() const noexcept override { return false; }
-	std::ptrdiff_t do_length() const noexcept override { return length_; }
+	void do_append(instruction) final { length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
+	void do_append(program const& p) final { length_ = detail::checked_add<program_limit_error>(length_, static_cast<std::ptrdiff_t>(p.instructions.size())); }
+	bool do_should_evaluate_length() const noexcept final { return false; }
+	std::ptrdiff_t do_length() const noexcept final { return length_; }
 public:
 	explicit instruction_length_evaluator(directives initial) : encoder{initial}, length_{0} {}
+	~instruction_length_evaluator() final = default;
 };
 
 class program_encoder : public encoder
 {
 	program& program_;
 	program_callees& callees_;
-	std::ptrdiff_t do_length() const noexcept override final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
-	void do_append(instruction instr) override final { program_.instructions.push_back(instr); }
-	void do_append(program const& p) override final { program_.concatenate(p); }
-	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) override final { callees_.emplace_back(r, p, n, d); }
-	immediate do_add_rune_set(unicode::rune_set r) override final { return add_item(program_.runesets, std::move(r)); }
-	immediate do_add_semantic_predicate(semantic_predicate p) override final { return add_item(program_.predicates, std::move(p)); }
-	immediate do_add_semantic_action(semantic_action a) override final { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_syntactic_capture(syntactic_capture a) override final { return add_item(program_.captures, std::move(a)); }
+	std::ptrdiff_t do_length() const noexcept final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
+	void do_append(instruction instr) final { program_.instructions.push_back(instr); }
+	void do_append(program const& p) final { program_.concatenate(p); }
+	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) final { callees_.emplace_back(r, p, n, d); }
+	immediate do_add_rune_set(unicode::rune_set r) final { return add_item(program_.runesets, std::move(r)); }
+	immediate do_add_semantic_predicate(semantic_predicate p) final { return add_item(program_.predicates, std::move(p)); }
+	immediate do_add_semantic_action(semantic_action a) final { return add_item(program_.actions, std::move(a)); }
+	immediate do_add_syntactic_capture(syntactic_capture a) final { return add_item(program_.captures, std::move(a)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item)
@@ -425,7 +420,7 @@ class program_encoder : public encoder
 
 public:
 	program_encoder(program& p, program_callees& c, directives initial) : encoder{initial}, program_{p}, callees_{c} {}
-	~program_encoder() { program_.mandate = mandate(); }
+	~program_encoder() override { program_.mandate = mandate(); }
 };
 
 class rule_encoder final : public program_encoder
@@ -433,7 +428,7 @@ class rule_encoder final : public program_encoder
 	rule& rule_;
 public:
 	explicit rule_encoder(rule& r) : program_encoder{r.program_, r.callees_, directives::eps}, rule_{r} { rule_.currently_encoding_ = true; }
-	~rule_encoder() override { rule_.currently_encoding_ = false; }
+	~rule_encoder() final { rule_.currently_encoding_ = false; }
 };
 
 template <class RuneSet>
@@ -844,9 +839,9 @@ inline grammar start(rule const& start_rule)
 		}
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
-		if (auto& iprefix = grprogram.instructions[instr_addr]; iprefix.pf.op == opcode::call)
+		if (auto& iprefix = grprogram.instructions[static_cast<std::size_t>(instr_addr)]; iprefix.pf.op == opcode::call)
 			iprefix.pf.val = left_recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
-		auto& ioffset = grprogram.instructions[instr_addr + 1];
+		auto& ioffset = grprogram.instructions[static_cast<std::size_t>(instr_addr + 1)];
 		auto const rel_addr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
 		ioffset.off = static_cast<int>(rel_addr);
@@ -935,7 +930,7 @@ class parser
 	{
 		if (!available(sr, 1))
 			return false;
-		auto const curr = input_.cbegin() + sr, last = input_.cend();
+		auto const curr = input_.cbegin() + static_cast<std::ptrdiff_t>(sr), last = input_.cend();
 		auto [next, rune] = utf8::decode_rune(curr, last);
 		bool matched;
 		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
@@ -949,7 +944,7 @@ class parser
 			detail::ignore(rune);
 		}
 		if (matched)
-			sr += std::distance(curr, next);
+			sr += static_cast<std::size_t>(std::distance(curr, next));
 		return matched;
 	}
 
@@ -1011,7 +1006,7 @@ class parser
 	{
 		std::vector<semantic_response> dropped;
 		if (n < responses_.size()) {
-			dropped.assign(responses_.begin() + n, responses_.end());
+			dropped.assign(responses_.begin() + static_cast<std::ptrdiff_t>(n), responses_.end());
 			responses_.resize(n);
 		}
 		return dropped;
@@ -1069,8 +1064,8 @@ public:
 			startindex = prevpos->first;
 			position = prevpos->second;
 		}
-		auto first = std::next(std::begin(input_), startindex);
-		auto const last = std::next(std::begin(input_), index);
+		auto first = std::next(std::begin(input_), static_cast<std::ptrdiff_t>(startindex));
+		auto const last = std::next(std::begin(input_), static_cast<std::ptrdiff_t>(index));
 		char32_t rune, prevrune = U'\0';
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);

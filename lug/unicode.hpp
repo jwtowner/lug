@@ -629,14 +629,14 @@ enum class property_enum
 	eawtype
 };
 
-template <class T> constexpr property_enum to_property_enum_v = property_enum::invalid;
-template <> constexpr property_enum to_property_enum_v<ctype> = property_enum::ctype;
-template <> constexpr property_enum to_property_enum_v<ptype> = property_enum::ptype;
-template <> constexpr property_enum to_property_enum_v<gctype> = property_enum::gctype;
-template <> constexpr property_enum to_property_enum_v<sctype> = property_enum::sctype;
-template <> constexpr property_enum to_property_enum_v<blktype> = property_enum::blktype;
-template <> constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
-template <> constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
+template <class T> inline constexpr property_enum to_property_enum_v = property_enum::invalid;
+template <> inline constexpr property_enum to_property_enum_v<ctype> = property_enum::ctype;
+template <> inline constexpr property_enum to_property_enum_v<ptype> = property_enum::ptype;
+template <> inline constexpr property_enum to_property_enum_v<gctype> = property_enum::gctype;
+template <> inline constexpr property_enum to_property_enum_v<sctype> = property_enum::sctype;
+template <> inline constexpr property_enum to_property_enum_v<blktype> = property_enum::blktype;
+template <> inline constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
+template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
 template <class T> constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
 

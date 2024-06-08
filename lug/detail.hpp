@@ -102,7 +102,7 @@ public:
 	typedef value_type* pointer;
 	typedef typename std::iterator_traits<base_type>::difference_type difference_type;
 	typedef typename std::iterator_traits<base_type>::iterator_category iterator_category;
-	constexpr member_access_iterator() noexcept : object_{} {};
+	constexpr member_access_iterator() noexcept : object_{} {}
 	constexpr explicit member_access_iterator(ObjectIterator obj) : object_{obj} {}
 	constexpr base_type base() const { return object_; }
 	constexpr pointer operator->() const { return (*object_).*MemberPtr; }

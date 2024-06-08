@@ -19,8 +19,8 @@ using enable_if_char_input_iterator_t = std::enable_if_t<!std::is_integral_v<Inp
 	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<InputIt>::iterator_category> &&
 	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<InputIt>::value_type>>, T>;
 
-constexpr unsigned int decode_accept = 0;
-constexpr unsigned int decode_reject = 12;
+inline constexpr unsigned int decode_accept = 0;
+inline constexpr unsigned int decode_reject = 12;
 
 constexpr bool is_lead(char octet) noexcept
 {
