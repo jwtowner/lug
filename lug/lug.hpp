@@ -2,8 +2,8 @@
 // Copyright (c) 2017 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifndef LUG_HPP
-#define LUG_HPP
+#ifndef LUG_INCLUDE_LUG_LUG_HPP
+#define LUG_INCLUDE_LUG_LUG_HPP
 
 #include <lug/error.hpp>
 #include <lug/utf8.hpp>

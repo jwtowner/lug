@@ -1103,8 +1103,8 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 // Do not modify this file by hand. Instead, modify and run the
 // tool to regenerate this file.
 
-#ifndef LUG_UNICODE_HPP
-#define LUG_UNICODE_HPP
+#ifndef LUG_INCLUDE_LUG_UNICODE_HPP
+#define LUG_INCLUDE_LUG_UNICODE_HPP
 
 #include <lug/detail.hpp>
 #include <cctype>

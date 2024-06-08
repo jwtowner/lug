@@ -7,8 +7,8 @@
 // See LICENSE.md file or http://bjoern.hoehrmann.de/utf-8/decoder/dfa/
 // for more details.
 
-#ifndef LUG_UTF8_HPP
-#define LUG_UTF8_HPP
+#ifndef LUG_INCLUDE_LUG_UTF8_HPP
+#define LUG_INCLUDE_LUG_UTF8_HPP
 
 #include <lug/unicode.hpp>
 
