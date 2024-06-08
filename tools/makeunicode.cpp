@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <regex>
 #include <set>
 #include <stdexcept>
