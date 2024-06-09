@@ -1241,7 +1241,7 @@ template <> inline constexpr property_enum to_property_enum_v<blktype> = propert
 template <> inline constexpr property_enum to_property_enum_v<agetype> = property_enum::agetype;
 template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
-template <class T> constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
+template <class T> inline constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
 
 // Unicode Character Database record
 class record
