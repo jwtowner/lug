@@ -37,7 +37,7 @@ DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 # distribution files
 DISTFILES = README.md LICENSE.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
 
-all: options samples test
+all: options samples tests
 
 .cpp.o:
 	@echo CXX $<
@@ -57,7 +57,9 @@ $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
-test: $(TESTS_BIN)
+tests: $(TESTS_BIN)
+
+check: tests
 	@sh runtests.sh "tests" $(TESTS_BIN)
 
 lint:
@@ -123,4 +125,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all samples test lint tools unicode options clean dist install uninstall
+.PHONY: all samples tests check lint tools unicode options clean dist install uninstall
