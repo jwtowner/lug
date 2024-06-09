@@ -26,6 +26,6 @@ extracted/DerivedGeneralCategory.txt
 
 for FILE in $UCD_FILES; do
     echo "downloading ${UCD_URL}${FILE}"
-    mkdir -p "ucd/$(dirname ${FILE})"
+    mkdir -p "ucd/$(dirname "${FILE}")"
     curl -s -S -o "ucd/${FILE}" "${UCD_URL}${FILE}"
 done

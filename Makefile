@@ -37,7 +37,7 @@ DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 # distribution files
 DISTFILES = README.md LICENSE.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
 
-all: options samples tests
+all: options samples test
 
 .cpp.o:
 	@echo CXX $<
@@ -57,7 +57,11 @@ $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
-tests: $(TESTS_BIN)
+test: $(TESTS_BIN)
+	@sh runtests.sh "tests" $(TESTS_BIN)
+
+lint:
+	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) lug/detail.hpp
 
 $(TOOLS_OBJ): $(DEPS)
 
@@ -72,12 +76,6 @@ unicode: tools
 	@cd tools/ && sh fetchucd.sh $(UCD_VERSION)
 	@echo generating lug/unicode.hpp
 	@cd tools/ && ./makeunicode > ../lug/unicode.hpp
-
-check: tests
-	@sh runtests.sh "tests" $(TESTS_BIN)
-
-lint:
-	@$(CLANGTIDY) $(CXXFLAGS:%=--extra-arg=%) lug/detail.hpp
 
 options:
 	@echo lug build options:
@@ -123,4 +121,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all samples tests tools unicode check lint options clean dist install uninstall
+.PHONY: all samples test lint tools unicode options clean dist install uninstall
