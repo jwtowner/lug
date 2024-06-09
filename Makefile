@@ -7,6 +7,9 @@ VERSION = 0.2-pre
 # paths
 PREFIX = /usr/local
 
+# unicode character database version
+UCD_VERSION = 15.1.0
+
 # toolchain
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wextra -Wextra-semi -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
@@ -27,9 +30,6 @@ TESTS_OBJ = $(TESTS:%=tests/%.o)
 TOOLS = makeunicode
 TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
-
-# Unicode Character Database version
-UCD_VERSION = 10.0.0
 
 # dependencies
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
@@ -79,11 +79,13 @@ unicode: tools
 
 options:
 	@echo lug build options:
-	@echo "CXX       = $(CXX)"
-	@echo "CXXSTD    = $(CXXSTD)"
-	@echo "CXXFLAGS  = $(CXXFLAGS)"
-	@echo "LDFLAGS   = $(LDFLAGS)"
-	@echo "CLANGTIDY = $(CLANGTIDY)"
+	@echo "CXX         = $(CXX)"
+	@echo "CXXSTD      = $(CXXSTD)"
+	@echo "CXXFLAGS    = $(CXXFLAGS)"
+	@echo "LDFLAGS     = $(LDFLAGS)"
+	@echo "CLANGTIDY   = $(CLANGTIDY)"
+	@echo "PREFIX      = $(PREFIX)"
+	@echo "UCD_VERSION = $(UCD_VERSION)"
 
 clean:
 	@echo cleaning

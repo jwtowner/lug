@@ -123,15 +123,15 @@ static std::vector<std::string> const binary_property_names =
 	"White_Space", "Bidi_Control", "Join_Control", "Dash", "Quotation_Mark", "Terminal_Punctuation",
 	"Other_Math", "Hex_Digit", "ASCII_Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
 	"Other_Lowercase", "Other_Uppercase", "Noncharacter_Code_Point", "Other_Grapheme_Extend",
-	"IDS_Binary_Operator", "IDS_Ternary_Operator", "Radical", "Unified_Ideograph",
-	"Other_Default_Ignorable_Code_Point", "Soft_Dotted", "Logical_Order_Exception", "Other_ID_Start",
-	"Other_ID_Continue", "Sentence_Terminal", "Variation_Selector", "Pattern_White_Space", "Pattern_Syntax",
-	"Prepended_Concatenation_Mark", "Regional_Indicator",
+	"IDS_Binary_Operator", "IDS_Trinary_Operator", "IDS_Unary_Operator", "Radical", "Unified_Ideograph",
+	"Other_Default_Ignorable_Code_Point", "Deprecated", "Soft_Dotted", "Logical_Order_Exception", "Other_ID_Start",
+	"Other_ID_Continue", "ID_Compat_Math_Continue", "ID_Compat_Math_Start", "Sentence_Terminal", "Variation_Selector",
+	"Pattern_White_Space", "Pattern_Syntax", "Prepended_Concatenation_Mark", "Regional_Indicator",
 	// DerivedBinaryProperties.txt
 	"Lowercase", "Uppercase", "Cased", "Case_Ignorable", "Changes_When_Lowercased", "Changes_When_Uppercased",
 	"Changes_When_Titlecased", "Changes_When_Casefolded", "Changes_When_Casemapped", "Alphabetic",
 	"Default_Ignorable_Code_Point", "Grapheme_Base", "Grapheme_Extend", "Math", "ID_Start", "ID_Continue",
-	"XID_Start", "XID_Continue"
+	"XID_Start", "XID_Continue", "Grapheme_Link", "InCB; Linker", "InCB; Consonant", "InCB; Extend"
 };
 
 static auto const binary_properties = build_namemap<enum_type::bitfield, std::uint_least64_t>(binary_property_names);
@@ -201,7 +201,17 @@ static std::vector<std::string> const script_names =
 	// Unicode 8.0.0
 	"Ahom", "Anatolian_Hieroglyphs", "Hatran", "Multani", "Old_Hungarian", "SignWriting",
 	// Unicode 10.0.0
-	"Adlam", "Bhaiksuki", "Marchen", "Newa", "Osage", "Tangut", "Masaram_Gondi", "Nushu", "Soyombo", "Zanabazar_Square"
+	"Adlam", "Bhaiksuki", "Marchen", "Newa", "Osage", "Tangut", "Masaram_Gondi", "Nushu", "Soyombo", "Zanabazar_Square",
+	// Unicode 11.0.0
+	"Dogra", "Gunjala_Gondi", "Makasar", "Medefaidrin", "Hanifi_Rohingya", "Sogdian", "Old_Sogdian",
+	// Unicode 12.0.0
+	"Elymaic", "Nandinagari", "Nyiakeng_Puachue_Hmong", "Wancho",
+	// Unicode 13.0.0
+	"Chorasmian", "Dives_Akuru", "Khitan_Small_Script", "Yezidi",
+	// Unicode 14.0.0
+	"Cypro_Minoan", "Old_Uyghur", "Tangsa", "Toto", "Vithkuqi",
+	// Unicode 15.0.0
+	"Kawi", "Nag_Mundari"
 };
 
 static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
@@ -256,15 +266,32 @@ static std::vector<std::string> const block_names =
 	"Alchemical Symbols", "Geometric Shapes Extended", "Supplemental Arrows-C", "Supplemental Symbols and Pictographs",
 	"CJK Unified Ideographs Extension B", "CJK Unified Ideographs Extension C", "CJK Unified Ideographs Extension D",
 	"CJK Unified Ideographs Extension E", "CJK Unified Ideographs Extension F", "CJK Compatibility Ideographs Supplement",
-	"Tags", "Variation Selectors Supplement", "Supplementary Private Use Area-A", "Supplementary Private Use Area-B"
+	"Tags", "Variation Selectors Supplement", "Supplementary Private Use Area-A", "Supplementary Private Use Area-B",
+	// Unicode 11.0.0
+	"Georgian Extended", "Hanifi Rohingya", "Old Sogdian", "Sogdian", "Dogra", "Gunjala Gondi", "Makasar", "Medefaidrin",
+	"Mayan Numerals", "Indic Siyaq Numbers", "Chess Symbols",
+	// Unicode 12.0.0
+	"Elymaic", "Nandinagari", "Tamil Supplement", "Egyptian Hieroglyph Format Controls", "Small Kana Extension",
+	"Nyiakeng Puachue Hmong", "Wancho", "Ottoman Siyaq Numbers", "Symbols and Pictographs Extended-A",
+	// Unicode 13.0.0
+	"Yezidi", "Chorasmian", "Dives Akuru", "Lisu Supplement", "Khitan Small Script", "Tangut Supplement",
+	"Symbols for Legacy Computing", "CJK Unified Ideographs Extension G",
+	// Unicode 14.0.0
+	"Arabic Extended-B", "Vithkuqi", "Latin Extended-F", "Old Uyghur", "Unified Canadian Aboriginal Syllabics Extended-A",
+	"Cypro-Minoan", "Tangsa", "Kana Extended-B", "Znamenny Musical Notation", "Latin Extended-G", "Toto", "Ethiopic Extended-B",
+	// Unicode 15.0.0
+	"Arabic Extended-C", "Devanagari Extended-A", "Kawi", "Kaktovik Numerals", "Cyrillic Extended-D", "Nag Mundari",
+	"CJK Unified Ideographs Extension H",
+	// Unicode 15.1.0
+	"CJK Unified Ideographs Extension I"
 };
 
 static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(block_names);
 
 static std::vector<std::string> const age_names =
 {
-	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2",
-	"6.0", "6.1", "6.2", "6.3", "7.0", "8.0", "9.0", "10.0"
+	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "6.3",
+	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1"
 };
 
 static auto const ages = build_namemap<enum_type::index, std::uint_least8_t>(age_names);
@@ -289,7 +316,7 @@ static ucd_array<std::int_least32_t> cuppertable; // Simple uppercase conversion
 
 constexpr auto default_rx_options = std::regex::ECMAScript | std::regex::optimize;
 static std::regex const rx_ucd_version(R"(^#\s*\w+-(\d+(\.\d+)+).*)", default_rx_options);
-static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*([\w_.-]+)\s*.*)", default_rx_options);
+static std::regex const rx_ucd_prop_range(R"(^\s*([0-9A-Fa-f]+)(\.\.([0-9A-Fa-f]+))?\s*;\s*([\w_.-]+(;\s+[\w_.-]+)?)\s*.*)", default_rx_options);
 static std::regex const rx_ucd_case_folding(R"(^\s*([0-9A-Fa-f]+);\s*(C|S);\s*([0-9A-Fa-f]+);.*)", default_rx_options);
 
 std::ifstream open_ucd_file_and_read_version(stdfs::path const& filepath, std::string& version)
@@ -927,7 +954,8 @@ auto normalize_property_identifier(std::string_view id)
 {
 	std::string normid;
 	for (char c : id)
-		normid.push_back(c == ' ' || c == '\t' || c == '-' || c == '.' ? '_' : c);
+		if (c != ';')
+			normid.push_back(c == ' ' || c == '\t' || c == '-' || c == '.' ? '_' : c);
 	return normid;
 }
 
@@ -935,7 +963,7 @@ auto normalize_property_label(std::string_view label)
 {
 	std::string normlabel;
 	for (char c : label)
-		if (c != ' ' && c != '\t' && c != '_' && c != '-' && c != '.')
+		if (c != ' ' && c != '\t' && c != '_' && c != '-' && c != '.' && c != ';')
 			normlabel.push_back(static_cast<char>(std::tolower(c)));
 	return normlabel;
 }
@@ -1137,7 +1165,7 @@ namespace lug::unicode {
 	auto const pad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
 	out << "\t" << std::left << std::setw(pad) << "None" << " = 0,\n";
 	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << pnames[i] << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
+		out << "\t" << std::left << std::setw(pad) << normalize_property_identifier(pnames[i]) << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "General categories", [](std::ostream& out) {
@@ -1438,7 +1466,7 @@ inline std::string normalize_property_label(std::string_view id)
 {
 	std::string normid;
 	for (char c : id)
-		if (c != ' ' && c != '\t' && c != '_' && c != '-')
+		if (c != ' ' && c != '\t' && c != '_' && c != '-' && c != '.' && c != ';')
 			normid.push_back(static_cast<char>(std::tolower(c)));
 	return normid;
 }
@@ -1457,7 +1485,7 @@ inline std::string normalize_property_label(std::string_view id)
 << enum_parser_printer("ptype", "pt", [] {
 	std::vector<std::pair<std::string, std::string>> labels;
 	std::transform(binary_property_names.begin(), binary_property_names.end(), std::back_inserter(labels), [](auto& label) {
-		return std::make_pair(normalize_property_label(label), label);
+		return std::make_pair(normalize_property_label(label), normalize_property_identifier(label));
 	});
 	return labels;
 })
