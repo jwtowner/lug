@@ -32,17 +32,17 @@ public:
 	{
 		using namespace lug::language;
 
+		implicit_space_rule SP = *"[ \t]"_rx;
+
 		rule Expr;
 		rule Stmnt;
 
-		[[maybe_unused]] implicit_space_rule SP = *"[ \t]"_rx;
-
 		rule NL     = lexeme["\n"_sx | "\r\n" | "\r"];
-		rule Func   = lexeme[capture(id_)["[A-Za-z]"_rx > *"[0-9A-Za-z]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
-		rule LineNo = lexeme[capture(sv_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{*sv_}); };
-		rule Real   = lexeme[capture(sv_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
-		            > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]         <[this]{ return std::stod(std::string{*sv_}); };
-		rule String = lexeme["\"" > capture(sv_)[*"[^\"]"_rx] > "\""]   <[this]{ return *sv_; };
+		rule Fn     = lexeme["FN"_isx > capture(fn_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(*fn_); };
+		rule LineNo = lexeme[capture(txt_)[+"[0-9]"_rx]]                <[this]{ return std::stoi(std::string{*txt_}); };
+		rule Real   = lexeme[capture(txt_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
+		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]      <[this]{ return std::stod(std::string{*txt_}); };
+		rule String = lexeme["\"" > capture(txt_)[*"[^\"]"_rx] > "\""]  <[this]{ return *txt_; };
 		rule Var    = lexeme[capture(id_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
@@ -60,6 +60,7 @@ public:
 		rule Value  = !("[A-Z][A-Z][A-Z]"_irx > "(")
 		            > ( ref_%Ref                                <[this]{ return **ref_; }
 		                | Real | "(" > Expr > ")" )
+		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(*fn_, *r1_); }
 		            | "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(*r1_); }
 		            | "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(*r1_); }
 		            | "TAN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::tan(*r1_); }
@@ -85,13 +86,15 @@ public:
 		                 | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
 		            )                                           <[this]{ return *r1_; };
 
+		rule FnEval = r1_%Expr > eoi                            <[this]{ fn_result_ = *r1_; };
+
 		rule DimEl  = id_%Var > "(" > r1_%Expr > ","
-		                            > r2_%Expr > ")"            <[this]{ dimension(tables_[*id_], *r1_, *r2_); }
-		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dimension(lists_[*id_], *r1_); };
+		                            > r2_%Expr > ")"            <[this]{ dim(tables_[*id_], *r1_, *r2_); }
+		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dim(lists_[*id_], *r1_); };
 		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
 		rule DataEl = r1_%Real                                  <[this]{ data_.push_back(*r1_); };
 		rule InptEl = ref_%Ref                                  <[this]{ std::cin >> **ref_; };
-		rule PrntEl = sv_%String                                <[this]{ std::cout << *sv_; }
+		rule PrntEl = txt_%String                               <[this]{ std::cout << *txt_; }
 		            | r1_%Expr                                  <[this]{ std::cout << *r1_; };
 
 		     Stmnt  = "IF"_isx > r1_%Expr
@@ -103,6 +106,9 @@ public:
 		                  | eps < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
 		            | "NEXT"_isx > id_%Var                      <[this]{ next(*id_); }
 		            | "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(*no_); }
+		            | "DEF"_isx > fn_%Fn
+		                > "(" > id_%Var > ")"
+		                > "=" > capture(txt_)[*(!NL > any)]     <[this]{ fn_param_body_[*fn_] = { *id_, std::string{*txt_} }; }
 		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ **ref_ = *r1_; }
 		            | "DIM"_isx > DimEl > *("," > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
@@ -119,18 +125,22 @@ public:
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ lines_.clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
 		            | "LIST"_isx                                <[this]{ list(std::cout); }
-		            | "LOAD"_isx > sv_%String                   <[this]{ load(*sv_); }
+		            | "LOAD"_isx > txt_%String                  <[this]{ load(*txt_); }
 		            | "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
-		            | "SAVE"_isx > sv_%String                   <[this]{ save(*sv_); };
+		            | "SAVE"_isx > txt_%String                  <[this]{ save(*txt_); };
 
 		rule Line   = Stmnt > NL
 		            | Cmnd > NL
-		            | no_%LineNo > capture(sv_)[*(!NL > any) > NL] <[this]{ update_line(*no_, *sv_); }
+		            | no_%LineNo
+		                > capture(txt_)[*(!NL > any) > NL]      <[this]{ update_line(*no_, *txt_); }
 		            | NL
 		            | (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); }
 		            | !any                                      <[]    { std::exit(EXIT_SUCCESS); };
 
-		grammar_ = start(Line);
+		rule Init   = [this]{ return fn_eval_; } > FnEval
+		            | [this]{ return !fn_eval_; } > Line;
+
+		grammar_ = start(Init);
 	}
 
 	void repl()
@@ -187,10 +197,12 @@ private:
 	void print_error(char const* message)
 	{
 		std::cerr << message << "\n";
-		if (lastline_ != lines_.end())
-			std::cerr << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
-		line_ = lastline_ = lines_.end();
-		stack_.clear(), for_stack_.clear();
+		if (!fn_eval_) {
+			if (lastline_ != lines_.end())
+				std::cerr << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
+			line_ = lastline_ = lines_.end();
+			stack_.clear(), for_stack_.clear();
+		}
 	}
 
 	void cont()
@@ -312,30 +324,68 @@ private:
 		return (invalid_value_ = std::numeric_limits<double>::quiet_NaN());
 	}
 
-	void dimension(List& lst, double n)
+	void dim(List& lst, double n)
 	{
-		if (n < 0.0)
+		if (n < 0.0) {
 			print_error("ARRAY SIZE OUT OF RANGE");
-		else
-			lst.values = std::vector<double>(static_cast<std::size_t>(n) + 1, 0.0);
+			return;
+		}
+		lst.values = std::vector<double>(static_cast<std::size_t>(n) + 1, 0.0);
 	}
 
-	void dimension(Table& tab, double m, double n)
+	void dim(Table& tab, double m, double n)
 	{
 		if (m < 0.0 || n < 0.0) {
 			print_error("ARRAY SIZE OUT OF RANGE");
-		} else {
-			tab.width = static_cast<std::size_t>(m) + 1;
-			tab.height = static_cast<std::size_t>(n) + 1;
-			tab.values = std::vector<double>(tab.width * tab.height, 0.0);
+			return;
 		}
+		tab.width = static_cast<std::size_t>(m) + 1;
+		tab.height = static_cast<std::size_t>(n) + 1;
+		tab.values = std::vector<double>(tab.width * tab.height, 0.0);
+	}
+
+	double call(const std::string& name, double arg)
+	{
+		auto const fn = fn_param_body_.find(name);
+		if (fn == fn_param_body_.end()) {
+			print_error("UNDEFINED FUNCTION");
+			return 0.0;
+		}
+
+		auto const& [param, body] = fn->second;
+		if (param.empty() || body.empty()) {
+			print_error("UNDEFINED FUNCTION");
+			return 0.0;
+		}
+
+		bool const saved_fn_eval = fn_eval_;
+		fn_eval_ = true;
+
+		double& param_var = vars_[param];
+		double const saved_var = param_var;
+		param_var = arg;
+
+		bool const success = lug::parse(body, grammar_, environment_);
+
+		fn_eval_ = saved_fn_eval;
+		param_var = saved_var;
+
+		if (!success) {
+			print_error("EVALUATION ERROR");
+			return 0.0;
+		}
+
+		return fn_result_;
 	}
 
 	lug::grammar grammar_;
 	lug::environment environment_;
+	lug::variable<std::string> fn_{environment_};
 	lug::variable<std::string> id_{environment_};
-	lug::variable<std::string_view> sv_{environment_};
-	lug::variable<double> r1_{environment_}, r2_{environment_}, r3_{environment_};
+	lug::variable<std::string_view> txt_{environment_};
+	lug::variable<double> r1_{environment_};
+	lug::variable<double> r2_{environment_};
+	lug::variable<double> r3_{environment_};
 	lug::variable<int> no_{environment_};
 	lug::variable<double*> ref_{environment_};
 	lug::variable<RelOpFn> rop_{environment_};
@@ -344,11 +394,14 @@ private:
 	std::unordered_map<std::string, double> vars_;
 	std::unordered_map<std::string, List> lists_;
 	std::unordered_map<std::string, Table> tables_;
+	std::unordered_map<std::string, std::pair<std::string, std::string>> fn_param_body_;
 	std::map<int, std::string> lines_;
 	std::map<int, std::string>::iterator line_{lines_.end()}, lastline_{lines_.end()}, haltline_{lines_.end()};
 	std::vector<std::map<int, std::string>::iterator> stack_;
 	std::vector<std::pair<std::string, std::map<int, std::string>::iterator>> for_stack_;
 	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
+	double fn_result_{0.0};
+	bool fn_eval_{false};
 	bool const stdin_tty_{isatty(fileno(stdin)) != 0};
 };
 

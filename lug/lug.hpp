@@ -188,8 +188,14 @@ class environment
 {
 	friend class lug::parser;
 
-	lug::parser* parser_ = nullptr;
-	std::vector<std::any> attributes_;
+	struct accept_context
+	{
+		lug::parser* parser;
+		std::vector<std::any> attributes;
+		explicit accept_context(lug::parser* p) noexcept : parser{p} {}
+	};
+
+	std::vector<accept_context> context_stack_;
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
 
@@ -198,29 +204,46 @@ class environment
 
 	void start_accept(lug::parser& p)
 	{
-		if (parser_)
-			throw reenterant_accept_error{};
-		parser_ = &p;
-		attributes_.clear();
+		if (context_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
+			throw resource_limit_error{};
+		context_stack_.emplace_back(&p);
 		on_accept_started();
 	}
 
 	void end_accept()
 	{
+		if (context_stack_.empty())
+			throw accept_context_error{};
 		on_accept_ended();
-		parser_ = nullptr;
+		context_stack_.pop_back();
+	}
+
+	accept_context& current_context()
+	{
+		if (context_stack_.empty())
+			throw accept_context_error{};
+		return context_stack_.back();
+	}
+
+	const accept_context& current_context() const
+	{
+		if (context_stack_.empty())
+			throw accept_context_error{};
+		return context_stack_.back();
 	}
 
 public:
 	virtual ~environment() = default;
-	lug::parser& parser() { if (!parser_) throw accept_context_error{}; return *parser_; }
-	lug::parser const& parser() const { if (!parser_) throw accept_context_error{}; return *parser_; }
+	lug::parser& parser() { return *current_context().parser; }
+	lug::parser const& parser() const { return *current_context().parser; }
 	unsigned int tab_width() const { return tab_width_; }
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	unsigned int tab_alignment() const { return tab_alignment_; }
 	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
 	std::string_view match() const;
 	syntax_position const& position_at(std::size_t index);
+	unsigned int variable_instance() const { return (static_cast<unsigned int>(accept_depth()) << 16) | call_depth(); }
+	unsigned short accept_depth() const { return static_cast<unsigned short>(context_stack_.size()); }
 	unsigned short call_depth() const;
 	unsigned short prune_depth() const;
 	void escape();
@@ -228,19 +251,19 @@ public:
 	template <class T>
 	void push_attribute(T&& x)
 	{
-		attributes_.emplace_back(std::in_place_type<T>, std::forward<T>(x));
+		current_context().attributes.emplace_back(std::in_place_type<T>, std::forward<T>(x));
 	}
 
 	template <class T, class... Args>
 	void push_attribute(Args&&... args)
 	{
-		attributes_.emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
+		current_context().attributes.emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
 	}
 
-	template <class T> T pop_attribute()
+	template <class T>
+	T pop_attribute()
 	{
-		T r{std::any_cast<T>(detail::pop_back(attributes_))};
-		return r;
+		return std::any_cast<T>(detail::pop_back(current_context().attributes));
 	}
 };
 
@@ -248,13 +271,13 @@ template <class T>
 class variable
 {
 	environment& environment_;
-	std::unordered_map<unsigned short, T> state_;
+	std::unordered_map<unsigned int, T> state_;
 public:
-	variable(environment& e) : environment_{e} {}
-	T* operator->() { return &state_[environment_.call_depth()]; }
-	T const* operator->() const { return &state_[environment_.call_depth()]; }
-	T& operator*() { return state_[environment_.call_depth()]; }
-	T const& operator*() const { return state_[environment_.call_depth()]; }
+	explicit variable(environment& e) : environment_{e} {}
+	T* operator->() { return &state_[environment_.variable_instance()]; }
+	T const* operator->() const { return &state_[environment_.variable_instance()]; }
+	T& operator*() { return state_[environment_.variable_instance()]; }
+	T const& operator*() const { return state_[environment_.variable_instance()]; }
 };
 
 class encoder
@@ -1155,9 +1178,8 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_set: {
-					auto imm_copy = imm;
-					if (!match_single(sr, [&runes = prog.runesets[imm_copy]](char32_t rune) {
-							auto interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
+					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
+							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
 						goto failure;
 				} break;
@@ -1166,7 +1188,7 @@ public:
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
 								return false;
 							if (U'\r' == rune)
-								if (auto [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
+								if (auto const [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
 									next = next2;
 							return true; }))
 						goto failure;
@@ -1192,7 +1214,7 @@ public:
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						auto memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
+						auto const memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
 								[sr = sr, pca = pc + off](auto const& m){ return m.srr == sr && m.pca == pca ? 1 : (m.srr < sr ? 0 : -1); });
 						if (memo != lrmemo_stack_.crend()) {
 							if (memo->sra == lrfailcode || imm < memo->prec)
@@ -1249,7 +1271,7 @@ public:
 								pop_stack_frame(capture_stack_, sr, mr, rc, pc), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
-								if (auto& memo = lrmemo_stack_.back(); memo.sra != lrfailcode)
+								if (auto const& memo = lrmemo_stack_.back(); memo.sra != lrfailcode)
 									sr = memo.sra, pc = memo.pcr, rc = restore_responses_after(memo.rcr, memo.responses);
 								else
 									++fc;
@@ -1272,7 +1294,7 @@ public:
 				} break;
 				case opcode::predicate: {
 					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-					bool accepted = prog.predicates[imm](*this);
+					bool const accepted = prog.predicates[imm](*this);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
 					pop_responses_after(rc);
 					if (!accepted)
@@ -1288,7 +1310,7 @@ public:
 				case opcode::end: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
-					auto sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
+					auto const sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
 					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
 					if (sr0 > sr1)
 						goto failure;
