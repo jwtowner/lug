@@ -10,9 +10,11 @@
 #define LUG_INCLUDE_LUG_UNICODE_HPP
 
 #include <lug/detail.hpp>
+
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+
 #include <array>
 #include <memory>
 #include <optional>

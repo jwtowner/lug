@@ -7,6 +7,7 @@
 
 #include <lug/error.hpp>
 #include <lug/utf8.hpp>
+
 #include <any>
 #include <iostream>
 #include <numeric>
@@ -896,7 +897,7 @@ class parser
 
 	bool read_more()
 	{
-		detail::reentrancy_sentinel<reenterant_read_error> guard{reading_};
+		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
 			bool more = sources_.back()(text);
@@ -1118,7 +1119,7 @@ public:
 
 	bool parse()
 	{
-		detail::reentrancy_sentinel<reenterant_parse_error> guard{parsing_};
+		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
 		program const& prog = grammar_.program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};

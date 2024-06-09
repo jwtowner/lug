@@ -11,6 +11,7 @@ PREFIX = /usr/local
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wextra -Wextra-semi -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -I.
 LDFLAGS = $(CXXSTD) -s
+CLANGTIDY = clang-tidy
 
 # samples
 SAMPLES = basic calc json
@@ -66,12 +67,16 @@ tools: $(TOOLS_BIN)
 check: tests
 	@sh runtests.sh "tests" $(TESTS_BIN)
 
+lint:
+	@$(CLANGTIDY) $(CXXFLAGS:%=--extra-arg=%) lug/detail.hpp
+
 options:
 	@echo lug build options:
 	@echo "CXX       = $(CXX)"
 	@echo "CXXSTD    = $(CXXSTD)"
 	@echo "CXXFLAGS  = $(CXXFLAGS)"
 	@echo "LDFLAGS   = $(LDFLAGS)"
+	@echo "CLANGTIDY = $(CLANGTIDY)"
 
 clean:
 	@echo cleaning
@@ -108,4 +113,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all check options samples tests tools clean dist install uninstall
+.PHONY: all samples tests tools check lint options clean dist install uninstall

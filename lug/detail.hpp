@@ -38,45 +38,45 @@ namespace lug {
 inline namespace bitfield_ops {
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
-constexpr T operator~(T x) noexcept
+[[nodiscard]] constexpr T operator~(T x) noexcept
 {
-	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x));
+	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
-constexpr T operator&(T x, T y) noexcept
+[[nodiscard]] constexpr T operator&(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
-constexpr T operator|(T x, T y) noexcept
+[[nodiscard]] constexpr T operator|(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y));
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
-constexpr T operator^(T x, T y) noexcept
+[[nodiscard]] constexpr T operator^(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y));
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator&=(T& x, T y) noexcept
 {
-	return (x = x & y);
+	return (x = x & y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator|=(T& x, T y) noexcept
 {
-	return (x = x | y);
+	return (x = x | y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator^=(T& x, T y) noexcept
 {
-	return (x = x ^ y);
+	return (x = x ^ y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 } // namespace bitfield_ops
@@ -84,7 +84,7 @@ constexpr T& operator^=(T& x, T y) noexcept
 namespace detail {
 
 template <class... Args>
-constexpr void ignore(Args&&...) noexcept {}
+constexpr void ignore(Args&&...) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward,hicpp-named-parameter,readability-named-parameter)
 
 template <class T> struct member_pointer_object {};
 template <class T, class U> struct member_pointer_object<T U::*> { using type = U; };
@@ -104,26 +104,26 @@ public:
 	using iterator_category = typename std::iterator_traits<base_type>::iterator_category;
 	constexpr member_access_iterator() noexcept : object_{} {}
 	constexpr explicit member_access_iterator(ObjectIterator obj) : object_{obj} {}
-	constexpr base_type base() const { return object_; }
-	constexpr pointer operator->() const { return (*object_).*MemberPtr; }
-	constexpr reference operator*() const { return (*object_).*MemberPtr; }
-	constexpr reference operator[](difference_type n) const { return (object_[n]).*MemberPtr; }
-	member_access_iterator& operator++() { ++object_; return *this; }
-	member_access_iterator& operator--() { --object_; return *this; }
-	member_access_iterator operator++(int) { member_access_iterator i{object_}; ++object_; return i; }
-	member_access_iterator operator--(int) { member_access_iterator i{object_}; --object_; return i; }
-	member_access_iterator& operator+=(difference_type n) { object_ += n; return *this; }
-	member_access_iterator& operator-=(difference_type n) { object_ -= n; return *this; }
-	friend constexpr bool operator==(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ == y.object_; }
-	friend constexpr bool operator!=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ != y.object_; }
-	friend constexpr bool operator<(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ < y.object_; }
-	friend constexpr bool operator<=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ <= y.object_; }
-	friend constexpr bool operator>(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ > y.object_; }
-	friend constexpr bool operator>=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ >= y.object_; }
-	friend constexpr member_access_iterator operator+(member_access_iterator const& x, difference_type n) noexcept { return member_access_iterator{x.object_ + n}; }
-	friend constexpr member_access_iterator operator+(difference_type n, member_access_iterator const& x) noexcept { return member_access_iterator{x.object_ + n}; }
-	friend constexpr member_access_iterator operator-(member_access_iterator const& x, difference_type n) noexcept { return member_access_iterator{x.object_ - n}; }
-	friend constexpr difference_type operator-(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ - y.object_; }
+	[[nodiscard]] constexpr base_type base() const { return object_; }
+	[[nodiscard]] constexpr pointer operator->() const { return (*object_).*MemberPtr; }
+	[[nodiscard]] constexpr reference operator*() const { return (*object_).*MemberPtr; }
+	[[nodiscard]] constexpr reference operator[](difference_type n) const { return (object_[n]).*MemberPtr; }
+	constexpr member_access_iterator& operator++() { ++object_; return *this; }
+	constexpr member_access_iterator& operator--() { --object_; return *this; }
+	constexpr member_access_iterator operator++(int) { member_access_iterator const i{object_}; ++object_; return i; }
+	constexpr member_access_iterator operator--(int) { member_access_iterator const i{object_}; --object_; return i; }
+	constexpr member_access_iterator& operator+=(difference_type n) { object_ += n; return *this; }
+	constexpr member_access_iterator& operator-=(difference_type n) { object_ -= n; return *this; }
+	[[nodiscard]] friend constexpr bool operator==(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ == y.object_; }
+	[[nodiscard]] friend constexpr bool operator!=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ != y.object_; }
+	[[nodiscard]] friend constexpr bool operator<(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ < y.object_; }
+	[[nodiscard]] friend constexpr bool operator<=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ <= y.object_; }
+	[[nodiscard]] friend constexpr bool operator>(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ > y.object_; }
+	[[nodiscard]] friend constexpr bool operator>=(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ >= y.object_; }
+	[[nodiscard]] friend constexpr member_access_iterator operator+(member_access_iterator const& x, difference_type n) noexcept { return member_access_iterator{x.object_ + n}; }
+	[[nodiscard]] friend constexpr member_access_iterator operator+(difference_type n, member_access_iterator const& x) noexcept { return member_access_iterator{x.object_ + n}; }
+	[[nodiscard]] friend constexpr member_access_iterator operator-(member_access_iterator const& x, difference_type n) noexcept { return member_access_iterator{x.object_ - n}; }
+	[[nodiscard]] friend constexpr difference_type operator-(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ - y.object_; }
 private:
 	ObjectIterator object_;
 };
@@ -135,26 +135,33 @@ constexpr auto make_member_accessor(ObjectIterator b)
 }
 
 template <class T>
-struct dynamic_cast_if_base_of
+class dynamic_cast_if_base_of
 {
-	std::remove_reference_t<T>& value;
+	std::remove_reference_t<T>& value; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+
+public:
+	constexpr explicit dynamic_cast_if_base_of(std::remove_reference_t<T>& x) noexcept
+		: value{x}
+	{}
 
 	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
-	operator U&() const volatile {
+	[[nodiscard]] constexpr operator U&() const // NOLINT(hicpp-explicit-conversions)
+	{
 		return dynamic_cast<std::remove_reference_t<U>&>(value);
 	}
 };
 
 template <class Error>
-struct reentrancy_sentinel
+class reentrancy_sentinel
 {
-	bool& value;
+	bool& value; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
 
-	reentrancy_sentinel(bool& x)
+public:
+	constexpr explicit reentrancy_sentinel(bool& x)
 		: value{x}
 	{
 		if (value)
-			throw Error{};
+			throw Error();
 		value = true;
 	}
 
@@ -162,20 +169,25 @@ struct reentrancy_sentinel
 	{
 		value = false;
 	}
+
+	reentrancy_sentinel(reentrancy_sentinel const&) = delete;
+	reentrancy_sentinel(reentrancy_sentinel&&) = delete;
+	reentrancy_sentinel& operator=(reentrancy_sentinel const&) = delete;
+	reentrancy_sentinel& operator=(reentrancy_sentinel&&) = delete;
 };
 
 template <class Error, class T, class U, class V>
 inline void assure_in_range(T x, U minval, V maxval)
 {
-	if (!(minval <= x && x <= maxval))
-		throw Error{};
+	if (!((minval <= x) && (x <= maxval)))
+		throw Error();
 }
 
 template <class Error, class T, class U>
 inline auto checked_add(T x, U y)
 {
-	if ((std::numeric_limits<decltype(x + y)>::max)() - x < y)
-		throw Error{};
+	if (((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
+		throw Error();
 	return x + y;
 }
 
@@ -186,12 +198,13 @@ constexpr auto make_tuple_view(Tuple&& t) noexcept
 }
 
 template<class InputIt, class UnaryPredicate>
-inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate p)
+inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
 {
 	for ( ; first != last; ++first) {
-		if (int status = p(*first); status > 0)
+		const int status = pred(*first);
+		if (status > 0)
 			return first;
-		else if (status < 0)
+		if (status < 0)
 			break;
 	}
 	return last;
@@ -207,7 +220,7 @@ inline std::size_t push_back_unique(Sequence& s, T&& x)
 }
 
 template <class Sequence>
-inline auto pop_back(Sequence& s)
+inline auto pop_back(Sequence& s) -> typename Sequence::value_type
 {
 	typename Sequence::value_type result{std::move(s.back())};
 	s.pop_back();
@@ -217,13 +230,13 @@ inline auto pop_back(Sequence& s)
 template <class Integral>
 inline std::string string_pack(Integral n)
 {
-	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)};
+	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }
 
 template <class Integral>
 inline Integral string_unpack(std::string_view s)
 {
-	return *reinterpret_cast<Integral const*>(s.data());
+	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }
 
 } // namespace detail
