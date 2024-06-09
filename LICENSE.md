@@ -1,6 +1,6 @@
 MIT License
 ===
-Copyright © 2017 Jesse W. Towner <townerj AT gmail DOT com>
+Copyright © 2017-2024 Jesse W. Towner <townerj AT gmail DOT com>
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
