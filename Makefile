@@ -28,6 +28,9 @@ TOOLS = makeunicode
 TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
+# Unicode Character Database version
+UCD_VERSION = 10.0.0
+
 # dependencies
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
@@ -64,6 +67,12 @@ $(TOOLS_BIN): $(TOOLS_OBJ)
 
 tools: $(TOOLS_BIN)
 
+unicode: tools
+	@echo fetching Unicode Character Database $(UCD_VERSION)
+	@cd tools/ && sh fetchucd.sh $(UCD_VERSION)
+	@echo generating lug/unicode.hpp
+	@cd tools/ && ./makeunicode > ../lug/unicode.hpp
+
 check: tests
 	@sh runtests.sh "tests" $(TESTS_BIN)
 
@@ -81,6 +90,7 @@ options:
 clean:
 	@echo cleaning
 	@rm -f $(SAMPLES_BIN) $(SAMPLES_OBJ) $(TESTS_BIN) $(TESTS_OBJ) $(TOOLS_BIN) $(TOOLS_OBJ) lug-$(VERSION).tar.gz
+	@rm -rf tools/ucd
 
 dist: clean
 	@echo creating dist tarball
@@ -113,4 +123,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all samples tests tools check lint options clean dist install uninstall
+.PHONY: all samples tests tools unicode check lint options clean dist install uninstall

@@ -415,15 +415,15 @@ void read_and_build_tables()
 			set_ptable_bits(0x0a, 0x0d, "Line_Ending");
 			set_ptable_bits(0x85, 0x85, "Line_Ending");
 			set_ptable_bits(0x2028, 0x2029, "Line_Ending");
-			auto proplist_version = read_ucd_prop_array("PropList.txt", set_ptable_bits);
-			auto dcp_version = read_ucd_prop_array("DerivedCoreProperties.txt", set_ptable_bits);
+			auto proplist_version = read_ucd_prop_array("ucd/PropList.txt", set_ptable_bits);
+			auto dcp_version = read_ucd_prop_array("ucd/DerivedCoreProperties.txt", set_ptable_bits);
 			return std::vector<std::string>{proplist_version, dcp_version};
 		});
 
 		// read in general category table
 		auto pending_gcversion = std::async(std::launch::async, [] {
 			std::fill(std::execution::par_unseq, gctable.begin(), gctable.end(), general_categories.find("Cn")->second);
-			return read_ucd_prop_array("DerivedGeneralCategory.txt", [](auto start, auto end, auto const& value) {
+			return read_ucd_prop_array("ucd/extracted/DerivedGeneralCategory.txt", [](auto start, auto end, auto const& value) {
 				if (auto category = general_categories.find(value); category != general_categories.end())
 					std::fill(std::execution::par_unseq, gctable.begin() + start, gctable.begin() + end + 1, category->second);
 			});
@@ -432,7 +432,7 @@ void read_and_build_tables()
 		// read in casefolding table
 		auto pending_cfoldversion = std::async(std::launch::async, [] {
 			std::fill(std::execution::par_unseq, cfoldtable.begin(), cfoldtable.end(), 0);
-			return read_ucd_case_array("CaseFolding.txt", [](auto code, auto mapping) {
+			return read_ucd_case_array("ucd/CaseFolding.txt", [](auto code, auto mapping) {
 				if (cfoldtable[code] == 0)
 					cfoldtable[code] = static_cast<std::int_least32_t>(mapping) - static_cast<std::int_least32_t>(code);
 			});
@@ -507,7 +507,7 @@ void read_and_build_tables()
 		// read in East Asian width and setup column width values in width table
 		auto pending_eawidthversion = std::async(std::launch::async, [] {
 			std::fill(std::execution::par_unseq, widthtable.begin(), widthtable.end(), eawidths.find("N")->second);
-			auto width = read_ucd_case_array("EastAsianWidth.txt", [](auto start, auto end, auto const& value) {
+			auto width = read_ucd_case_array("ucd/EastAsianWidth.txt", [](auto start, auto end, auto const& value) {
 				if (auto eawidth = eawidths.find(value); eawidth != eawidths.end())
 					std::fill(std::execution::par_unseq, widthtable.begin() + start, widthtable.begin() + end + 1, eawidth->second);
 			});
@@ -575,7 +575,7 @@ void read_and_build_tables()
 	// load in the scripts table
 	auto pending_scversion = std::async(std::launch::async, [] {
 		std::fill(std::execution::par_unseq, sctable.begin(), sctable.end(), scripts.find("Unknown")->second);
-		return read_ucd_prop_array("Scripts.txt", [](auto start, auto end, auto const& value) {
+		return read_ucd_prop_array("ucd/Scripts.txt", [](auto start, auto end, auto const& value) {
 			if (auto script = scripts.find(value); script != scripts.end())
 				std::fill(std::execution::par_unseq, sctable.begin() + start, sctable.begin() + end + 1, script->second);
 		});
@@ -584,7 +584,7 @@ void read_and_build_tables()
 	// load in the blocks table
 	auto pending_blockversion = std::async(std::launch::async, [] {
 		std::fill(std::execution::par_unseq, blocktable.begin(), blocktable.end(), blocks.find("No_block")->second);
-		return read_ucd_prop_array("Blocks.txt", [](auto start, auto end, auto const& value) {
+		return read_ucd_prop_array("ucd/Blocks.txt", [](auto start, auto end, auto const& value) {
 			if (auto block = blocks.find(value); block != blocks.end())
 				std::fill(std::execution::par_unseq, blocktable.begin() + start, blocktable.begin() + end + 1, block->second);
 		});
@@ -593,7 +593,7 @@ void read_and_build_tables()
 	// load in the age table
 	auto pending_ageversion = std::async(std::launch::async, [] {
 		std::fill(std::execution::par_unseq, agetable.begin(), agetable.end(), ages.find("Unassigned")->second);
-		return read_ucd_prop_array("DerivedAge.txt", [](auto start, auto end, auto const& value) {
+		return read_ucd_prop_array("ucd/DerivedAge.txt", [](auto start, auto end, auto const& value) {
 			if (auto age = ages.find(value); age != ages.end())
 				std::fill(std::execution::par_unseq, agetable.begin() + start, agetable.begin() + end + 1, age->second);
 		});
