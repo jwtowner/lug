@@ -87,7 +87,9 @@ public:
 		                 | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
 		            )                                           <[this]{ return *r1_; };
 
-		rule FnEval = r1_%Expr > eoi                            <[this]{ fn_result_ = *r1_; };
+		rule Rem    = "REM"_isx > *(!NL > any);
+
+		rule FnEval = r1_%Expr > ~Rem > eoi                     <[this]{ fn_result_ = *r1_; };
 
 		rule DimEl  = id_%Var > "(" > r1_%Expr > ","
 		                            > r2_%Expr > ")"            <[this]{ dim(tables_[*id_], *r1_, *r2_); }
@@ -114,14 +116,14 @@ public:
 		            | "DIM"_isx > DimEl > *("," > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
 		            | "READ"_isx > ReadEl > *("," > ReadEl)
+		            | "DATA"_isx > DataEl > *("," > DataEl)
 		            | "INPUT"_isx > InptEl > *("," > InptEl)
 		            | "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[]    { std::cout << std::endl; }
 		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
-		            | "END"_isx                                 <[this]{ if (line_ == lines_.end()) std::exit(EXIT_SUCCESS); line_ = lines_.end(); }
-		            | ("EXIT"_isx | "QUIT"_isx)                 <[]    { std::exit(EXIT_SUCCESS); }
-		            | "REM"_isx > *(!NL > any);
+		            | "END"_isx                                 <[this]{ line_ = lines_.end(); }
+		            | ("EXIT"_isx | "QUIT"_isx)                 <[]    { std::exit(EXIT_SUCCESS); };
 
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ lines_.clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
@@ -130,8 +132,9 @@ public:
 		            | "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
 		            | "SAVE"_isx > txt_%String                  <[this]{ save(*txt_); };
 
-		rule Line   = Stmnt > NL
-		            | Cmnd > NL
+		rule Line   = Rem > NL
+		            | Stmnt > ~Rem > NL
+		            | Cmnd > ~Rem > NL
 		            | no_%LineNo
 		                > capture(txt_)[*(!NL > any) > NL]      <[this]{ update_line(*no_, *txt_); }
 		            | NL
@@ -154,6 +157,7 @@ public:
 			} else {
 				if (stdin_tty_)
 					std::cout << "> " << std::flush;
+				std::cin >> std::ws;
 				if (!std::getline(std::cin, out))
 					return false;
 				out.push_back('\n');
@@ -202,7 +206,8 @@ private:
 			if (lastline_ != lines_.end())
 				std::cerr << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
 			line_ = lastline_ = lines_.end();
-			stack_.clear(), for_stack_.clear();
+			stack_.clear();
+			for_stack_.clear();
 		}
 	}
 
@@ -257,10 +262,12 @@ private:
 
 	void retsub()
 	{
-		if (!stack_.empty())
-			line_ = stack_.back(), stack_.pop_back();
-		else
+		if (!stack_.empty()) {
+			line_ = stack_.back();
+			stack_.pop_back();
+		} else {
 			print_error("ILLEGAL RETURN");
+		}
 	}
 
 	void for_to_step(std::string const& id, double from, double to, double step)
@@ -272,7 +279,7 @@ private:
 				for_stack_.emplace_back(id, lastline_);
 				v = from;
 			}
-			if ((step >= 0 && v <= to) || (step < 0 && v >= to))
+			if (((step >= 0) && (v <= to)) || ((step < 0) && (v >= to)))
 				return;
 			for_stack_.pop_back();
 			for (auto k = id.size(); line_ != lines_.end(); ++line_) {
@@ -291,7 +298,7 @@ private:
 
 	void next(std::string const& id)
 	{
-		if (lastline_ != lines_.end() && !for_stack_.empty() && for_stack_.back().first == id) {
+		if ((lastline_ != lines_.end()) && !for_stack_.empty() && (for_stack_.back().first == id)) {
 			lastline_ = line_;
 			line_ = for_stack_.back().second;
 		} else {
@@ -336,7 +343,7 @@ private:
 
 	void dim(Table& tab, double m, double n)
 	{
-		if (m < 0.0 || n < 0.0) {
+		if ((m < 0.0) || (n < 0.0)) {
 			print_error("ARRAY SIZE OUT OF RANGE");
 			return;
 		}
