@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <deque>
 #include <fstream>
 #include <iomanip>
@@ -57,7 +58,7 @@ public:
 		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ return &at(lists_[*id_], *r1_); }
 		            | id_%Var                                   <[this]{ return &vars_[*id_]; };
 
-		rule Value  = !("[A-Z][A-Z][A-Z]"_irx > "(")
+		rule Value  = !"[A-Z][A-Z][A-Z]"_irx
 		            > ( ref_%Ref                                <[this]{ return **ref_; }
 		                | Real | "(" > Expr > ")" )
 		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(*fn_, *r1_); }
@@ -70,7 +71,7 @@ public:
 		            | "LOG"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::log(*r1_); }
 		            | "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(*r1_); }
 		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
-		            | "RND"_isx > "(" > r1_%Expr > ")"          <[]    { return std::rand() / static_cast<double>(RAND_MAX); };
+		            | "RND"_isx > ~ ( "(" > ~Expr > ")" )       <[]    { return std::rand() / static_cast<double>(RAND_MAX); };
 
 		rule Factor = r1_%Value > ~(u8"[↑^]"_rx > r2_%Value     <[this]{ *r1_ = std::pow(*r1_, *r2_); }
 		            )                                           <[this]{ return *r1_; };
@@ -408,6 +409,7 @@ private:
 int main(int argc, char** argv)
 {
 	try {
+		std::srand(std::time(nullptr));
 		basic_interpreter interpreter;
 		while (--argc > 1)
 			interpreter.load(*++argv);
