@@ -15,76 +15,81 @@
 namespace lug::utf8 {
 
 template <class InputIt, class T = void>
-using enable_if_char_input_iterator_t = std::enable_if_t<!std::is_integral_v<InputIt> &&
+using enable_if_char_input_iterator_t =
+	std::enable_if_t<!std::is_integral_v<InputIt> &&
 	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<InputIt>::iterator_category> &&
 	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<InputIt>::value_type>>, T>;
+
+namespace detail {
 
 inline constexpr unsigned int decode_accept = 0;
 inline constexpr unsigned int decode_reject = 12;
 
-constexpr bool is_lead(char octet) noexcept
+inline constexpr std::array<unsigned char, 256> dfa_class_table
+{
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	8, 8, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	10, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 3, 3,
+	11, 6, 6, 6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8
+};
+
+inline constexpr std::array<unsigned char, 108> dfa_transition_table
+{
+	0,12,24,36,60,96,84,12,12,12,48,72,12,12,12,12,
+	12,12,12,12,12,12,12,12,12, 0,12,12,12,12,12, 0,
+	12, 0,12,12,12,24,12,12,12,12,12,24,12,24,12,12,
+	12,12,12,12,12,12,12,24,12,12,12,12,12,24,12,12,
+	12,12,12,12,12,24,12,12,12,12,12,12,12,12,12,36,
+	12,36,12,12,12,36,12,12,12,12,12,36,12,36,12,12,
+	12,36,12,12,12,12,12,12,12,12,12,12
+};
+
+} // namespace detail
+
+[[nodiscard]] constexpr bool is_lead(char octet) noexcept
 {
 	return (static_cast<unsigned char>(octet) & 0xc0) != 0x80;
 }
 
-inline unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state)
+[[nodiscard]] constexpr unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state)
 {
-	static constexpr std::array<unsigned char, 256> dfa_class_table
-	{
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-		 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
-		 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-		 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
-		 8, 8, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		10, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 3, 3,
-		11, 6, 6, 6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8
-	};
-
-	static constexpr std::array<unsigned char, 108> dfa_transition_table
-	{
-		 0,12,24,36,60,96,84,12,12,12,48,72,12,12,12,12,
-		12,12,12,12,12,12,12,12,12, 0,12,12,12,12,12, 0,
-		12, 0,12,12,12,24,12,12,12,12,12,24,12,24,12,12,
-		12,12,12,12,12,12,12,24,12,12,12,12,12,24,12,12,
-		12,12,12,12,12,24,12,12,12,12,12,12,12,12,12,36,
-		12,36,12,12,12,36,12,12,12,12,12,36,12,36,12,12,
-		12,36,12,12,12,12,12,12,12,12,12,12
-	};
-
 	unsigned int const symbol = static_cast<unsigned char>(octet);
-	unsigned int const dfa_class = dfa_class_table[symbol];
-	rune = state == decode_accept ? symbol & (0xff >> dfa_class) : (symbol & 0x3f) | (rune << 6);
-	return dfa_transition_table[state + dfa_class];
+	unsigned int const dfa_class = detail::dfa_class_table[symbol];
+	rune = state == detail::decode_accept ? symbol & (0xff >> dfa_class) : (symbol & 0x3f) | (rune << 6);
+	return detail::dfa_transition_table[state + dfa_class];
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
-inline std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
+[[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
 {
 	char32_t rune = U'\0';
-	unsigned int state = decode_accept;
-	while (first != last && state != decode_reject)
-		if (state = lug::utf8::decode_rune_octet(rune, *first++, state); state == decode_accept)
+	unsigned int state = detail::decode_accept;
+	while (first != last && state != detail::decode_reject)
+		if (state = lug::utf8::decode_rune_octet(rune, *first++, state); state == detail::decode_accept)
 			return std::make_pair(first, rune);
 	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), U'\U0000fffd');
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
-inline InputIt next_rune(InputIt first, InputIt last)
+[[nodiscard]] constexpr InputIt next_rune(InputIt first, InputIt last)
 {
 	return lug::utf8::decode_rune(first, last).first;
 }
 
 template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
-inline std::size_t count_runes(InputIt first, InputIt last)
+[[nodiscard]] constexpr std::size_t count_runes(InputIt first, InputIt last)
 {
 	std::size_t count = 0;
 	for (; first != last; ++count)
@@ -107,7 +112,7 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return {dst, true};
 }
 
-inline std::string encode_rune(char32_t rune)
+[[nodiscard]] inline std::string encode_rune(char32_t rune)
 {
 	std::string result;
 	encode_rune(std::back_inserter(result), rune);
@@ -125,7 +130,7 @@ inline OutputIt tocasefold(InputIt first, InputIt last, OutputIt dst)
 	return dst;
 }
 
-inline std::string tocasefold(std::string_view src)
+[[nodiscard]] inline std::string tocasefold(std::string_view src)
 {
 	std::string result;
 	result.reserve(src.size());
@@ -144,7 +149,7 @@ inline OutputIt tolower(InputIt first, InputIt last, OutputIt dst)
 	return dst;
 }
 
-inline std::string tolower(std::string_view src)
+[[nodiscard]] inline std::string tolower(std::string_view src)
 {
 	std::string result;
 	result.reserve(src.size());
@@ -163,7 +168,7 @@ inline OutputIt toupper(InputIt first, InputIt last, OutputIt dst)
 	return dst;
 }
 
-inline std::string toupper(std::string_view src)
+[[nodiscard]] inline std::string toupper(std::string_view src)
 {
 	std::string result;
 	result.reserve(src.size());

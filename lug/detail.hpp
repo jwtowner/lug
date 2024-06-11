@@ -138,7 +138,7 @@ private:
 };
 
 template <class MemberPtrType, MemberPtrType MemberPtr, class ObjectIterator>
-constexpr auto make_member_accessor(ObjectIterator b)
+[[nodiscard]] constexpr auto make_member_accessor(ObjectIterator b)
 {
 	return member_access_iterator<ObjectIterator, MemberPtrType, MemberPtr>{b};
 }
@@ -193,7 +193,7 @@ inline void assure_in_range(T x, U minval, V maxval)
 }
 
 template <class Error, class T, class U>
-inline auto checked_add(T x, U y)
+[[nodiscard]] inline auto checked_add(T x, U y)
 {
 	if (((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
 		throw Error();
@@ -201,13 +201,13 @@ inline auto checked_add(T x, U y)
 }
 
 template <std::size_t... Indices, class Tuple>
-constexpr auto make_tuple_view(Tuple&& t) noexcept
+[[nodiscard]] constexpr auto make_tuple_view(Tuple&& t) noexcept
 {
 	return std::forward_as_tuple(std::get<Indices>(std::forward<Tuple>(t))...);
 }
 
 template<class InputIt, class UnaryPredicate>
-inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
+[[nodiscard]] inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
 {
 	for ( ; first != last; ++first) {
 		const int status = pred(*first);
@@ -229,7 +229,7 @@ inline std::size_t push_back_unique(Sequence& s, T&& x)
 }
 
 template <class Sequence>
-inline auto pop_back(Sequence& s) -> typename Sequence::value_type
+[[nodiscard]] inline auto pop_back(Sequence& s) -> typename Sequence::value_type
 {
 	typename Sequence::value_type result{std::move(s.back())};
 	s.pop_back();
@@ -237,13 +237,13 @@ inline auto pop_back(Sequence& s) -> typename Sequence::value_type
 }
 
 template <class Integral>
-inline std::string string_pack(Integral n)
+[[nodiscard]] inline std::string string_pack(Integral n)
 {
 	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }
 
 template <class Integral>
-inline Integral string_unpack(std::string_view s)
+[[nodiscard]] inline Integral string_unpack(std::string_view s)
 {
 	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }

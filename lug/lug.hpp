@@ -17,7 +17,6 @@
 
 namespace lug {
 
-struct program;
 class rule;
 class grammar;
 class encoder;
@@ -25,7 +24,7 @@ class rule_encoder;
 class parser;
 class syntax;
 class environment;
-
+struct program;
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
@@ -39,7 +38,7 @@ template <class E> inline constexpr bool is_proper_expression_v = std::is_invoca
 template <class E> inline constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> inline constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
 
-grammar start(rule const& start_rule);
+[[nodiscard]] grammar start(rule const& start_rule);
 
 enum class opcode : unsigned char
 {
@@ -56,16 +55,16 @@ enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, is_bitfi
 
 union instruction
 {
-	static constexpr std::size_t maxstrlen = 256;
+	static inline constexpr std::size_t maxstrlen = 256;
 	struct prefix { opcode op; operands aux; unsigned short val; } pf;
 	int off;
 	std::array<char, 4> str;
 
-	instruction(opcode op, operands aux, immediate imm) : pf{op, aux, static_cast<unsigned short>(imm)} {}
-	instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_limit_error{}; }
-	instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
+	instruction(opcode op, operands aux, immediate imm) noexcept : pf{op, aux, static_cast<unsigned short>(imm)} {}
+	explicit instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_limit_error{}; }
+	explicit instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
-	static auto decode(std::vector<instruction> const& code, std::ptrdiff_t& pc)
+	[[nodiscard]] static auto decode(std::vector<instruction> const& code, std::ptrdiff_t& pc)
 	{
 		const prefix pf = code[static_cast<std::size_t>(pc++)].pf;
 		const int off = ((pf.aux & operands::off) != operands::none) ? code[static_cast<std::size_t>(pc++)].off : 0;
@@ -79,7 +78,7 @@ union instruction
 		return std::make_tuple(pf.op, imm, off, str);
 	}
 
-	static std::ptrdiff_t length(prefix pf) noexcept
+	[[nodiscard]] static std::ptrdiff_t length(prefix pf) noexcept
 	{
 		std::ptrdiff_t len = 1;
 		len += ((pf.aux & operands::off) != operands::none) ? 1 : 0;
@@ -129,7 +128,7 @@ struct program
 		mandate = (mandate & ~directives::eps) | (mandate & src.mandate & directives::eps);
 	}
 
-	void swap(program& p)
+	void swap(program& p) noexcept
 	{
 		instructions.swap(p.instructions);
 		runesets.swap(p.runesets);
@@ -155,7 +154,7 @@ public:
 	rule(rule&& r) = default;
 	rule& operator=(rule const& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
-	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
+	void swap(rule& r) noexcept { program_.swap(r.program_); callees_.swap(r.callees_); }
 	[[nodiscard]] auto operator[](unsigned short precedence) const noexcept;
 };
 
@@ -166,8 +165,8 @@ class grammar
 	grammar(lug::program p) : program_{std::move(p)} {}
 public:
 	grammar() = default;
-	void swap(grammar& g) { program_.swap(g.program_); }
-	lug::program const& program() const noexcept { return program_; }
+	void swap(grammar& g) noexcept { program_.swap(g.program_); }
+	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
 	static thread_local std::function<void(encoder&)> implicit_space;
 };
 
@@ -176,12 +175,12 @@ class syntax
 	lug::parser& parser_;
 	syntax_range const range_;
 public:
-	syntax(lug::parser& p, syntax_range const& r) : parser_{p}, range_{r} {}
-	lug::parser& parser() const noexcept { return parser_; }
-	syntax_range range() const noexcept { return range_; }
-	syntax_position const& start() const;
-	syntax_position const& end() const;
-	std::string_view capture() const;
+	syntax(lug::parser& p, syntax_range const& r) noexcept : parser_{p}, range_{r} {}
+	[[nodiscard]] lug::parser& parser() const noexcept { return parser_; }
+	[[nodiscard]] syntax_range range() const noexcept { return range_; }
+	[[nodiscard]] syntax_position const& start() const;
+	[[nodiscard]] syntax_position const& end() const;
+	[[nodiscard]] std::string_view capture() const;
 };
 
 class environment
@@ -219,14 +218,14 @@ class environment
 		context_stack_.pop_back();
 	}
 
-	accept_context& current_context()
+	[[nodiscard]] accept_context& current_context()
 	{
 		if (context_stack_.empty())
 			throw accept_context_error{};
 		return context_stack_.back();
 	}
 
-	const accept_context& current_context() const
+	[[nodiscard]] const accept_context& current_context() const
 	{
 		if (context_stack_.empty())
 			throw accept_context_error{};
@@ -235,23 +234,23 @@ class environment
 
 public:
 	virtual ~environment() = default;
-	lug::parser& parser() { return *current_context().parser; }
-	lug::parser const& parser() const { return *current_context().parser; }
-	unsigned int tab_width() const { return tab_width_; }
+	[[nodiscard]] lug::parser& parser() { return *(current_context().parser); }
+	[[nodiscard]] lug::parser const& parser() const { return *(current_context().parser); }
+	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
 	void tab_width(unsigned int w) { tab_width_ = w; }
-	unsigned int tab_alignment() const { return tab_alignment_; }
+	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
 	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
-	bool has_condition(std::string_view c) const noexcept { return conditions_.count(std::string{c}) > 0; }
+	[[nodiscard]] bool has_condition(std::string_view c) const noexcept { return (conditions_.count(std::string{c}) > 0); }
 	void set_condition(std::string_view c) { conditions_.insert(std::string{c}); }
 	void unset_condition(std::string_view c) { conditions_.erase(std::string{c}); }
 	void clear_conditions() { conditions_.clear(); }
 	template <bool B> void modify_condition(std::string_view c) { if constexpr (B) set_condition(c); else unset_condition(c); }
-	std::string_view match() const;
-	syntax_position const& position_at(std::size_t index);
-	unsigned int variable_instance() const { return (static_cast<unsigned int>(accept_depth()) << 16) | call_depth(); }
-	unsigned short accept_depth() const { return static_cast<unsigned short>(context_stack_.size()); }
-	unsigned short call_depth() const;
-	unsigned short prune_depth() const;
+	[[nodiscard]] std::string_view match() const;
+	[[nodiscard]] syntax_position const& position_at(std::size_t index);
+	[[nodiscard]] unsigned int variable_instance() const { return (static_cast<unsigned int>(accept_depth()) << 16) | call_depth(); }
+	[[nodiscard]] unsigned short accept_depth() const { return static_cast<unsigned short>(context_stack_.size()); }
+	[[nodiscard]] unsigned short call_depth() const;
+	[[nodiscard]] unsigned short prune_depth() const;
 	void escape();
 
 	template <class T>
@@ -267,7 +266,7 @@ public:
 	}
 
 	template <class T>
-	T pop_attribute()
+	[[nodiscard]] T pop_attribute()
 	{
 		return std::any_cast<T>(detail::pop_back(current_context().attributes));
 	}
@@ -280,10 +279,10 @@ class variable
 	std::unordered_map<unsigned int, T> state_;
 public:
 	explicit variable(environment& e) : environment_{e} {}
-	T* operator->() { return &state_[environment_.variable_instance()]; }
-	T const* operator->() const { return &state_[environment_.variable_instance()]; }
-	T& operator*() { return state_[environment_.variable_instance()]; }
-	T const& operator*() const { return state_[environment_.variable_instance()]; }
+	[[nodiscard]] T* operator->() { return &state_[environment_.variable_instance()]; }
+	[[nodiscard]] T const* operator->() const { return &state_[environment_.variable_instance()]; }
+	[[nodiscard]] T& operator*() { return state_[environment_.variable_instance()]; }
+	[[nodiscard]] T const& operator*() const { return state_[environment_.variable_instance()]; }
 };
 
 class encoder
@@ -350,9 +349,9 @@ public:
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, syntactic_capture c) { return append(instruction{op, operands::none, do_add_syntactic_capture(std::move(c))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
-	std::ptrdiff_t length() const noexcept { return do_length(); }
-	directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
-	directives mode() const noexcept { return mode_.back(); }
+	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
+	[[nodiscard]] directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
+	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
 	encoder& match(unicode::rune_set runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
 	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 	encoder& match_any() { return skip().encode(opcode::match_any); }
@@ -478,7 +477,7 @@ class basic_regular_expression
 	std::string const expression_;
 	std::shared_ptr<program> const program_;
 
-	static grammar make_grammar();
+	[[nodiscard]] static grammar make_grammar();
 
 	struct generator : environment
 	{
@@ -490,7 +489,8 @@ class basic_regular_expression
 		unicode::rune_set runes;
 
 		generator(basic_regular_expression const& se, directives mode)
-			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
+			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme}
+		{}
 
 		void bracket_class(std::string_view s)
 		{
@@ -837,7 +837,7 @@ template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 
 inline thread_local std::function<void(encoder&)> grammar::implicit_space{language::operator*(language::space)};
 
-inline grammar start(rule const& start_rule)
+[[nodiscard]] inline grammar start(rule const& start_rule)
 {
 	program grprogram;
 	program_callees grcallees;
@@ -885,8 +885,8 @@ inline grammar start(rule const& start_rule)
 struct parser_registers
 {
 	std::size_t sr, mr, rc; std::ptrdiff_t pc; std::size_t fc;
-	auto as_tuple() noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
-	auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
+	[[nodiscard]] auto as_tuple() noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
+	[[nodiscard]] auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
 };
 
 class parser
@@ -894,9 +894,9 @@ class parser
 	enum class stack_frame_type : unsigned char { backtrack, call, capture, lrcall };
 	enum class subject_location : std::size_t {};
 	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
-	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-	static constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
-	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
+	static inline constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
+	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	static inline constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
 	lug::grammar const& grammar_;
 	lug::environment& environment_;
 	std::vector<std::function<bool(std::string&)>> sources_;
@@ -1069,22 +1069,22 @@ class parser
 
 public:
 	parser(lug::grammar const& g, lug::environment& e) : grammar_{g}, environment_{e} {}
-	lug::grammar const& grammar() const noexcept { return grammar_; }
-	lug::environment& environment() const noexcept { return environment_; }
-	std::string_view match() const noexcept { return {input_.data(), registers_.sr}; }
-	std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
-	std::size_t subject_index() const noexcept { return registers_.sr; }
-	std::size_t max_subject_index() const noexcept { return registers_.mr; }
-	syntax_position const& subject_position() { return position_at(registers_.sr); }
-	syntax_position const& max_subject_position() { return position_at(registers_.mr); }
-	parser_registers& registers() noexcept { return registers_; }
-	parser_registers const& registers() const noexcept { return registers_; }
-	bool available(std::size_t sn) { return available(registers_.sr, sn); }
-	unsigned short call_depth() const noexcept { return call_depth_; }
-	unsigned short prune_depth() const noexcept { return prune_depth_; }
+	[[nodiscard]] lug::grammar const& grammar() const noexcept { return grammar_; }
+	[[nodiscard]] lug::environment& environment() const noexcept { return environment_; }
+	[[nodiscard]] std::string_view match() const noexcept { return {input_.data(), registers_.sr}; }
+	[[nodiscard]] std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
+	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
+	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
+	[[nodiscard]] syntax_position const& subject_position() { return position_at(registers_.sr); }
+	[[nodiscard]] syntax_position const& max_subject_position() { return position_at(registers_.mr); }
+	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
+	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
+	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
+	[[nodiscard]] unsigned short call_depth() const noexcept { return call_depth_; }
+	[[nodiscard]] unsigned short prune_depth() const noexcept { return prune_depth_; }
 	void escape() { prune_depth_ = call_depth_; }
 
-	syntax_position const& position_at(std::size_t index)
+	[[nodiscard]] syntax_position const& position_at(std::size_t index)
 	{
 		auto pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (pos != std::end(positions_) && index == pos->first)
@@ -1381,15 +1381,15 @@ inline bool parse(grammar const& grmr)
 	return parse(std::cin, grmr);
 }
 
-inline std::string_view syntax::capture() const { return parser_.match().substr(range_.index, range_.size); }
-inline syntax_position const& syntax::start() const { return parser_.position_at(range_.index); }
-inline syntax_position const& syntax::end() const { return parser_.position_at(range_.index + range_.size); }
+[[nodiscard]] inline std::string_view syntax::capture() const { return parser_.match().substr(range_.index, range_.size); }
+[[nodiscard]] inline syntax_position const& syntax::start() const { return parser_.position_at(range_.index); }
+[[nodiscard]] inline syntax_position const& syntax::end() const { return parser_.position_at(range_.index + range_.size); }
 
-inline unsigned short environment::call_depth() const { return parser().call_depth(); }
-inline unsigned short environment::prune_depth() const { return parser().prune_depth(); }
+[[nodiscard]] inline std::string_view environment::match() const { return parser().match(); }
+[[nodiscard]] inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
+[[nodiscard]] inline unsigned short environment::call_depth() const { return parser().call_depth(); }
+[[nodiscard]] inline unsigned short environment::prune_depth() const { return parser().prune_depth(); }
 inline void environment::escape() { parser().escape(); }
-inline std::string_view environment::match() const { return parser().match(); }
-inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
 
 template <class Op> template <class C>
 [[nodiscard]] constexpr auto test_condition_combinator<Op>::operator()(C&& condition) const
@@ -1419,7 +1419,7 @@ template <bool Value> template <class C>
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
-inline grammar basic_regular_expression::make_grammar()
+[[nodiscard]] inline grammar basic_regular_expression::make_grammar()
 {
 	using namespace language;
 	auto old_implicit_space = grammar::implicit_space;
