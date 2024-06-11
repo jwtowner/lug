@@ -196,6 +196,7 @@ class environment
 	};
 
 	std::vector<accept_context> context_stack_;
+	std::unordered_set<std::string> conditions_;
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
 
@@ -240,6 +241,11 @@ public:
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	unsigned int tab_alignment() const { return tab_alignment_; }
 	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
+	bool has_condition(std::string_view c) const noexcept { return conditions_.count(std::string{c}) > 0; }
+	void set_condition(std::string_view c) { conditions_.insert(std::string{c}); }
+	void unset_condition(std::string_view c) { conditions_.erase(std::string{c}); }
+	void clear_conditions() { conditions_.clear(); }
+	template <bool B> void modify_condition(std::string_view c) { if constexpr (B) set_condition(c); else unset_condition(c); }
 	std::string_view match() const;
 	syntax_position const& position_at(std::size_t index);
 	unsigned int variable_instance() const { return (static_cast<unsigned int>(accept_depth()) << 16) | call_depth(); }
@@ -553,11 +559,9 @@ template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class
 	if constexpr (is_callable_v<E>)
 		return [&target = t](encoder& d) { d.call(target, 0); };
 	else if constexpr (std::is_invocable_r_v<bool, E, parser&>)
-		return [p = semantic_predicate{t}](encoder& d) { d.encode(opcode::predicate, p); };
-	else if constexpr (std::is_invocable_r_v<bool, E>)
-		return [p = semantic_predicate{[a = E{t}](parser&) { return a(); }}](encoder& d) { d.encode(opcode::predicate, p); };
+		return [p = semantic_predicate{std::forward<T>(t)}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<E>)
-		return string_expression{t};
+		return string_expression{std::forward<T>(t)};
 }
 
 template <class E>
@@ -599,11 +603,13 @@ struct directive_modifier
 	}
 };
 
-inline constexpr auto matches_eps = directive_modifier<directives::none, directives::none, directives::none>{};
-inline constexpr auto relays_eps = directive_modifier<directives::none, directives::none, directives::eps>{};
-inline constexpr auto skip_after = directive_modifier<directives::postskip, directives::none, directives::eps>{};
-inline constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
+inline constexpr directive_modifier<directives::none, directives::none, directives::none> matches_eps{};
+inline constexpr directive_modifier<directives::none, directives::none, directives::eps> relays_eps{};
+inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
+inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
+template <typename Op> struct test_conditional_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
+template <bool Value> struct modify_conditional_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
 
 namespace language {
 
@@ -613,20 +619,22 @@ using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 using parser = lug::parser; using syntax = lug::syntax; using csyntax = lug::syntax const;
 using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
 using environment = lug::environment; template <class T> using variable = lug::variable<T>;
-inline constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
-inline constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
-inline constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
-inline constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
-inline constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
-inline constexpr struct { void operator()(encoder&) const {} } nop = {};
-inline constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
-inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
-inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol = {};
-inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
-inline constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
-inline constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
-inline constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
-inline constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {};
+inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
+inline constexpr directive_modifier<directives::caseless, directives::none, directives::eps> caseless{};
+inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
+inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
+inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
+inline constexpr struct { void operator()(encoder&) const {} } nop{};
+inline constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps{};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi{};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol{};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut{};
+inline constexpr ctype_combinator<ctype::alpha> alpha{}; inline constexpr ctype_combinator<ctype::alnum> alnum{}; inline constexpr ctype_combinator<ctype::lower> lower{};
+inline constexpr ctype_combinator<ctype::upper> upper{}; inline constexpr ctype_combinator<ctype::digit> digit{}; inline constexpr ctype_combinator<ctype::xdigit> xdigit{};
+inline constexpr ctype_combinator<ctype::space> space{}; inline constexpr ctype_combinator<ctype::blank> blank{}; inline constexpr ctype_combinator<ctype::punct> punct{};
+inline constexpr ctype_combinator<ctype::graph> graph{}; inline constexpr ctype_combinator<ctype::print> print{};
+inline constexpr test_conditional_combinator<detail::identity> when{}; inline constexpr test_conditional_combinator<std::logical_not<>> unless{};
+inline constexpr modify_conditional_combinator<true> set{}; inline constexpr modify_conditional_combinator<false> unset{};
 
 inline constexpr struct
 {
@@ -634,28 +642,28 @@ inline constexpr struct
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
 	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
 }
-any = {};
+any{};
 
 inline constexpr struct
 {
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
 	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_all(p); }; }
 }
-all = {};
+all{};
 
 inline constexpr struct
 {
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
 	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_none(p); }; }
 }
-none = {};
+none{};
 
 inline constexpr struct
 {
 	[[nodiscard]] auto operator()(std::string_view s) const { return basic_regular_expression{s}; }
 	[[nodiscard]] auto operator()(char const* s, std::size_t n) const { return basic_regular_expression{std::string_view{s, n}}; }
 }
-bre = {};
+bre{};
 
 inline constexpr struct
 {
@@ -671,14 +679,14 @@ inline constexpr struct
 		};
 	}
 }
-chr = {};
+chr{};
 
 inline constexpr struct
 {
 	[[nodiscard]] constexpr auto operator()(std::string_view s) const { return string_expression{s}; }
 	[[nodiscard]] constexpr auto operator()(char const* s, std::size_t n) const { return string_expression{std::string_view{s, n}}; }
 }
-str = {};
+str{};
 
 [[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
@@ -817,7 +825,7 @@ inline constexpr struct
 		return capture_to<T>{v};
 	}
 }
-capture = {};
+capture{};
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 [[nodiscard]] constexpr auto operator%(variable<T>& v, E const& e)
@@ -1382,6 +1390,32 @@ inline unsigned short environment::prune_depth() const { return parser().prune_d
 inline void environment::escape() { parser().escape(); }
 inline std::string_view environment::match() const { return parser().match(); }
 inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
+
+template <class Op> template <class C>
+[[nodiscard]] constexpr auto test_conditional_combinator<Op>::operator()(C&& condition) const
+{
+	if constexpr (std::is_invocable_r_v<bool, C, parser&>)
+		return [c = std::decay_t<C>{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(c(p)); };
+	else if constexpr (std::is_invocable_r_v<bool, C>)
+		return [c = std::decay_t<C>{std::forward<C>(condition)}](parser&) -> bool { return Op{}(c()); };
+	else if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
+		return [c = std::string_view{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(p.environment().has_condition(c)); };
+	else if constexpr (std::is_constructible_v<std::string, C&&>)
+		return [c = std::string{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(p.environment().has_condition(c)); };
+	else if constexpr (std::is_constructible_v<bool const&, C&&>)
+		return [&condition](parser&) -> bool { return Op{}(condition); };
+}
+
+template <bool Value> template <class C>
+[[nodiscard]] constexpr auto modify_conditional_combinator<Value>::operator()(C&& condition) const
+{
+	if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
+		return [c = std::string_view{std::forward<C>(condition)}](parser& p) -> bool { p.environment().modify_condition<Value>(c); return true; };
+	else if constexpr (std::is_constructible_v<std::string, C&&>)
+		return [c = std::string{std::forward<C>(condition)}](parser& p) -> bool { p.environment().modify_condition<Value>(c); return true; };
+	else if constexpr (std::is_constructible_v<bool&, C&&>)
+		return [&condition](parser&) -> bool { condition = Value; return true; };
+}
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 

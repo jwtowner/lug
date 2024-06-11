@@ -3,6 +3,8 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+
+#undef NDEBUG
 #include <cassert>
 
 void test_sequence()
@@ -124,7 +126,7 @@ int main()
 		test_not();
 		test_predicate();
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "Error: " << e.what() << "\n";
 		return -1;
 	}
 	return 0;

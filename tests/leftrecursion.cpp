@@ -3,6 +3,8 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+
+#undef NDEBUG
 #include <cassert>
 
 void test_direct_left_recursion()
@@ -106,7 +108,7 @@ int main()
 		test_indirect_left_recursion();
 		test_association_and_precedence();
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "Error: " << e.what() << "\n";
 		return -1;
 	}
 	return 0;

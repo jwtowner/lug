@@ -86,6 +86,15 @@ namespace detail {
 template <class... Args>
 constexpr void ignore(Args&&...) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward,hicpp-named-parameter,readability-named-parameter)
 
+struct identity
+{
+	template <class T>
+	[[nodiscard]] constexpr T&& operator()( T&& t ) const noexcept
+	{
+		return std::forward<T>(t);
+	}
+};
+
 template <class T> struct member_pointer_object {};
 template <class T, class U> struct member_pointer_object<T U::*> { using type = U; };
 template <class T> struct member_pointer_value {};

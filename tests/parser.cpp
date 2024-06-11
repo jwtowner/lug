@@ -3,6 +3,8 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+
+#undef NDEBUG
 #include <cassert>
 
 using namespace std::string_view_literals;
@@ -97,7 +99,7 @@ int main()
 	try {
 		test_line_column_tracking();
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "Error: " << e.what() << "\n";
 		return -1;
 	}
 	return 0;

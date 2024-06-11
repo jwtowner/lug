@@ -3,12 +3,14 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+
+#undef NDEBUG
 #include <cassert>
 
 void test_simple_predicates()
 {
 	using namespace lug::language;
-	rule S = "a"_sx > []{ return false; } | []{ return true; } > "ab";
+	rule S = "a"_sx > [](parser&){ return false; } | [](parser&){ return true; } > "ab";
 	grammar G = start(S > eoi);
 	assert(!lug::parse("a", G));
 	assert(lug::parse("ab", G));
@@ -34,7 +36,7 @@ int main()
 		test_simple_predicates();
 		test_subject_index_predicate();
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "Error: " << e.what() << "\n";
 		return -1;
 	}
 	return 0;
