@@ -4,10 +4,10 @@
 
 #include <lug/lug.hpp>
 
-class json_parser
+class json_matcher
 {
 public:
-	json_parser()
+	json_matcher()
 	{
 		using namespace lug::language;
 		rule JSON;
@@ -38,13 +38,16 @@ private:
 int main()
 {
 	try {
-		json_parser parser;
-		if (!parser.parse(std::cin)) {
-			std::cout << "Invalid JSON!" << std::endl;
+		json_matcher matcher;
+		if (!matcher.parse(std::cin)) {
+			std::cout << "Invalid JSON!" << "\n";
 			return -1;
 		}
 	} catch (std::exception& e) {
-		std::cerr << "Error: " << e.what() << std::endl;
+		std::cerr << "ERROR: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "UNKNOWN ERROR\n";
 		return -1;
 	}
 	return 0;
