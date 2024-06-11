@@ -156,7 +156,7 @@ public:
 	rule& operator=(rule const& r) { rule{r}.swap(*this); return *this; }
 	rule& operator=(rule&& r) = default;
 	void swap(rule& r) { program_.swap(r.program_); callees_.swap(r.callees_); }
-	auto operator[](unsigned short precedence) const noexcept;
+	[[nodiscard]] auto operator[](unsigned short precedence) const noexcept;
 };
 
 class grammar
@@ -536,18 +536,18 @@ class string_expression
 {
 	std::string_view const expression_;
 public:
-	explicit string_expression(std::string_view e) : expression_{e} {}
+	constexpr explicit string_expression(std::string_view e) noexcept : expression_{e} {}
 	void operator()(encoder& d) const { d.match(expression_); }
 };
 
 template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class = std::enable_if_t<is_proper_expression_v<E>>>
-constexpr T const& make_expression(T const& t)
+[[nodiscard]] constexpr T const& make_expression(T const& t)
 {
 	return t;
 }
 
 template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class = std::enable_if_t<!is_proper_expression_v<E>>>
-constexpr auto make_expression(T&& t)
+[[nodiscard]] constexpr auto make_expression(T&& t)
 {
 	static_assert(is_expression_v<E>, "T must be an expression type");
 	if constexpr (is_callable_v<E>)
@@ -584,25 +584,25 @@ inline rule::rule(rule const& r)
 	rule_encoder{*this}.call(r, 1);
 }
 
-inline auto rule::operator[](unsigned short precedence) const noexcept
+[[nodiscard]] inline auto rule::operator[](unsigned short precedence) const noexcept
 {
-	return [&target = *this, precedence](encoder& d){ d.call(target, precedence); };
+	return [this, precedence](encoder& d){ d.call(*this, precedence); };
 }
 
 template <directives EnableMask, directives DisableMask, directives RelayMask>
 struct directive_modifier
 {
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	auto operator[](E const& e) const
+	[[nodiscard]] constexpr auto operator[](E const& e) const
 	{
 		return [e = make_expression(e)](encoder& d) { d.dpsh(EnableMask, DisableMask).evaluate(e).dpop(RelayMask); };
 	}
 };
 
-constexpr auto matches_eps = directive_modifier<directives::none, directives::none, directives::none>{};
-constexpr auto relays_eps = directive_modifier<directives::none, directives::none, directives::eps>{};
-constexpr auto skip_after = directive_modifier<directives::postskip, directives::none, directives::eps>{};
-constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
+inline constexpr auto matches_eps = directive_modifier<directives::none, directives::none, directives::none>{};
+inline constexpr auto relays_eps = directive_modifier<directives::none, directives::none, directives::eps>{};
+inline constexpr auto skip_after = directive_modifier<directives::postskip, directives::none, directives::eps>{};
+inline constexpr auto skip_before = directive_modifier<directives::preskip, directives::postskip, directives::eps>{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
 
 namespace language {
@@ -613,58 +613,58 @@ using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 using parser = lug::parser; using syntax = lug::syntax; using csyntax = lug::syntax const;
 using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
 using environment = lug::environment; template <class T> using variable = lug::variable<T>;
-constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
-constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
-constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
-constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
-constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
-constexpr struct { void operator()(encoder&) const {} } nop = {};
-constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
-constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
-constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol = {};
-constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
-constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
-constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
-constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
-constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {};
+inline constexpr auto cased = directive_modifier<directives::none, directives::caseless, directives::eps>{};
+inline constexpr auto caseless = directive_modifier<directives::caseless, directives::none, directives::eps>{};
+inline constexpr auto lexeme = directive_modifier<directives::lexeme, directives::noskip, directives::eps>{};
+inline constexpr auto noskip = directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps>{};
+inline constexpr auto skip = directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps>{};
+inline constexpr struct { void operator()(encoder&) const {} } nop = {};
+inline constexpr struct { void operator()(encoder& d) const { d.match_eps(); } } eps = {};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); } } eoi = {};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::match_eol); } } eol = {};
+inline constexpr struct { void operator()(encoder& d) const { d.encode(opcode::accept); } } cut = {};
+inline constexpr ctype_combinator<ctype::alpha> alpha = {}; constexpr ctype_combinator<ctype::alnum> alnum = {}; constexpr ctype_combinator<ctype::lower> lower = {};
+inline constexpr ctype_combinator<ctype::upper> upper = {}; constexpr ctype_combinator<ctype::digit> digit = {}; constexpr ctype_combinator<ctype::xdigit> xdigit = {};
+inline constexpr ctype_combinator<ctype::space> space = {}; constexpr ctype_combinator<ctype::blank> blank = {}; constexpr ctype_combinator<ctype::punct> punct = {};
+inline constexpr ctype_combinator<ctype::graph> graph = {}; constexpr ctype_combinator<ctype::print> print = {};
 
-constexpr struct
+inline constexpr struct
 {
 	void operator()(encoder& d) const { d.match_any(); }
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
+	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_any(p); }; }
 }
 any = {};
 
-constexpr struct
+inline constexpr struct
 {
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	auto operator()(T p) const { return [p](encoder& d) { d.match_all(p); }; }
+	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_all(p); }; }
 }
 all = {};
 
-constexpr struct
+inline constexpr struct
 {
 	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	auto operator()(T p) const { return [p](encoder& d) { d.match_none(p); }; }
+	[[nodiscard]] constexpr auto operator()(T p) const { return [p](encoder& d) { d.match_none(p); }; }
 }
 none = {};
 
-constexpr struct
+inline constexpr struct
 {
-	auto operator()(std::string_view s) const { return basic_regular_expression{s}; }
-	auto operator()(char const* s, std::size_t n) const { return basic_regular_expression{std::string_view{s, n}}; }
+	[[nodiscard]] auto operator()(std::string_view s) const { return basic_regular_expression{s}; }
+	[[nodiscard]] auto operator()(char const* s, std::size_t n) const { return basic_regular_expression{std::string_view{s, n}}; }
 }
 bre = {};
 
-constexpr struct
+inline constexpr struct
 {
-	auto operator()(char32_t c) const
+	[[nodiscard]] constexpr auto operator()(char32_t c) const
 	{
 		return [c](encoder& d) { d.match(utf8::encode_rune(c)); };
 	}
 
-	auto operator()(char32_t start, char32_t end) const
+	[[nodiscard]] constexpr auto operator()(char32_t start, char32_t end) const
 	{
 		return [start, end](encoder& d) {
 			d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end)));
@@ -673,22 +673,22 @@ constexpr struct
 }
 chr = {};
 
-constexpr struct
+inline constexpr struct
 {
-	auto operator()(std::string_view s) const { return string_expression{s}; }
-	auto operator()(char const* s, std::size_t n) const { return string_expression{std::string_view{s, n}}; }
+	[[nodiscard]] constexpr auto operator()(std::string_view s) const { return string_expression{s}; }
+	[[nodiscard]] constexpr auto operator()(char const* s, std::size_t n) const { return string_expression{std::string_view{s, n}}; }
 }
 str = {};
 
-inline auto operator ""_cx(char32_t c) { return chr(c); }
-inline auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
-inline auto operator ""_rx(char const* s, std::size_t n) { return basic_regular_expression{std::string_view{s, n}}; }
-inline auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
-inline auto operator ""_isx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
-inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[basic_regular_expression{std::string_view{s, n}}]; }
-inline auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
-inline auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
-inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
+[[nodiscard]] constexpr auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
+[[nodiscard]] inline auto operator ""_rx(char const* s, std::size_t n) { return basic_regular_expression{std::string_view{s, n}}; }
+[[nodiscard]] constexpr auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
+[[nodiscard]] constexpr auto operator ""_isx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
+[[nodiscard]] inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
+[[nodiscard]] constexpr auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
+[[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
 
 struct implicit_space_rule
 {
@@ -700,7 +700,7 @@ struct implicit_space_rule
 };
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator!(E const& e)
+[[nodiscard]] constexpr auto operator!(E const& e)
 {
 	return [x = matches_eps[e]](encoder& d) {
 		d.encode(opcode::choice, 1 + d.evaluate_length(x)).evaluate(x).encode(opcode::fail, immediate{1});
@@ -708,7 +708,7 @@ constexpr auto operator!(E const& e)
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator&(E const& e)
+[[nodiscard]] constexpr auto operator&(E const& e)
 {
 	return [x = matches_eps[e]](encoder& d) {
 		d.encode(opcode::choice, 2 + d.evaluate_length(x)).evaluate(x).encode(opcode::commit_back, 1).encode(opcode::fail);
@@ -716,7 +716,7 @@ constexpr auto operator&(E const& e)
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator*(E const& e)
+[[nodiscard]] constexpr auto operator*(E const& e)
 {
 	return [x = matches_eps[skip_after[e]]](encoder& d) {
 		auto n = d.evaluate_length(x);
@@ -725,7 +725,7 @@ constexpr auto operator*(E const& e)
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator|(E1 const& e1, E2 const& e2)
+[[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2)
 {
 	return [x1 = relays_eps[e1], x2 = relays_eps[e2]](encoder& d) {
 		d.encode(opcode::choice, 2 + d.evaluate_length(x1)).evaluate(x1).encode(opcode::commit, d.evaluate_length(x2)).evaluate(x2);
@@ -733,13 +733,13 @@ constexpr auto operator|(E1 const& e1, E2 const& e2)
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
-constexpr auto operator>(E1 const& e1, E2 const& e2)
+[[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2)
 {
 	return [x1 = make_expression(e1), x2 = skip_before[e2]](encoder& d) { d.evaluate(x1).evaluate(x2); };
 }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator<(E const& e, A a)
+[[nodiscard]] constexpr auto operator<(E const& e, A a)
 {
 	if constexpr (std::is_invocable_v<A, environment&, syntax>) {
 		return [e = make_expression(e), a = std::move(a)](encoder& d) {
@@ -773,31 +773,31 @@ constexpr auto operator<(E const& e, A a)
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator+(E const& e)
+[[nodiscard]] constexpr auto operator+(E const& e)
 {
 	auto x = make_expression(e);
 	return x > *x;
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator~(E const& e)
+[[nodiscard]] constexpr auto operator~(E const& e)
 {
 	return e | eps;
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator--(E const& e)
+[[nodiscard]] constexpr auto operator--(E const& e)
 {
 	return cut > e;
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-constexpr auto operator--(E const& e, int)
+[[nodiscard]] constexpr auto operator--(E const& e, int)
 {
 	return e > cut;
 }
 
-constexpr struct
+inline constexpr struct
 {
 	template <class T>
 	struct capture_to
@@ -805,14 +805,14 @@ constexpr struct
 		variable<T>& v;
 
 		template <class E, class = std::enable_if_t<is_expression_v<E>>>
-		constexpr auto operator[](E const& e) const
+		[[nodiscard]] constexpr auto operator[](E const& e) const
 		{
 			return e < [&vr = v](syntax x) { *vr = T(x.capture()); };
 		}
 	};
 
 	template <class T>
-	constexpr auto operator()(variable<T>& v) const
+	[[nodiscard]] constexpr auto operator()(variable<T>& v) const
 	{
 		return capture_to<T>{v};
 	}
@@ -820,7 +820,7 @@ constexpr struct
 capture = {};
 
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
-inline auto operator%(variable<T>& v, E const& e)
+[[nodiscard]] constexpr auto operator%(variable<T>& v, E const& e)
 {
 	return e < [&v](environment& s) { *v = s.pop_attribute<T>(); };
 }
