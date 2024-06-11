@@ -8,13 +8,13 @@
 #include <lug/lug.hpp>
 
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <deque>
 #include <fstream>
-#include <iomanip>
 #include <map>
+#include <random>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _MSC_VER
 #include <io.h>
@@ -71,7 +71,7 @@ public:
 		            | "LOG"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::log(*r1_); }
 		            | "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(*r1_); }
 		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
-		            | "RND"_isx > ~ ( "(" > ~Expr > ")" )       <[]    { return std::rand() / static_cast<double>(RAND_MAX); };
+		            | "RND"_isx > ~ ( "(" > ~Expr > ")" )       <[this]{ return std::uniform_real_distribution{}(random_); };
 
 		rule Factor = r1_%Value > ~(u8"[↑^]"_rx > r2_%Value     <[this]{ *r1_ = std::pow(*r1_, *r2_); }
 		            )                                           <[this]{ return *r1_; };
@@ -118,12 +118,12 @@ public:
 		            | "READ"_isx > ReadEl > *("," > ReadEl)
 		            | "DATA"_isx > DataEl > *("," > DataEl)
 		            | "INPUT"_isx > InptEl > *("," > InptEl)
-		            | "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[]    { std::cout << std::endl; }
+		            | "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[]    { std::cout << "\n"; }
 		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
 		            | "END"_isx                                 <[this]{ line_ = lines_.end(); }
-		            | ("EXIT"_isx | "QUIT"_isx)                 <[]    { std::exit(EXIT_SUCCESS); };
+		            | ("EXIT"_isx | "QUIT"_isx)                 <[this]{ quit_ = true; };
 
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ lines_.clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
@@ -132,17 +132,16 @@ public:
 		            | "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
 		            | "SAVE"_isx > txt_%String                  <[this]{ save(*txt_); };
 
-		rule Line   = Rem > NL
-		            | Stmnt > ~Rem > NL
+		rule Line   = Stmnt > ~Rem > NL
 		            | Cmnd > ~Rem > NL
 		            | no_%LineNo
 		                > capture(txt_)[*(!NL > any) > NL]      <[this]{ update_line(*no_, *txt_); }
+		            | Rem > NL
 		            | NL
-		            | (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); }
-		            | !any                                      <[]    { std::exit(EXIT_SUCCESS); };
+		            | (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); };
 
-		rule Init   = [this]{ return fn_eval_; } > FnEval
-		            | [this]{ return !fn_eval_; } > Line;
+		rule Init   = when(fn_eval_) > FnEval
+		            | unless(fn_eval_) > Line;
 
 		grammar_ = start(Init);
 	}
@@ -151,14 +150,15 @@ public:
 	{
 		lug::parser parser{grammar_, environment_};
 		parser.push_source([this](std::string& out) {
+			if (quit_)
+				return false;
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
 				out = lastline_->second;
 			} else {
 				if (stdin_tty_)
 					std::cout << "> " << std::flush;
-				std::cin >> std::ws;
-				if (!std::getline(std::cin, out))
+				if (!std::getline(std::cin >> std::ws, out))
 					return false;
 				out.push_back('\n');
 			}
@@ -169,10 +169,9 @@ public:
 
 	void load(std::string_view name)
 	{
-		std::ifstream file{filename_with_ext(name), std::ifstream::in};
-		if (file) {
+		if (std::ifstream file{filename_with_ext(name), std::ifstream::in}; file) {
 			while (!file.bad() && !file.eof()) {
-				int lineno;
+				int lineno = 0;
 				std::string line;
 				if (file >> lineno && std::getline(file >> std::ws, line)) {
 					update_line(lineno, line + "\n");
@@ -191,7 +190,7 @@ private:
 	struct Table { std::vector<double> values = std::vector<double>(121, 0.0); std::size_t width = 11, height = 11; };
 	using RelOpFn = bool(*)(double, double);
 
-	std::string filename_with_ext(std::string_view name)
+	static std::string filename_with_ext(std::string_view name)
 	{
 		std::string filename{name};
 		if (filename.size() < 4 || strncasecmp(filename.data() + filename.size() - 4, ".BAS", 4) != 0)
@@ -325,7 +324,8 @@ private:
 
 	double& at(Table& tab, double i, double j)
 	{
-		auto const row = static_cast<std::size_t>(i), col = static_cast<std::size_t>(j);
+		auto const row = static_cast<std::size_t>(i);
+		auto const col = static_cast<std::size_t>(j);
 		if (row < tab.height || col < tab.width)
 			return tab.values[tab.width * row + col];
 		print_error("ARRAY INDEX OUT OF RANGE");
@@ -397,6 +397,7 @@ private:
 	lug::variable<int> no_{environment_};
 	lug::variable<double*> ref_{environment_};
 	lug::variable<RelOpFn> rop_{environment_};
+	std::default_random_engine random_{std::random_device{}()};
 	std::deque<double> data_;
 	std::deque<double>::const_iterator read_itr_;
 	std::unordered_map<std::string, double> vars_;
@@ -410,19 +411,22 @@ private:
 	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
 	double fn_result_{0.0};
 	bool fn_eval_{false};
-	bool const stdin_tty_{isatty(fileno(stdin)) != 0};
+	bool stdin_tty_{isatty(fileno(stdin)) != 0};
+	bool quit_{false};
 };
 
 int main(int argc, char** argv)
 {
 	try {
-		std::srand(std::time(nullptr));
 		basic_interpreter interpreter;
-		while (--argc > 1)
-			interpreter.load(*++argv);
+		for (int i = 1; i < argc; ++i)
+			interpreter.load(argv[1]);
 		interpreter.repl();
-	} catch (std::exception& e) {
-		std::cerr << "ERROR: " << e.what() << std::endl;
+	} catch (const std::exception& e) {
+		std::cerr << "ERROR: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "UNKNOWN ERROR\n";
 		return -1;
 	}
 	return 0;
