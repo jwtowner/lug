@@ -57,6 +57,6 @@ int main()
 	} catch (...) {
 		std::cerr << "UNKNOWN ERROR\n";
 		return -1;
-	}	
+	}
 	return 0;
 }
