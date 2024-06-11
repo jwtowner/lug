@@ -28,9 +28,9 @@ struct program;
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
-using syntactic_capture = std::function<void(environment&, syntax const&)>;
 using semantic_action = std::function<void(environment&)>;
-using semantic_predicate = std::function<bool(environment&)>;
+using syntactic_capture = std::function<void(environment&, syntax const&)>;
+using syntactic_predicate = std::function<bool(environment&)>;
 
 template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, environment&>;
@@ -46,7 +46,7 @@ enum class opcode : unsigned char
 	match_all_of,   match_none_of,  match_set,      match_eol,
 	choice,         commit,         commit_back,    commit_partial,
 	jump,           call,           ret,            fail,
-	accept,         accept_final,   predicate,      action,
+	accept,         accept_final,   action,         predicate,
 	begin,          end
 };
 
@@ -99,9 +99,9 @@ struct program
 {
 	std::vector<instruction> instructions;
 	std::vector<unicode::rune_set> runesets;
-	std::vector<semantic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<syntactic_capture> captures;
+	std::vector<syntactic_predicate> predicates;
 	directives mandate{directives::eps};
 
 	void concatenate(program const& src)
@@ -112,8 +112,8 @@ struct program
 			std::size_t val;
 			switch (instr.pf.op) {
 				case opcode::match_set: val = detail::push_back_unique(runesets, src.runesets[instr.pf.val]); break;
-				case opcode::predicate: val = predicates.size(); predicates.push_back(src.predicates[instr.pf.val]); break;
 				case opcode::action: val = actions.size(); actions.push_back(src.actions[instr.pf.val]); break;
+				case opcode::predicate: val = predicates.size(); predicates.push_back(src.predicates[instr.pf.val]); break;
 				case opcode::end: val = captures.size(); captures.push_back(src.captures[instr.pf.val]); break;
 				default: val = (std::numeric_limits<std::size_t>::max)(); break;
 			}
@@ -132,9 +132,9 @@ struct program
 	{
 		instructions.swap(p.instructions);
 		runesets.swap(p.runesets);
-		predicates.swap(p.predicates);
 		actions.swap(p.actions);
 		captures.swap(p.captures);
+		predicates.swap(p.predicates);
 		std::swap(mandate, p.mandate);
 	}
 };
@@ -293,9 +293,9 @@ class encoder
 	virtual void do_append(instruction) = 0;
 	virtual void do_append(program const&) = 0;
 	virtual immediate do_add_rune_set(unicode::rune_set) { return immediate{0}; }
-	virtual immediate do_add_semantic_predicate(semantic_predicate) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
 	virtual immediate do_add_syntactic_capture(syntactic_capture) { return immediate{0}; }
+	virtual immediate do_add_syntactic_predicate(syntactic_predicate) { return immediate{0}; }
 	virtual void do_add_callee(rule const*, program const*, std::ptrdiff_t, directives) {}
 	virtual bool do_should_evaluate_length() const noexcept { return true; }
 	virtual std::ptrdiff_t do_length() const noexcept = 0;
@@ -346,9 +346,9 @@ public:
 	encoder& call(program const& p, unsigned short prec) { return do_call(nullptr, &p, 0, prec); }
 	encoder& call(grammar const& g, unsigned short prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
-	encoder& encode(opcode op, semantic_predicate p) { return append(instruction{op, operands::none, do_add_semantic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
 	encoder& encode(opcode op, syntactic_capture c) { return append(instruction{op, operands::none, do_add_syntactic_capture(std::move(c))}); }
+	encoder& encode(opcode op, syntactic_predicate p) { return append(instruction{op, operands::none, do_add_syntactic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
 	[[nodiscard]] directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
@@ -386,7 +386,7 @@ public:
 	encoder& call(rule const& r, unsigned short prec, bool allow_inlining = true)
 	{
 		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
-					p.instructions.size() <= 8 && p.predicates.size() <= 1 && p.actions.size() <= 1 && p.captures.size() <= 1)
+					p.instructions.size() <= 8 && p.actions.size() <= 1 && p.captures.size() <= 1 && p.predicates.size() <= 1)
 			return skip(p.mandate, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
@@ -436,9 +436,9 @@ class program_encoder : public encoder
 	void do_append(program const& p) final { program_.concatenate(p); }
 	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) final { callees_.emplace_back(r, p, n, d); }
 	immediate do_add_rune_set(unicode::rune_set r) final { return add_item(program_.runesets, std::move(r)); }
-	immediate do_add_semantic_predicate(semantic_predicate p) final { return add_item(program_.predicates, std::move(p)); }
 	immediate do_add_semantic_action(semantic_action a) final { return add_item(program_.actions, std::move(a)); }
 	immediate do_add_syntactic_capture(syntactic_capture a) final { return add_item(program_.captures, std::move(a)); }
+	immediate do_add_syntactic_predicate(syntactic_predicate p) final { return add_item(program_.predicates, std::move(p)); }
 
 	template <class Item>
 	immediate add_item(std::vector<Item>& items, Item&& item)
@@ -560,7 +560,7 @@ template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class
 	if constexpr (is_callable_v<E>)
 		return [&target = t](encoder& d) { d.call(target, 0); };
 	else if constexpr (is_predicate_v<E>)
-		return [p = semantic_predicate{std::forward<T>(t)}](encoder& d) { d.encode(opcode::predicate, p); };
+		return [p = syntactic_predicate{std::forward<T>(t)}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<E>)
 		return string_expression{std::forward<T>(t)};
 }
@@ -1334,6 +1334,9 @@ public:
 					accept(sr, mr, rc, pc);
 					result = done = true;
 				} break;
+				case opcode::action: {
+					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
+				} break;
 				case opcode::predicate: {
 					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
 					bool const accepted = prog.predicates[imm](environment_);
@@ -1341,9 +1344,6 @@ public:
 					pop_responses_after(rc);
 					if (!accepted)
 						goto failure;
-				} break;
-				case opcode::action: {
-					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
 				} break;
 				case opcode::begin: {
 					stack_frames_.push_back(stack_frame_type::capture);
