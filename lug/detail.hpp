@@ -185,6 +185,33 @@ public:
 	reentrancy_sentinel& operator=(reentrancy_sentinel&&) = delete;
 };
 
+template <class EF>
+class scope_exit
+{
+	static_assert(std::is_invocable_v<EF>);
+
+	EF destructor;
+
+public:
+	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
+	constexpr explicit scope_exit( Fn&& fn ) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
+		: destructor{std::forward<Fn>(fn)}
+	{}
+
+	~scope_exit()
+	{
+		destructor();
+	}
+
+	scope_exit(scope_exit const&) = delete;
+	scope_exit(scope_exit&&) = delete;
+	scope_exit& operator=(scope_exit const&) = delete;
+	scope_exit& operator=(scope_exit&&) = delete;
+};
+
+template <class Fn, class = std::enable_if_t<std::is_invocable_v<Fn>>>
+scope_exit(Fn) -> scope_exit<std::decay_t<Fn>>;
+
 template <class Error, class T, class U, class V>
 inline void assure_in_range(T x, U minval, V maxval)
 {

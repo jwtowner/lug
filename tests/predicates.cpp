@@ -10,7 +10,7 @@
 void test_simple_predicates()
 {
 	using namespace lug::language;
-	rule S = "a"_sx > [](parser&){ return false; } | [](parser&){ return true; } > "ab";
+	rule S = "a"_sx > [](environment&){ return false; } | [](environment&){ return true; } > "ab";
 	grammar G = start(S > eoi);
 	assert(!lug::parse("a", G));
 	assert(lug::parse("ab", G));
@@ -19,7 +19,7 @@ void test_simple_predicates()
 void test_subject_index_predicate()
 {
 	using namespace lug::language;
-	rule S = +("a"_sx > [](parser& p){ return p.subject_index() <= 4; });
+	rule S = +("a"_sx > [](environment& e){ return e.parser().subject_index() <= 4; });
 	grammar G = start(S > eoi);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));

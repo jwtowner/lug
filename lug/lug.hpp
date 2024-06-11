@@ -30,10 +30,10 @@ struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
 using syntactic_capture = std::function<void(environment&, syntax const&)>;
 using semantic_action = std::function<void(environment&)>;
-using semantic_predicate = std::function<bool(parser&)>;
+using semantic_predicate = std::function<bool(environment&)>;
 
 template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, parser&> || std::is_invocable_r_v<bool, E>;
+template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, E, environment&>;
 template <class E> inline constexpr bool is_proper_expression_v = std::is_invocable_v<E, encoder&>;
 template <class E> inline constexpr bool is_string_expression_v = std::is_convertible_v<E, std::string>;
 template <class E> inline constexpr bool is_expression_v = is_callable_v<E> || is_predicate_v<E> || is_proper_expression_v<E> || is_string_expression_v<E>;
@@ -187,14 +187,8 @@ class environment
 {
 	friend class lug::parser;
 
-	struct accept_context
-	{
-		lug::parser* parser;
-		std::vector<std::any> attributes;
-		explicit accept_context(lug::parser* p) noexcept : parser{p} {}
-	};
-
-	std::vector<accept_context> context_stack_;
+	std::vector<lug::parser*> parser_stack_;
+	std::vector<std::vector<std::any>> accept_stack_;
 	std::unordered_set<std::string> conditions_;
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
@@ -202,40 +196,47 @@ class environment
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
-	void start_accept(lug::parser& p)
+	void start_parse(lug::parser& p)
 	{
-		if (context_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
+		if (parser_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
 			throw resource_limit_error{};
-		context_stack_.emplace_back(&p);
+		parser_stack_.emplace_back(&p);
+	}
+
+	void end_parse()
+	{
+		if (parser_stack_.empty())
+			throw parse_context_error{};
+		parser_stack_.pop_back();
+	}
+
+	void start_accept()
+	{
+		if (accept_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
+			throw resource_limit_error{};
+		accept_stack_.emplace_back();
 		on_accept_started();
 	}
 
 	void end_accept()
 	{
-		if (context_stack_.empty())
+		if (accept_stack_.empty())
 			throw accept_context_error{};
 		on_accept_ended();
-		context_stack_.pop_back();
+		accept_stack_.pop_back();
 	}
 
-	[[nodiscard]] accept_context& current_context()
+	[[nodiscard]] std::vector<std::any>& current_accept_context()
 	{
-		if (context_stack_.empty())
+		if (accept_stack_.empty())
 			throw accept_context_error{};
-		return context_stack_.back();
-	}
-
-	[[nodiscard]] const accept_context& current_context() const
-	{
-		if (context_stack_.empty())
-			throw accept_context_error{};
-		return context_stack_.back();
+		return accept_stack_.back();
 	}
 
 public:
 	virtual ~environment() = default;
-	[[nodiscard]] lug::parser& parser() { return *(current_context().parser); }
-	[[nodiscard]] lug::parser const& parser() const { return *(current_context().parser); }
+	[[nodiscard]] lug::parser& parser() { if (parser_stack_.empty()) throw parse_context_error{}; return *(parser_stack_.back()); }
+	[[nodiscard]] lug::parser const& parser() const { if (parser_stack_.empty()) throw parse_context_error{}; return *(parser_stack_.back()); }
 	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
@@ -247,8 +248,8 @@ public:
 	template <bool B> void modify_condition(std::string_view c) { if constexpr (B) set_condition(c); else unset_condition(c); }
 	[[nodiscard]] std::string_view match() const;
 	[[nodiscard]] syntax_position const& position_at(std::size_t index);
-	[[nodiscard]] unsigned int variable_instance() const { return (static_cast<unsigned int>(accept_depth()) << 16) | call_depth(); }
-	[[nodiscard]] unsigned short accept_depth() const { return static_cast<unsigned short>(context_stack_.size()); }
+	[[nodiscard]] unsigned int variable_instance() const { return (static_cast<unsigned int>(parse_depth()) << 16) | call_depth(); }
+	[[nodiscard]] unsigned short parse_depth() const { return static_cast<unsigned short>(parser_stack_.size()); }
 	[[nodiscard]] unsigned short call_depth() const;
 	[[nodiscard]] unsigned short prune_depth() const;
 	void escape();
@@ -256,19 +257,19 @@ public:
 	template <class T>
 	void push_attribute(T&& x)
 	{
-		current_context().attributes.emplace_back(std::in_place_type<T>, std::forward<T>(x));
+		current_accept_context().emplace_back(std::in_place_type<T>, std::forward<T>(x));
 	}
 
 	template <class T, class... Args>
 	void push_attribute(Args&&... args)
 	{
-		current_context().attributes.emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
+		current_accept_context().emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
 	}
 
 	template <class T>
 	[[nodiscard]] T pop_attribute()
 	{
-		return std::any_cast<T>(detail::pop_back(current_context().attributes));
+		return std::any_cast<T>(detail::pop_back(current_accept_context()));
 	}
 };
 
@@ -558,7 +559,7 @@ template <class T, class E = std::remove_cv_t<std::remove_reference_t<T>>, class
 	static_assert(is_expression_v<E>, "T must be an expression type");
 	if constexpr (is_callable_v<E>)
 		return [&target = t](encoder& d) { d.call(target, 0); };
-	else if constexpr (std::is_invocable_r_v<bool, E, parser&>)
+	else if constexpr (is_predicate_v<E>)
 		return [p = semantic_predicate{std::forward<T>(t)}](encoder& d) { d.encode(opcode::predicate, p); };
 	else if constexpr (is_string_expression_v<E>)
 		return string_expression{std::forward<T>(t)};
@@ -608,8 +609,39 @@ inline constexpr directive_modifier<directives::none, directives::none, directiv
 inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
-template <typename Op> struct test_condition_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
-template <bool Value> struct modify_condition_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
+
+template <typename Op> struct test_condition_combinator
+{
+	template <class C>
+	[[nodiscard]] constexpr auto operator()(C&& condition) const
+	{
+		if constexpr (std::is_invocable_r_v<bool, C, environment&>)
+			return [c = std::decay_t<C>{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(c(envr)); };
+		else if constexpr (std::is_invocable_r_v<bool, C>)
+			return [c = std::decay_t<C>{std::forward<C>(condition)}](environment&) -> bool { return Op{}(c()); };
+		else if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
+			return [c = std::string_view{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(envr.has_condition(c)); };
+		else if constexpr (std::is_constructible_v<std::string, C&&>)
+			return [c = std::string{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(envr.has_condition(c)); };
+		else if constexpr (std::is_constructible_v<bool const&, C&&>)
+			return [&condition](environment&) -> bool { return Op{}(condition); };
+	}
+};
+
+template <bool Value>
+struct modify_condition_combinator
+{
+	template <class C>
+	[[nodiscard]] constexpr auto operator()(C&& condition) const
+	{
+		if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
+			return [c = std::string_view{std::forward<C>(condition)}](environment& envr) -> bool { envr.modify_condition<Value>(c); return true; };
+		else if constexpr (std::is_constructible_v<std::string, C&&>)
+			return [c = std::string{std::forward<C>(condition)}](environment& envr) -> bool { envr.modify_condition<Value>(c); return true; };
+		else if constexpr (std::is_constructible_v<bool&, C&&>)
+			return [&condition](environment&) -> bool { condition = Value; return true; };
+	}
+};
 
 namespace language {
 
@@ -1002,7 +1034,8 @@ class parser
 		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
 		auto const& actions = grammar_.program().actions;
 		auto const& captures = grammar_.program().captures;
-		environment_.start_accept(*this);
+		environment_.start_accept();
+		detail::scope_exit const cleanup{[this]{ environment_.end_accept(); }};
 		for (auto& response : responses_) {
 			if (prune_depth_ <= response.call_depth)
 				continue;
@@ -1012,7 +1045,6 @@ class parser
 			else
 				actions[response.action_index](environment_);
 		}
-		environment_.end_accept();
 	}
 
 	[[nodiscard]] auto drain()
@@ -1154,6 +1186,8 @@ public:
 		program const& prog = grammar_.program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
+		environment_.start_parse(*this);
+		detail::scope_exit const cleanup{[this]{ environment_.end_parse(); }};
 		auto [sr, mr, rc, pc, fc] = drain();
 		bool result = false, done = false;
 		prune_depth_ = max_call_depth, call_depth_ = 0;
@@ -1302,7 +1336,7 @@ public:
 				} break;
 				case opcode::predicate: {
 					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-					bool const accepted = prog.predicates[imm](*this);
+					bool const accepted = prog.predicates[imm](environment_);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
 					pop_responses_after(rc);
 					if (!accepted)
@@ -1390,32 +1424,6 @@ inline bool parse(grammar const& grmr)
 [[nodiscard]] inline unsigned short environment::call_depth() const { return parser().call_depth(); }
 [[nodiscard]] inline unsigned short environment::prune_depth() const { return parser().prune_depth(); }
 inline void environment::escape() { parser().escape(); }
-
-template <class Op> template <class C>
-[[nodiscard]] constexpr auto test_condition_combinator<Op>::operator()(C&& condition) const
-{
-	if constexpr (std::is_invocable_r_v<bool, C, parser&>)
-		return [c = std::decay_t<C>{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(c(p)); };
-	else if constexpr (std::is_invocable_r_v<bool, C>)
-		return [c = std::decay_t<C>{std::forward<C>(condition)}](parser&) -> bool { return Op{}(c()); };
-	else if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
-		return [c = std::string_view{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(p.environment().has_condition(c)); };
-	else if constexpr (std::is_constructible_v<std::string, C&&>)
-		return [c = std::string{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(p.environment().has_condition(c)); };
-	else if constexpr (std::is_constructible_v<bool const&, C&&>)
-		return [&condition](parser&) -> bool { return Op{}(condition); };
-}
-
-template <bool Value> template <class C>
-[[nodiscard]] constexpr auto modify_condition_combinator<Value>::operator()(C&& condition) const
-{
-	if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
-		return [c = std::string_view{std::forward<C>(condition)}](parser& p) -> bool { p.environment().modify_condition<Value>(c); return true; };
-	else if constexpr (std::is_constructible_v<std::string, C&&>)
-		return [c = std::string{std::forward<C>(condition)}](parser& p) -> bool { p.environment().modify_condition<Value>(c); return true; };
-	else if constexpr (std::is_constructible_v<bool&, C&&>)
-		return [&condition](parser&) -> bool { condition = Value; return true; };
-}
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
