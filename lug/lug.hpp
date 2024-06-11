@@ -915,7 +915,7 @@ class parser
 	std::vector<semantic_response> responses_;
 	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
 
-	bool available(std::size_t sr, std::size_t sn)
+	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
 		do {
 			if (sn <= input_.size() - sr)
@@ -926,7 +926,7 @@ class parser
 		return false;
 	}
 
-	bool read_more()
+	[[nodiscard]] bool read_more()
 	{
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		std::string text;
@@ -939,7 +939,7 @@ class parser
 		return !text.empty();
 	}
 
-	int casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
+	[[nodiscard]] int casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
 	{
 		auto& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
@@ -948,7 +948,7 @@ class parser
 	}
 
 	template <class Compare>
-	bool match_sequence(std::size_t& sr, std::string_view str, Compare&& comp)
+	[[nodiscard]] bool match_sequence(std::size_t& sr, std::string_view str, Compare&& comp)
 	{
 		if (auto sn = str.size(); !sn || (available(sr, sn) && comp(sr, sn, str))) {
 			sr += sn;
@@ -958,7 +958,7 @@ class parser
 	}
 
 	template <class Match>
-	bool match_single(std::size_t& sr, Match&& match)
+	[[nodiscard]] bool match_single(std::size_t& sr, Match&& match)
 	{
 		if (!available(sr, 1))
 			return false;
@@ -981,7 +981,7 @@ class parser
 	}
 
 	template <opcode Opcode>
-	bool commit(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc, int off)
+	[[nodiscard]] bool commit(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc, int off)
 	{
 		if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
 			return false;
@@ -1015,7 +1015,7 @@ class parser
 		environment_.end_accept();
 	}
 
-	auto drain()
+	[[nodiscard]] auto drain()
 	{
 		origin_ = position_at(registers_.sr);
 		input_.erase(0, registers_.sr);
@@ -1034,7 +1034,7 @@ class parser
 			responses_.resize(n);
 	}
 
-	auto drop_responses_after(std::size_t n)
+	[[nodiscard]] auto drop_responses_after(std::size_t n)
 	{
 		std::vector<semantic_response> dropped;
 		if (n < responses_.size()) {
@@ -1044,14 +1044,14 @@ class parser
 		return dropped;
 	}
 
-	auto restore_responses_after(std::size_t n, std::vector<semantic_response> const& restore)
+	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<semantic_response> const& restore)
 	{
 		pop_responses_after(n);
 		responses_.insert(responses_.end(), restore.begin(), restore.end());
 		return responses_.size();
 	}
 
-	auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_size, 0})
+	[[nodiscard]] auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_size, 0})
 	{
 		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), range});
 		return responses_.size();
