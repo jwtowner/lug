@@ -9,8 +9,8 @@
 
 #include <cmath>
 #include <cstring>
-#include <deque>
 #include <fstream>
+#include <list>
 #include <map>
 #include <random>
 #include <unordered_map>
@@ -95,7 +95,7 @@ public:
 		                            > r2_%Expr > ")"            <[this]{ dim(tables_[*id_], *r1_, *r2_); }
 		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dim(lists_[*id_], *r1_); };
 		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
-		rule DataEl = r1_%Real                                  <[this]{ data_.push_back(*r1_); };
+		rule DataEl = r1_%Real                                  <[this]{ data(*r1_); };
 		rule InptEl = ref_%Ref                                  <[this]{ std::cin >> **ref_; };
 		rule PrntEl = txt_%String                               <[this]{ std::cout << *txt_; }
 		            | r1_%Expr                                  <[this]{ std::cout << *r1_; };
@@ -125,7 +125,7 @@ public:
 		            | "END"_isx                                 <[this]{ line_ = lines_.end(); }
 		            | ("EXIT"_isx | "QUIT"_isx)                 <[this]{ quit_ = true; };
 
-		rule Cmnd   = "CLEAR"_isx                               <[this]{ lines_.clear(); }
+		rule Cmnd   = "CLEAR"_isx                               <[this]{ clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
 		            | "LIST"_isx                                <[this]{ list(std::cout); }
 		            | "LOAD"_isx > txt_%String                  <[this]{ load(*txt_); }
@@ -208,6 +208,19 @@ private:
 			stack_.clear();
 			for_stack_.clear();
 		}
+	}
+
+	void clear()
+	{
+		data_.clear();
+		read_itr_ = data_.cbegin();
+		vars_.clear();
+		lists_.clear();
+		tables_.clear();
+		fn_param_body_.clear();
+		lines_.clear();
+		stack_.clear();
+		for_stack_.clear();
 	}
 
 	void cont()
@@ -313,6 +326,14 @@ private:
 			print_error("NO DATA");
 	}
 
+	void data(double value)
+	{
+		const bool reset = data_.empty();
+		data_.push_back(value);
+		if (reset)
+			read_itr_ = data_.cbegin();
+	}
+
 	double& at(List& lst, double i)
 	{
 		auto const index = static_cast<std::size_t>(i);
@@ -398,8 +419,8 @@ private:
 	lug::variable<double*> ref_{environment_};
 	lug::variable<RelOpFn> rop_{environment_};
 	std::default_random_engine random_{std::random_device{}()};
-	std::deque<double> data_;
-	std::deque<double>::const_iterator read_itr_;
+	std::list<double> data_;
+	std::list<double>::const_iterator read_itr_{data_.cbegin()};
 	std::unordered_map<std::string, double> vars_;
 	std::unordered_map<std::string, List> lists_;
 	std::unordered_map<std::string, Table> tables_;
