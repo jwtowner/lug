@@ -608,8 +608,8 @@ inline constexpr directive_modifier<directives::none, directives::none, directiv
 inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
-template <typename Op> struct test_conditional_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
-template <bool Value> struct modify_conditional_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
+template <typename Op> struct test_condition_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
+template <bool Value> struct modify_condition_combinator { template <class C> [[nodiscard]] constexpr auto operator()(C&& condition) const; };
 
 namespace language {
 
@@ -633,8 +633,8 @@ inline constexpr ctype_combinator<ctype::alpha> alpha{}; inline constexpr ctype_
 inline constexpr ctype_combinator<ctype::upper> upper{}; inline constexpr ctype_combinator<ctype::digit> digit{}; inline constexpr ctype_combinator<ctype::xdigit> xdigit{};
 inline constexpr ctype_combinator<ctype::space> space{}; inline constexpr ctype_combinator<ctype::blank> blank{}; inline constexpr ctype_combinator<ctype::punct> punct{};
 inline constexpr ctype_combinator<ctype::graph> graph{}; inline constexpr ctype_combinator<ctype::print> print{};
-inline constexpr test_conditional_combinator<detail::identity> when{}; inline constexpr test_conditional_combinator<std::logical_not<>> unless{};
-inline constexpr modify_conditional_combinator<true> set{}; inline constexpr modify_conditional_combinator<false> unset{};
+inline constexpr test_condition_combinator<detail::identity> when{}; inline constexpr test_condition_combinator<std::logical_not<>> unless{};
+inline constexpr modify_condition_combinator<true> set{}; inline constexpr modify_condition_combinator<false> unset{};
 
 inline constexpr struct
 {
@@ -1392,7 +1392,7 @@ inline std::string_view environment::match() const { return parser().match(); }
 inline syntax_position const& environment::position_at(std::size_t index) { return parser().position_at(index); }
 
 template <class Op> template <class C>
-[[nodiscard]] constexpr auto test_conditional_combinator<Op>::operator()(C&& condition) const
+[[nodiscard]] constexpr auto test_condition_combinator<Op>::operator()(C&& condition) const
 {
 	if constexpr (std::is_invocable_r_v<bool, C, parser&>)
 		return [c = std::decay_t<C>{std::forward<C>(condition)}](parser& p) -> bool { return Op{}(c(p)); };
@@ -1407,7 +1407,7 @@ template <class Op> template <class C>
 }
 
 template <bool Value> template <class C>
-[[nodiscard]] constexpr auto modify_conditional_combinator<Value>::operator()(C&& condition) const
+[[nodiscard]] constexpr auto modify_condition_combinator<Value>::operator()(C&& condition) const
 {
 	if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
 		return [c = std::string_view{std::forward<C>(condition)}](parser& p) -> bool { p.environment().modify_condition<Value>(c); return true; };
