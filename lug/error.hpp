@@ -6,6 +6,7 @@
 #define LUG_INCLUDE_LUG_ERROR_HPP
 
 #include <stdexcept>
+#include <string>
 
 namespace lug {
 
