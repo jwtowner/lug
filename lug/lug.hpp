@@ -47,7 +47,8 @@ enum class opcode : unsigned char
 	choice,         commit,         commit_back,    commit_partial,
 	jump,           call,           ret,            fail,
 	accept,         accept_final,   action,         predicate,
-	begin,          end
+	capture_start,  capture_end,    test_condition, push_condition,
+	pop_condition
 };
 
 enum class immediate : unsigned short {};
@@ -114,7 +115,7 @@ struct program
 				case opcode::match_set: val = detail::push_back_unique(runesets, src.runesets[instr.pf.val]); break;
 				case opcode::action: val = actions.size(); actions.push_back(src.actions[instr.pf.val]); break;
 				case opcode::predicate: val = predicates.size(); predicates.push_back(src.predicates[instr.pf.val]); break;
-				case opcode::end: val = captures.size(); captures.push_back(src.captures[instr.pf.val]); break;
+				case opcode::capture_end: val = captures.size(); captures.push_back(src.captures[instr.pf.val]); break;
 				default: val = (std::numeric_limits<std::size_t>::max)(); break;
 			}
 			if (val != (std::numeric_limits<std::size_t>::max)()) {
@@ -189,7 +190,7 @@ class environment
 
 	std::vector<lug::parser*> parser_stack_;
 	std::vector<std::vector<std::any>> accept_stack_;
-	std::unordered_set<std::string> conditions_;
+	std::unordered_set<std::string_view> conditions_;
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
 
@@ -241,11 +242,9 @@ public:
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
 	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
-	[[nodiscard]] bool has_condition(std::string_view c) const noexcept { return (conditions_.count(std::string{c}) > 0); }
-	void set_condition(std::string_view c) { conditions_.insert(std::string{c}); }
-	void unset_condition(std::string_view c) { conditions_.erase(std::string{c}); }
+	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
+	bool set_condition(std::string_view name, bool value) { if (value) { return !conditions_.emplace(name).second; } else { return (conditions_.erase(name) > 0); } }
 	void clear_conditions() { conditions_.clear(); }
-	template <bool B> void modify_condition(std::string_view c) { if constexpr (B) set_condition(c); else unset_condition(c); }
 	[[nodiscard]] std::string_view match() const;
 	[[nodiscard]] syntax_position const& position_at(std::size_t index);
 	[[nodiscard]] unsigned int variable_instance() const { return (static_cast<unsigned int>(parse_depth()) << 16) | call_depth(); }
@@ -610,37 +609,34 @@ inline constexpr directive_modifier<directives::postskip, directives::none, dire
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 template <unicode::ctype Property> struct ctype_combinator { void operator()(encoder& d) const { d.match_any(Property); } };
 
-template <typename Op> struct test_condition_combinator
+template <bool Value>
+struct condition_test_combinator
 {
-	template <class C>
-	[[nodiscard]] constexpr auto operator()(C&& condition) const
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept
 	{
-		if constexpr (std::is_invocable_r_v<bool, C, environment&>)
-			return [c = std::decay_t<C>{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(c(envr)); };
-		else if constexpr (std::is_invocable_r_v<bool, C>)
-			return [c = std::decay_t<C>{std::forward<C>(condition)}](environment&) -> bool { return Op{}(c()); };
-		else if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
-			return [c = std::string_view{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(envr.has_condition(c)); };
-		else if constexpr (std::is_constructible_v<std::string, C&&>)
-			return [c = std::string{std::forward<C>(condition)}](environment& envr) -> bool { return Op{}(envr.has_condition(c)); };
-		else if constexpr (std::is_constructible_v<bool const&, C&&>)
-			return [&condition](environment&) -> bool { return Op{}(condition); };
+		return [name](encoder& d) {
+			d.encode(opcode::test_condition, name, immediate{Value ? 1 : 0});
+		};
 	}
 };
 
 template <bool Value>
-struct modify_condition_combinator
+struct condition_block_combinator
 {
-	template <class C>
-	[[nodiscard]] constexpr auto operator()(C&& condition) const
+	struct condition_block_expression
 	{
-		if constexpr (std::is_same_v<std::string_view, std::decay_t<C>> || std::is_same_v<char const*, std::decay_t<C>>)
-			return [c = std::string_view{std::forward<C>(condition)}](environment& envr) -> bool { envr.modify_condition<Value>(c); return true; };
-		else if constexpr (std::is_constructible_v<std::string, C&&>)
-			return [c = std::string{std::forward<C>(condition)}](environment& envr) -> bool { envr.modify_condition<Value>(c); return true; };
-		else if constexpr (std::is_constructible_v<bool&, C&&>)
-			return [&condition](environment&) -> bool { condition = Value; return true; };
-	}
+		std::string_view name;
+
+		template <class E, class = std::enable_if_t<is_expression_v<E>>>
+		[[nodiscard]] constexpr auto operator[](E const& e) const
+		{
+			return [e = make_expression(e), n = name](encoder& d) {
+				d.encode(opcode::push_condition, n, immediate{Value ? 1 : 0}).evaluate(e).encode(opcode::pop_condition);
+			};
+		}
+	};
+
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept { return condition_block_expression{name}; }
 };
 
 namespace language {
@@ -665,8 +661,8 @@ inline constexpr ctype_combinator<ctype::alpha> alpha{}; inline constexpr ctype_
 inline constexpr ctype_combinator<ctype::upper> upper{}; inline constexpr ctype_combinator<ctype::digit> digit{}; inline constexpr ctype_combinator<ctype::xdigit> xdigit{};
 inline constexpr ctype_combinator<ctype::space> space{}; inline constexpr ctype_combinator<ctype::blank> blank{}; inline constexpr ctype_combinator<ctype::punct> punct{};
 inline constexpr ctype_combinator<ctype::graph> graph{}; inline constexpr ctype_combinator<ctype::print> print{};
-inline constexpr test_condition_combinator<detail::identity> when{}; inline constexpr test_condition_combinator<std::logical_not<>> unless{};
-inline constexpr modify_condition_combinator<true> set{}; inline constexpr modify_condition_combinator<false> unset{};
+inline constexpr condition_test_combinator<true> when{}; inline constexpr condition_test_combinator<false> unless{};
+inline constexpr condition_block_combinator<true> on{}; inline constexpr condition_block_combinator<false> off{};
 
 inline constexpr struct
 {
@@ -715,8 +711,8 @@ chr{};
 
 inline constexpr struct
 {
-	[[nodiscard]] constexpr auto operator()(std::string_view s) const { return string_expression{s}; }
-	[[nodiscard]] constexpr auto operator()(char const* s, std::size_t n) const { return string_expression{std::string_view{s, n}}; }
+	[[nodiscard]] constexpr auto operator()(std::string_view s) const noexcept { return string_expression{s}; }
+	[[nodiscard]] constexpr auto operator()(char const* s, std::size_t n) const noexcept { return string_expression{std::string_view{s, n}}; }
 }
 str{};
 
@@ -783,7 +779,7 @@ template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 {
 	if constexpr (std::is_invocable_v<A, environment&, syntax>) {
 		return [e = make_expression(e), a = std::move(a)](encoder& d) {
-			d.skip().encode(opcode::begin).evaluate(e).encode(opcode::end, syntactic_capture{a});
+			d.skip().encode(opcode::capture_start).evaluate(e).encode(opcode::capture_end, syntactic_capture{a});
 		};
 	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>) {
 		return e < [a = std::move(a)](environment& envr, csyntax& x) {
@@ -923,7 +919,7 @@ struct parser_registers
 
 class parser
 {
-	enum class stack_frame_type : unsigned char { backtrack, call, capture, lrcall };
+	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall };
 	enum class subject_location : std::size_t {};
 	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
 	static inline constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
@@ -943,6 +939,7 @@ class parser
 	std::vector<std::tuple<std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // sr, rc, pc
 	std::vector<std::ptrdiff_t> call_stack_; // pc
 	std::vector<subject_location> capture_stack_; // sr
+	std::vector<std::pair<std::string_view, bool>> condition_stack_; // name, value
 	std::vector<lrmemo> lrmemo_stack_;
 	std::vector<semantic_response> responses_;
 	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
@@ -1297,7 +1294,7 @@ public:
 					fc = imm;
 				failure:
 					for (mr = (std::max)(mr, sr), ++fc; fc > 0; --fc) {
-						if (done = cut_frame_ >= stack_frames_.size(); done) {
+						if (done = (cut_frame_ >= stack_frames_.size()); done) {
 							registers_ = {sr, mr, rc, pc, 0};
 							break;
 						}
@@ -1311,6 +1308,11 @@ public:
 							} break;
 							case stack_frame_type::capture: {
 								pop_stack_frame(capture_stack_, sr, mr, rc, pc), ++fc;
+							} break;
+							case stack_frame_type::condition: {
+								auto const& [cond_name, cond_value] = condition_stack_.back();
+								environment_.set_condition(cond_name, cond_value);
+								pop_stack_frame(condition_stack_), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
 								if (auto const& memo = lrmemo_stack_.back(); memo.sra != lrfailcode)
@@ -1345,11 +1347,11 @@ public:
 					if (!accepted)
 						goto failure;
 				} break;
-				case opcode::begin: {
+				case opcode::capture_start: {
 					stack_frames_.push_back(stack_frame_type::capture);
 					capture_stack_.push_back(static_cast<subject_location>(sr));
 				} break;
-				case opcode::end: {
+				case opcode::capture_end: {
 					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
 						goto failure;
 					auto const sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
@@ -1357,6 +1359,21 @@ public:
 					if (sr0 > sr1)
 						goto failure;
 					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
+				} break;
+				case opcode::test_condition: {
+					if (environment_.has_condition(str) != (imm != 0))
+						goto failure;
+				} break;
+				case opcode::push_condition: {
+					stack_frames_.push_back(stack_frame_type::condition);
+					condition_stack_.emplace_back(str, environment_.set_condition(str, imm != 0));
+				} break;
+				case opcode::pop_condition: {
+					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::condition)
+						goto failure;
+					auto const& [cond_name, cond_value] = condition_stack_.back();
+					environment_.set_condition(cond_name, cond_value);
+					pop_stack_frame(condition_stack_);
 				} break;
 				default: registers_ = {sr, (std::max)(mr, sr), rc, pc, 0}; throw bad_opcode{};
 			}

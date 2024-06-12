@@ -140,8 +140,8 @@ public:
 		            | NL
 		            | (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); };
 
-		rule Init   = when(fn_eval_) > FnEval
-		            | unless(fn_eval_) > Line;
+		rule Init   = when("fnev") > FnEval
+		            | unless("fnev") > Line;
 
 		grammar_ = start(Init);
 	}
@@ -387,8 +387,7 @@ private:
 			return 0.0;
 		}
 
-		bool const saved_fn_eval = fn_eval_;
-		fn_eval_ = true;
+		bool const saved_fn_eval = environment_.set_condition("fnev", true);
 
 		double& param_var = vars_[param];
 		double const saved_var = param_var;
@@ -396,7 +395,7 @@ private:
 
 		bool const success = lug::parse(body, grammar_, environment_);
 
-		fn_eval_ = saved_fn_eval;
+		environment_.set_condition("fnev", saved_fn_eval);
 		param_var = saved_var;
 
 		if (!success) {
