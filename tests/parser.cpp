@@ -10,7 +10,7 @@
 using namespace std::string_view_literals;
 
 constexpr auto sentences1 =
-u8R"(The stranger officiates the meal.
+R"(The stranger officiates the meal.
 She was too short to see over the fence.
 This is the last random sentence I will be writing and I am going to stop mid-sent
 It was getting dark, and we weren't there yet.
@@ -32,7 +32,7 @@ I want more detailed information.
 	He told us a very exciting adventure story.)"sv;
 
 constexpr auto sentences2 =
-u8R"(
+R"(
 There were white out conditions in the town; subsequently, the roads were impassable.
 He told us a very exciting adventure story.
 The sky is clear; the stars are twinkling.

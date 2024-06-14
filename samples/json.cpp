@@ -19,7 +19,7 @@ public:
 		rule Null           = lexeme[ "null" ];
 		rule UnicodeEscape  = lexeme[ chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
 		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
-		rule String         = lexeme[ "\"" > *(u8"[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ];
+		rule String         = lexeme[ "\"" > *("[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ];
 		rule Array          = "[" > JSON > *("," > JSON) > "]";
 		rule Object         = "{" > String > ":" > JSON > *("," > String > ":" > JSON) > "}";
 		JSON                = Object | Array | String | Number | Boolean | Null;
