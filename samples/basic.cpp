@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <list>
 #include <map>
 #include <random>
@@ -39,12 +40,13 @@ public:
 		rule Stmnt;
 
 		rule NL     = lexeme["\n"_sx | "\r\n" | "\r"];
-		rule Fn     = lexeme["FN"_isx > capture(fn_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(*fn_); };
+		rule Delim  = lexeme[","_sx | ";"];
 		rule LineNo = lexeme[capture(txt_)[+"[0-9]"_rx]]                <[this]{ return std::stoi(std::string{*txt_}); };
 		rule Real   = lexeme[capture(txt_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
 		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]      <[this]{ return std::stod(std::string{*txt_}); };
 		rule String = lexeme["\"" > capture(txt_)[*"[^\"]"_rx] > "\""]  <[this]{ return *txt_; };
 		rule Var    = lexeme[capture(id_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
+		rule Fn     = lexeme["FN"_isx > capture(fn_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(*fn_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 		            | ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -60,7 +62,7 @@ public:
 
 		rule Value  = !"[A-Z][A-Z][A-Z]"_irx
 		            > ( ref_%Ref                                <[this]{ return **ref_; }
-		                | Real | "(" > Expr > ")" )
+		              | Real | "(" > Expr > ")" )
 		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(*fn_, *r1_); }
 		            | "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(*r1_); }
 		            | "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(*r1_); }
@@ -73,7 +75,7 @@ public:
 		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
 		            | "RND"_isx > ~ ( "(" > ~Expr > ")" )       <[this]{ return std::uniform_real_distribution{}(random_); };
 
-		rule Factor = r1_%Value > ~(u8"[↑^]"_rx > r2_%Value     <[this]{ *r1_ = std::pow(*r1_, *r2_); }
+		rule Factor = r1_%Value > ~("[↑^]"_rx > r2_%Value       <[this]{ *r1_ = std::pow(*r1_, *r2_); }
 		            )                                           <[this]{ return *r1_; };
 
 		rule Term   = r1_%Factor > *(
@@ -87,7 +89,7 @@ public:
 		                 | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
 		            )                                           <[this]{ return *r1_; };
 
-		rule Rem    = "REM"_isx > *(!NL > any);
+		rule Rem    = "REM"_isx > *( !NL > any );
 
 		rule FnEval = r1_%Expr > ~Rem > eoi                     <[this]{ fn_result_ = *r1_; };
 
@@ -102,28 +104,31 @@ public:
 
 		     Stmnt  = "IF"_isx > r1_%Expr
 		                > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { environment_.escape(); } }
-		                > "THEN"_isx > Stmnt
+		                > "THEN"_isx > ( Stmnt
+		                               | no_%LineNo             <[this]{ goto_line(*no_); } )
 		            | "FOR"_isx > id_%Var > "=" > r1_%Expr
 		                > "TO"_isx > r2_%Expr
 		                > ( "STEP"_isx > r3_%Expr
-		                  | eps < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
+		                  | &NL < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
 		            | "NEXT"_isx > id_%Var                      <[this]{ next(*id_); }
 		            | "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(*no_); }
 		            | "DEF"_isx > fn_%Fn
 		                > "(" > id_%Var > ")"
 		                > "=" > capture(txt_)[*(!NL > any)]     <[this]{ fn_param_body_[*fn_] = { *id_, std::string{*txt_} }; }
 		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ **ref_ = *r1_; }
-		            | "DIM"_isx > DimEl > *("," > DimEl)
+		            | "DIM"_isx > DimEl > *(Delim > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
-		            | "READ"_isx > ReadEl > *("," > ReadEl)
-		            | "DATA"_isx > DataEl > *("," > DataEl)
-		            | "INPUT"_isx > InptEl > *("," > InptEl)
-		            | "PRINT"_isx > ~PrntEl > *("," > PrntEl)   <[]    { std::cout << "\n"; }
+		            | "READ"_isx > ReadEl > *(Delim > ReadEl)
+		            | "DATA"_isx > DataEl > *(Delim > DataEl)
+		            | "INPUT"_isx > InptEl > *(Delim > InptEl)
+		            | "PRINT"_isx > ~PrntEl > *(Delim > PrntEl)
+		                          > ( Delim                     <[]    { std::cout << " "; }
+		                            | &NL                       <[]    { std::cout << "\n"; } )
 		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
 		            | "END"_isx                                 <[this]{ line_ = lines_.end(); }
-		            | ("EXIT"_isx | "QUIT"_isx)                 <[this]{ quit_ = true; };
+		            | ( "EXIT"_isx | "QUIT"_isx )               <[this]{ quit_ = true; };
 
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
@@ -138,7 +143,7 @@ public:
 		                > capture(txt_)[*(!NL > any) > NL]      <[this]{ update_line(*no_, *txt_); }
 		            | Rem > NL
 		            | NL
-		            | (*(!NL > any) > NL)                       <[this]{ print_error("ILLEGAL FORMULA"); };
+		            | ( *(!NL > any) > NL )                     <[this]{ print_error("ILLEGAL FORMULA"); };
 
 		rule Init   = when("fnev") > FnEval
 		            | unless("fnev") > Line;
@@ -171,10 +176,20 @@ public:
 	{
 		if (std::ifstream file{filename_with_ext(name), std::ifstream::in}; file) {
 			while (!file.bad() && !file.eof()) {
-				int lineno = 0;
 				std::string line;
-				if (file >> lineno && std::getline(file >> std::ws, line)) {
-					update_line(lineno, line + "\n");
+				if (std::getline(file >> std::ws, line)) {
+					try {
+						std::size_t pos = 0;
+						const int lineno = std::stoi(line, &pos);
+						while ((pos < line.size()) && std::isspace(line[pos]))
+							++pos;
+						update_line(lineno, line.substr(pos) + "\n");
+					} catch (const std::out_of_range&) {
+						print_error("ILLEGAL LINE NUMBER");
+						return;
+					} catch (...) {
+						// ignore
+					}
 				} else {
 					file.clear();
 					file.ignore(std::numeric_limits<std::streamsize>::max(), file.widen('\n'));
@@ -438,6 +453,7 @@ private:
 int main(int argc, char** argv)
 {
 	try {
+		std::cout.precision(10);
 		basic_interpreter interpreter;
 		for (int i = 1; i < argc; ++i)
 			interpreter.load(argv[1]);
