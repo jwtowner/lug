@@ -17,7 +17,7 @@ LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 
 # samples
-SAMPLES = basic calc json
+SAMPLES = basic/basic calc/calc json/json
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
