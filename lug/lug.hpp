@@ -47,8 +47,10 @@ enum class opcode : unsigned char
 	choice,         commit,         commit_back,    commit_partial,
 	jump,           call,           ret,            fail,
 	accept,         accept_final,   action,         predicate,
-	capture_start,  capture_end,    test_condition, push_condition,
-	pop_condition
+	capture_start,  capture_end,    condition_test, condition_push,
+	condition_pop,  symbol_start,   symbol_end,     symbol_exists,
+	symbol_all,     symbol_any,     symbol_head,    symbol_tail,
+	symbol_push,    symbol_pop
 };
 
 enum class immediate : unsigned short {};
@@ -191,6 +193,8 @@ class environment
 	std::vector<lug::parser*> parser_stack_;
 	std::vector<std::vector<std::any>> accept_stack_;
 	std::unordered_set<std::string_view> conditions_;
+	std::unordered_map<std::string_view, std::vector<std::string_view>> symbols_;
+	static inline const std::vector<std::string_view> empty_symbols_{};
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
 
@@ -245,6 +249,10 @@ public:
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { if (value) { return !conditions_.emplace(name).second; } else { return (conditions_.erase(name) > 0); } }
 	void clear_conditions() { conditions_.clear(); }
+	[[nodiscard]] bool has_symbol(std::string_view name) const noexcept { return (symbols_.count(name) > 0); }
+	[[nodiscard]] const std::vector<std::string_view>& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
+	void add_symbol(std::string_view name, std::string_view value) { symbols_[name].emplace_back(value); }
+	void clear_symbols(std::string_view name) { symbols_.erase(name); }
 	[[nodiscard]] std::string_view match() const;
 	[[nodiscard]] syntax_position const& position_at(std::size_t index);
 	[[nodiscard]] unsigned int variable_instance() const { return (static_cast<unsigned int>(parse_depth()) << 16) | call_depth(); }
@@ -615,7 +623,7 @@ struct condition_test_combinator
 	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept
 	{
 		return [name](encoder& d) {
-			d.encode(opcode::test_condition, name, immediate{Value ? 1 : 0});
+			d.encode(opcode::condition_test, name, immediate{Value ? 1 : 0});
 		};
 	}
 };
@@ -631,12 +639,45 @@ struct condition_block_combinator
 		[[nodiscard]] constexpr auto operator[](E const& e) const
 		{
 			return [e = make_expression(e), n = name](encoder& d) {
-				d.encode(opcode::push_condition, n, immediate{Value ? 1 : 0}).evaluate(e).encode(opcode::pop_condition);
+				d.encode(opcode::condition_push, n, immediate{Value ? 1 : 0}).evaluate(e).encode(opcode::condition_pop);
 			};
 		}
 	};
 
 	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept { return condition_block_expression{name}; }
+};
+
+template <bool Value>
+struct symbol_exists_combinator
+{
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept
+	{
+		return [name](encoder& d) {
+			d.encode(opcode::symbol_exists, name, immediate{Value ? 1 : 0});
+		};
+	}
+};
+
+template <opcode Op>
+struct symbol_match_combinator
+{
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept
+	{
+		return [name](encoder& d) {
+			d.skip(directives::eps).encode(Op, name);
+		};
+	}
+};
+
+template <opcode Op>
+struct symbol_match_offset_combinator
+{
+	[[nodiscard]] constexpr auto operator()(std::string_view name, std::size_t offset = 0) const noexcept
+	{
+		return [name, offset](encoder& d) {
+			d.skip(directives::eps).encode(Op, name, immediate{offset});
+		};
+	}
 };
 
 namespace language {
@@ -663,6 +704,10 @@ inline constexpr ctype_combinator<ctype::space> space{}; inline constexpr ctype_
 inline constexpr ctype_combinator<ctype::graph> graph{}; inline constexpr ctype_combinator<ctype::print> print{};
 inline constexpr condition_test_combinator<true> when{}; inline constexpr condition_test_combinator<false> unless{};
 inline constexpr condition_block_combinator<true> on{}; inline constexpr condition_block_combinator<false> off{};
+inline constexpr symbol_exists_combinator<true> exists{}; inline constexpr symbol_exists_combinator<false> missing{};
+inline constexpr symbol_match_offset_combinator<opcode::symbol_head> match_front{}; inline constexpr symbol_match_offset_combinator<opcode::symbol_tail> match_back{};
+inline constexpr symbol_match_combinator<opcode::symbol_all> match_all{}; inline constexpr symbol_match_combinator<opcode::symbol_any> match_any{};
+inline constexpr symbol_match_combinator<opcode::symbol_tail> match{};
 
 inline constexpr struct
 {
@@ -861,6 +906,64 @@ template <class T, class E, class = std::enable_if_t<is_expression_v<E>>>
 	return e < [&v](environment& s) { *v = s.pop_attribute<T>(); };
 }
 
+inline constexpr struct
+{
+	struct capture_to
+	{
+		std::string_view name;
+
+		template <class E, class = std::enable_if_t<is_expression_v<E>>>
+		[[nodiscard]] constexpr auto operator[](E const& e) const
+		{
+			return [e = make_expression(e), n = name](encoder& d) {
+				d.skip().encode(opcode::symbol_start, n).evaluate(e).encode(opcode::symbol_end);
+			};
+		}
+	};
+
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept { return capture_to{name}; }
+}
+symbol{};
+
+inline constexpr struct
+{
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const
+	{
+		return [e = make_expression(e)](encoder& d) {
+			d.skip().encode(opcode::symbol_push).evaluate(e).encode(opcode::symbol_pop);
+		};
+	}
+}
+block{};
+
+inline constexpr struct
+{
+	struct local_to
+	{
+		std::string_view name;
+
+		template <class E, class = std::enable_if_t<is_expression_v<E>>>
+		[[nodiscard]] constexpr auto operator[](E const& e) const
+		{
+			return [e = make_expression(e), n = name](encoder& d) {
+				d.skip().encode(opcode::symbol_push, n, immediate{1}).evaluate(e).encode(opcode::symbol_pop);
+			};
+		}
+	};
+
+	[[nodiscard]] constexpr auto operator()(std::string_view name) const noexcept { return local_to{name}; }
+
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const
+	{
+		return [e = make_expression(e)](encoder& d) {
+			d.skip().encode(opcode::symbol_push, immediate{2}).evaluate(e).encode(opcode::symbol_pop);
+		};
+	}
+}
+local{};
+
 } // namespace language
 
 inline thread_local std::function<void(encoder&)> grammar::implicit_space{language::operator*(language::space)};
@@ -919,7 +1022,7 @@ struct parser_registers
 
 class parser
 {
-	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall };
+	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall, symbol_definition, symbol_table };
 	enum class subject_location : std::size_t {};
 	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
 	static inline constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
@@ -940,6 +1043,8 @@ class parser
 	std::vector<std::ptrdiff_t> call_stack_; // pc
 	std::vector<subject_location> capture_stack_; // sr
 	std::vector<std::pair<std::string_view, bool>> condition_stack_; // name, value
+	std::vector<std::pair<std::string_view, subject_location>> symbol_definition_stack_; // name, sr
+	std::vector<std::unordered_map<std::string_view, std::vector<std::string_view>>> symbol_table_stack_;
 	std::vector<lrmemo> lrmemo_stack_;
 	std::vector<semantic_response> responses_;
 	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
@@ -1321,6 +1426,13 @@ public:
 									++fc;
 								pop_stack_frame(lrmemo_stack_, sr, mr, rc, pc);
 							} break;
+							case stack_frame_type::symbol_definition: {
+								pop_stack_frame(symbol_definition_stack_), ++fc;
+							} break;
+							case stack_frame_type::symbol_table: {
+								environment_.symbols_.swap(symbol_table_stack_.back());
+								pop_stack_frame(symbol_table_stack_), ++fc;
+							} break;
 							default: break;
 						}
 					}
@@ -1352,7 +1464,7 @@ public:
 					capture_stack_.push_back(static_cast<subject_location>(sr));
 				} break;
 				case opcode::capture_end: {
-					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::capture)
+					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::capture))
 						goto failure;
 					auto const sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
 					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
@@ -1360,20 +1472,90 @@ public:
 						goto failure;
 					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
 				} break;
-				case opcode::test_condition: {
+				case opcode::condition_test: {
 					if (environment_.has_condition(str) != (imm != 0))
 						goto failure;
 				} break;
-				case opcode::push_condition: {
+				case opcode::condition_push: {
 					stack_frames_.push_back(stack_frame_type::condition);
 					condition_stack_.emplace_back(str, environment_.set_condition(str, imm != 0));
 				} break;
-				case opcode::pop_condition: {
-					if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::condition)
+				case opcode::condition_pop: {
+					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::condition))
 						goto failure;
 					auto const& [cond_name, cond_value] = condition_stack_.back();
 					environment_.set_condition(cond_name, cond_value);
 					pop_stack_frame(condition_stack_);
+				} break;
+				case opcode::symbol_start: {
+					stack_frames_.push_back(stack_frame_type::symbol_definition);
+					symbol_definition_stack_.emplace_back(str, static_cast<subject_location>(sr));
+				} break;
+				case opcode::symbol_end: {
+					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_definition))
+						goto failure;
+					auto const [symbol_name, symbol_sr] = symbol_definition_stack_.back();
+					auto const sr0 = static_cast<std::size_t>(symbol_sr), sr1 = sr;
+					pop_stack_frame(symbol_definition_stack_);
+					if (sr0 > sr1)
+						goto failure;
+					environment_.add_symbol(symbol_name, match().substr(sr0, sr1 - sr0));
+				} break;
+				case opcode::symbol_exists: {
+					if (environment_.has_symbol(str) != (imm != 0))
+						goto failure;
+				} break;
+				case opcode::symbol_all: {
+					auto const symbols = environment_.get_symbols(str);
+					if (symbols.empty())
+						goto failure;
+					std::size_t tsr = sr;
+					for (const auto& symbol : symbols)
+						if (!match_sequence(tsr, symbol, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+							goto failure;
+					sr = tsr;
+				} break;
+				case opcode::symbol_any: {
+					auto const symbols = environment_.get_symbols(str);
+					if (symbols.empty())
+						goto failure;
+					bool matched = false;
+					for (const auto& symbol : symbols) {
+						if (match_sequence(sr, symbol, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; })) {
+							matched = true;
+							break;
+						}
+					}
+					if (!matched)
+						goto failure;
+				} break;
+				case opcode::symbol_head: {
+					auto const symbols = environment_.get_symbols(str);
+					if (imm >= symbols.size())
+						goto failure;
+					if (!match_sequence(sr, symbols[imm], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+						goto failure;
+				} break;
+				case opcode::symbol_tail: {
+					auto const symbols = environment_.get_symbols(str);
+					if (imm >= symbols.size())
+						goto failure;
+					if (!match_sequence(sr, symbols[symbols.size() - imm - 1], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+						goto failure;
+				} break;
+				case opcode::symbol_push: {
+					stack_frames_.push_back(stack_frame_type::symbol_table);
+					symbol_table_stack_.emplace_back(environment_.symbols_);
+					if (imm == 1)
+						environment_.symbols_.erase(str);
+					else if (imm == 2)
+						environment_.symbols_.clear();
+				} break;
+				case opcode::symbol_pop: {
+					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_table))
+						goto failure;
+					environment_.symbols_.swap(symbol_table_stack_.back());
+					pop_stack_frame(symbol_table_stack_);
 				} break;
 				default: registers_ = {sr, (std::max)(mr, sr), rc, pc, 0}; throw bad_opcode{};
 			}
