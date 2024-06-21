@@ -35,8 +35,11 @@ int main()
 	try {
 		test_simple_predicates();
 		test_subject_index_predicate();
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "Unknown Error\n";
 		return -1;
 	}
 	return 0;

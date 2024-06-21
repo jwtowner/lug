@@ -44,7 +44,7 @@ int main()
 			std::cout << "Invalid JSON!\n";
 			return -1;
 		}
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
 		return -1;
 	} catch (...) {

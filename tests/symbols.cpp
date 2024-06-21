@@ -265,8 +265,11 @@ int main()
 		test_symbol_definition_and_match_all();
 		test_symbol_nested_definition_and_match();
 		test_symbol_exists();
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "Unknown Error\n";
 		return -1;
 	}
 	return 0;

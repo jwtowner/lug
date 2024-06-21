@@ -44,8 +44,11 @@ int main()
 	try {
 		test_condition();
 		test_condition_block();
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "Unknown Error\n";
 		return -1;
 	}
 	return 0;

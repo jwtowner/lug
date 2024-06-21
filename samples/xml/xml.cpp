@@ -54,7 +54,7 @@ int main()
 			std::cout << "Invalid XML!\n";
 			return -1;
 		}
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
 		return -1;
 	} catch (...) {

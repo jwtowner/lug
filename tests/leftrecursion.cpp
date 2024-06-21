@@ -107,8 +107,11 @@ int main()
 		test_direct_left_recursion();
 		test_indirect_left_recursion();
 		test_association_and_precedence();
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "Unknown Error\n";
 		return -1;
 	}
 	return 0;

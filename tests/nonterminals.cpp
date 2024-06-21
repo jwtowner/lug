@@ -125,8 +125,11 @@ int main()
 		test_one_or_many();
 		test_not();
 		test_predicate();
-	} catch (std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
+		return -1;
+	} catch (...) {
+		std::cerr << "Unknown Error\n";
 		return -1;
 	}
 	return 0;

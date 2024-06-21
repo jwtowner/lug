@@ -458,7 +458,7 @@ int main(int argc, char** argv)
 		for (int i = 1; i < argc; ++i)
 			interpreter.load(argv[1]);
 		interpreter.repl();
-	} catch (const std::exception& e) {
+	} catch (std::exception const& e) {
 		std::cerr << "ERROR: " << e.what() << "\n";
 		return -1;
 	} catch (...) {
