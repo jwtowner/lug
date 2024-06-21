@@ -35,7 +35,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
 # distribution files
-DISTFILES = README.md LICENSE.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
+DISTFILES = README.md LICENSE.md CHANGELOG.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
 
 all: options samples tests
 
