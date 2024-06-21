@@ -58,17 +58,17 @@ Syntax Reference
 
 | Operator | Syntax | Description|
 | --- | --- | --- |
-| Sequence | *e1* \> *e2* | Matches both expressions *e1* followed by *e2* in sequence |
-| Ordered Choice | *e1* \| *e2* | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2* |
-| Zero-or-More | \**e* | Reptition matching of expression *e* zero, one or more times |
-| One-or-More | +*e* | Reptition matching of expression *e* one or more times |
-| Optional | ~*e* | Matching of expression *e* zero or one times |
-| Positive Lookahead | &*e* | Matches without consuming input if expression *e* succeeds to match the input |
-| Negative Lookahead | !*e* | Matches without consuming input if expression *e* fails to match the input |
-| Cut Before | --*e* | Issues a cut instruction before the expression *e* |
-| Cut After | *e*-- | Issues a cut instruction after the expression *e* |
-| Action Scheduling | *e* < *a* | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input |
-| Attribute Binding | *v* % *e* | Binds the return value of the last evaluated semantic action within the expression *e* to the attribute *v* |
+| Sequence | `e1 > e2` | Matches both expressions *e1* followed by *e2* in sequence |
+| Ordered Choice | `e1 \| e2` | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2* |
+| Zero-or-More | `*e` | Reptition matching of expression *e* zero, one or more times |
+| One-or-More | `+e` | Reptition matching of expression *e* one or more times |
+| Optional | `~e` | Matching of expression *e* zero or one times |
+| Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input |
+| Negative Lookahead | `!e` | Matches without consuming input if expression *e* fails to match the input |
+| Cut Before | `--e` | Issues a cut instruction before the expression *e* |
+| Cut After | `e--` | Issues a cut instruction after the expression *e* |
+| Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input |
+| Attribute Binding | `v % e` | Binds the return value of the last evaluated semantic action within the expression *e* to the attribute *v* |
 
 | Control | Description |
 | --- | --- |
