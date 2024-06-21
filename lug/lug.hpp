@@ -193,8 +193,8 @@ class environment
 	std::vector<lug::parser*> parser_stack_;
 	std::vector<std::vector<std::any>> accept_stack_;
 	std::unordered_set<std::string_view> conditions_;
-	std::unordered_map<std::string_view, std::vector<std::string_view>> symbols_;
-	static inline const std::vector<std::string_view> empty_symbols_{};
+	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
+	static inline const std::vector<std::string> empty_symbols_{};
 	unsigned int tab_width_ = 8;
 	unsigned int tab_alignment_ = 8;
 
@@ -250,8 +250,8 @@ public:
 	bool set_condition(std::string_view name, bool value) { if (value) { return !conditions_.emplace(name).second; } else { return (conditions_.erase(name) > 0); } }
 	void clear_conditions() { conditions_.clear(); }
 	[[nodiscard]] bool has_symbol(std::string_view name) const noexcept { return (symbols_.count(name) > 0); }
-	[[nodiscard]] const std::vector<std::string_view>& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
-	void add_symbol(std::string_view name, std::string_view value) { symbols_[name].emplace_back(value); }
+	[[nodiscard]] const std::vector<std::string>& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
+	void add_symbol(std::string_view name, std::string value) { symbols_[name].emplace_back(std::move(value)); }
 	void clear_symbols(std::string_view name) { symbols_.erase(name); }
 	[[nodiscard]] std::string_view match() const;
 	[[nodiscard]] syntax_position const& position_at(std::size_t index);
@@ -1046,7 +1046,7 @@ class parser
 	std::vector<subject_location> capture_stack_; // sr
 	std::vector<std::pair<std::string_view, bool>> condition_stack_; // name, value
 	std::vector<std::pair<std::string_view, subject_location>> symbol_definition_stack_; // name, sr
-	std::vector<std::unordered_map<std::string_view, std::vector<std::string_view>>> symbol_table_stack_;
+	std::vector<std::unordered_map<std::string_view, std::vector<std::string>>> symbol_table_stack_;
 	std::vector<lrmemo> lrmemo_stack_;
 	std::vector<semantic_response> responses_;
 	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
@@ -1054,7 +1054,7 @@ class parser
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
 		do {
-			if (sn <= input_.size() - sr)
+			if (sn <= (input_.size() - sr))
 				return true;
 			if (sr < input_.size())
 				return false;
@@ -1067,7 +1067,8 @@ class parser
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		std::string text;
 		while (!sources_.empty() && text.empty()) {
-			bool more = sources_.back()(text);
+			text.clear();
+			bool const more = sources_.back()(text);
 			input_.insert(input_.end(), text.begin(), text.end());
 			if (!more)
 				sources_.pop_back();
@@ -1222,7 +1223,7 @@ public:
 
 	[[nodiscard]] syntax_position const& position_at(std::size_t index)
 	{
-		auto pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
+		auto const pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (pos != std::end(positions_) && index == pos->first)
 			return pos->second;
 		std::size_t startindex = 0;
@@ -1247,9 +1248,9 @@ public:
 			if (rune != U'\t') {
 				position.column += unicode::ucwidth(rune);
 			} else {
-				auto oldcolumn = position.column;
-				auto newcolumn = oldcolumn + environment_.tab_width();
-				auto alignedcolumn = newcolumn - ((newcolumn - 1) % environment_.tab_alignment());
+				auto const oldcolumn = position.column;
+				auto const newcolumn = oldcolumn + environment_.tab_width();
+				auto const alignedcolumn = newcolumn - ((newcolumn - 1) % environment_.tab_alignment());
 				position.column = (std::max)((std::min)(newcolumn, alignedcolumn), oldcolumn);
 			}
 		}
@@ -1501,14 +1502,14 @@ public:
 					pop_stack_frame(symbol_definition_stack_);
 					if (sr0 > sr1)
 						goto failure;
-					environment_.add_symbol(symbol_name, match().substr(sr0, sr1 - sr0));
+					environment_.add_symbol(symbol_name, std::string{match().substr(sr0, sr1 - sr0)});
 				} break;
 				case opcode::symbol_exists: {
 					if (environment_.has_symbol(str) != (imm != 0))
 						goto failure;
 				} break;
 				case opcode::symbol_all: {
-					auto const symbols = environment_.get_symbols(str);
+					auto const& symbols = environment_.get_symbols(str);
 					if (symbols.empty())
 						goto failure;
 					std::size_t tsr = sr;
@@ -1518,7 +1519,7 @@ public:
 					sr = tsr;
 				} break;
 				case opcode::symbol_any: {
-					auto const symbols = environment_.get_symbols(str);
+					auto const& symbols = environment_.get_symbols(str);
 					if (symbols.empty())
 						goto failure;
 					bool matched = false;
@@ -1532,14 +1533,14 @@ public:
 						goto failure;
 				} break;
 				case opcode::symbol_head: {
-					auto const symbols = environment_.get_symbols(str);
+					auto const& symbols = environment_.get_symbols(str);
 					if (imm >= symbols.size())
 						goto failure;
 					if (!match_sequence(sr, symbols[imm], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
 						goto failure;
 				} break;
 				case opcode::symbol_tail: {
-					auto const symbols = environment_.get_symbols(str);
+					auto const& symbols = environment_.get_symbols(str);
 					if (imm >= symbols.size())
 						goto failure;
 					if (!match_sequence(sr, symbols[symbols.size() - imm - 1], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Above is the XML prolog and below is the DOCTYPE -->
+<!DOCTYPE recipe SYSTEM "recipe.dtd">
+<!-- This is a sample recipe XML document -->
+<recipe id="r001" difficulty="medium">
+  <name>Chocolate Chip Cookies</name>
+  <!-- Ingredient list -->
+  <ingredients>
+    <item amount="2 1/4" unit="cups">all-purpose flour</item>
+    <item amount="1" unit="tsp">baking soda</item>
+    <item amount="1" unit="cup">butter</item>
+    <item amount="3/4" unit="cup">sugar</item>
+    <item amount="3/4" unit="cup">brown sugar</item>
+    <item amount="2" unit="large">eggs</item>
+    <item amount="2" unit="cups">chocolate chips</item>
+  </ingredients>
+  
+  <!-- Cooking instructions -->
+  <instructions>
+    <step number="1">
+      <![CDATA[
+      Preheat oven to 375°F (190°C).
+      Mix flour & baking soda in a bowl.
+      ]]>
+    </step>
+    <step number="2">
+      <![CDATA[
+      Cream butter & sugars, then beat in eggs.
+      Gradually add flour mixture. Stir in chips.
+      ]]>
+    </step>
+    <step number="3">
+      <![CDATA[
+      Drop by rounded tablespoons onto ungreased baking sheets.
+      Bake for 9 to 11 minutes or until golden brown.
+      ]]>
+    </step>
+  </instructions>
+  
+  <nutrition-info>
+    <!-- Calorie information per serving -->
+    <serving size="1 cookie" calories="150"/>
+  </nutrition-info>
+  
+  <!-- Recipe metadata -->
+  <metadata>
+    <author>Jane Doe</author>
+    <date-added year="2024" month="06" day="20"/>
+    <rating value="4.5" scale="5"/>
+  </metadata>
+</recipe>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<library>
+  <book isbn="978-1234567890">
+    <title>The Art of XML</title>
+    <author>
+      <firstName>Jane</firstName>
+      <lastName>Doe</lastName>
+    </author>
+    <publicationYear>2023</publicationYear>
+    <genres>
+      <genre>Technical</genre>
+      <genre>Programming</genre>
+    </genres>
+    <price currency="USD">39.99</price>
+  </book>
+  <book isbn="978-0987654321">
+    <title>Standalone XML Mastery</title>
+    <author>
+      <firstName>John</firstName>
+      <lastName>Smith</lastName>
+    </author>
+    <publicationYear>2024</publicationYear>
+    <genres>
+      <genre>Computer Science</genre>
+      <genre>Web Development</genre>
+    </genres>
+    <price currency="USD">44.99</price>
+  </book>
+</library>

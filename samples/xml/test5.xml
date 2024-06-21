@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<programming-examples>
+  <example language="HTML">
+    <description>A simple HTML paragraph with inline CSS</description>
+    <code><![CDATA[
+      <p style="color: blue; font-size: 14px;">
+        This is a blue paragraph with 14px font size.
+      </p>
+    ]]></code>
+  </example>
+  <example language="JavaScript">
+    <description>A function that calculates the factorial of a number</description>
+    <code><![CDATA[
+      function factorial(n) {
+        if (n === 0 || n === 1) {
+          return 1;
+        } else {
+          return n * factorial(n - 1);
+        }
+      }
+      
+      console.log(factorial(5)); // Output: 120
+    ]]></code>
+  </example>
+  <example language="SQL">
+    <description>A SQL query with a JOIN clause</description>
+    <code><![CDATA[
+      SELECT orders.order_id, customers.customer_name, orders.order_date
+      FROM orders
+      INNER JOIN customers ON orders.customer_id = customers.customer_id
+      WHERE orders.order_date > '2023-01-01';
+    ]]></code>
+  </example>
+</programming-examples>

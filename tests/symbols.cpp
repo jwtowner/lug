@@ -10,27 +10,36 @@
 void test_symbol_match()
 {
 	using namespace lug::language;
+
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
 	Xml = chr('<') > Name > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
+
 	grammar G = start(Xml > eoi);
 
 	environment E;
+	assert(!E.has_symbol("TAG"));
 	E.add_symbol("TAG", "a");
+	assert(E.has_symbol("TAG"));
 
 	assert(lug::parse("<a></a>", G, E));
 	assert(lug::parse("< a ></ a>", G, E));
 	assert(!lug::parse("<a></b>", G, E));
 
+	assert(E.has_symbol("TAG"));
 	E.clear_symbols("TAG");
+	assert(!E.has_symbol("TAG"));
 	E.add_symbol("TAG", "b");
+	assert(E.has_symbol("TAG"));
 
 	assert(lug::parse("<b></b>", G, E));
 	assert(lug::parse("<b ></ b>", G, E));
 	assert(!lug::parse("<b ></a>", G, E));
 	assert(!lug::parse("<b ></ a>", G, E));
 
+	assert(E.has_symbol("TAG"));
 	E.add_symbol("TAG", "body");
+	assert(E.has_symbol("TAG"));
 
 	assert(lug::parse("<body></body>", G, E));
 	assert(lug::parse("<body></ body>", G, E));
@@ -42,9 +51,11 @@ void test_symbol_match()
 void test_symbol_definition_and_match()
 {
 	using namespace lug::language;
+
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
 	Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
+
 	grammar G = start(Xml > eoi);
 
 	assert(lug::parse("<a></a>", G));
@@ -71,6 +82,7 @@ void test_symbol_definition_and_match()
 void test_symbol_definition_and_match_2()
 {
 	using namespace lug::language;
+
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > match("fruit");
 	grammar G = start(FruitSet > eoi);
@@ -90,6 +102,7 @@ void test_symbol_definition_and_match_2()
 void test_symbol_definition_and_match_3()
 {
 	using namespace lug::language;
+
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match("fruit");
 	grammar G = start(FruitSet > eoi);
@@ -117,6 +130,7 @@ void test_symbol_definition_and_match_3()
 void test_symbol_definition_and_match_any()
 {
 	using namespace lug::language;
+
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match_any("fruit");
 	grammar G = start(FruitSet > eoi);
@@ -148,6 +162,7 @@ void test_symbol_definition_and_match_any()
 void test_symbol_definition_and_match_all()
 {
 	using namespace lug::language;
+
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match_all("fruit");
 	grammar G = start(FruitSet > eoi);
@@ -180,10 +195,13 @@ void test_symbol_definition_and_match_all()
 void test_symbol_nested_definition_and_match()
 {
 	using namespace lug::language;
+
 	rule Xml, Inner, Name;
+
 	Name = lexeme[alpha > *alnum];
 	Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Inner > str("</") > match("TAG") > chr('>');
 	Inner = block[Xml];
+
 	grammar G = start(Xml > eoi);
 
 	assert(lug::parse("<a></a>", G));
@@ -211,6 +229,31 @@ void test_symbol_nested_definition_and_match()
 	assert(!lug::parse("<body></ broken>", G));
 }
 
+void test_symbol_exists()
+{
+	using namespace lug::language;
+
+	int Count = 0;
+
+	rule Name = lexeme[+alpha];
+	rule OptionalName = ~symbol("Name")[Name] >
+			( exists("Name") <[&Count] { ++Count; }
+			| missing("Name") <[&Count] { --Count; } );
+	grammar G = start(OptionalName);
+
+	assert(Count == 0);
+	assert(lug::parse("Apple", G));
+	assert(Count == 1);
+
+	Count = 0;
+	assert(lug::parse("123132", G));
+	assert(Count == -1);
+
+	Count = 0;
+	assert(lug::parse("Banana Banana", G));
+	assert(Count == 1);
+}
+
 int main()
 {
 	try {
@@ -221,6 +264,7 @@ int main()
 		test_symbol_definition_and_match_any();
 		test_symbol_definition_and_match_all();
 		test_symbol_nested_definition_and_match();
+		test_symbol_exists();
 	} catch (std::exception& e) {
 		std::cerr << "Error: " << e.what() << "\n";
 		return -1;

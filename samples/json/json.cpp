@@ -4,6 +4,7 @@
 
 #include <lug/lug.hpp>
 
+// Matcher for JSON Data Interchange Standard (RFC7159)
 class json_matcher
 {
 public:
@@ -40,7 +41,7 @@ int main()
 	try {
 		json_matcher matcher;
 		if (!matcher.parse(std::cin)) {
-			std::cout << "Invalid JSON!" << "\n";
+			std::cout << "Invalid JSON!\n";
 			return -1;
 		}
 	} catch (std::exception& e) {

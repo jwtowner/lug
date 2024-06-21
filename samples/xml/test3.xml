@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<inventory>
+  <product id="p001" category="electronics">
+    <name>Smartphone</name>
+    <brand>TechCo</brand>
+    <price currency="USD">599.99</price>
+    <specs>
+      <display size="6.2" unit="inches">OLED</display>
+      <storage capacity="128" unit="GB"/>
+      <camera resolution="12" unit="MP"/>
+    </specs>
+    <inStock quantity="50"/>
+  </product>
+  <product id="p002" category="appliances">
+    <name>Refrigerator</name>
+    <brand>CoolTech</brand>
+    <price currency="USD">899.99</price>
+    <specs>
+      <capacity value="20" unit="cubic feet"/>
+      <energyRating class="A+"/>
+    </specs>
+    <inStock quantity="10"/>
+  </product>
+</inventory>
