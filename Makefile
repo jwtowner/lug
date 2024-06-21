@@ -2,7 +2,7 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.2-pre
+VERSION = 0.2.0
 
 # paths
 PREFIX = /usr/local
@@ -35,7 +35,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
 # distribution files
-DISTFILES = README.md LICENSE.md CHANGELOG.md Makefile lug.sln runtests.sh doc/ lug/ msvs/ samples/ tests/ tools/ 
+DISTFILES = CHANGELOG.md LICENSE.md README.md Makefile lug.sln runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore doc/ lug/ msvs/ samples/ tests/ tools/ .github/
 
 all: options samples tests
 
