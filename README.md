@@ -58,7 +58,7 @@ Syntax Reference
 
 | Operator | Syntax | Description|
 | --- | --- | --- |
-| Sequence | *e1* > *e2* | Matches both expressions *e1* followed by *e2* in sequence |
+| Sequence | *e1* \> *e2* | Matches both expressions *e1* followed by *e2* in sequence |
 | Ordered Choice | *e1* \| *e2* | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2* |
 | Zero-or-More | \**e* | Reptition matching of expression *e* zero, one or more times |
 | One-or-More | +*e* | Reptition matching of expression *e* one or more times |
@@ -80,7 +80,7 @@ Syntax Reference
 | `capture(V)[e]` | Syntactic capture of the matching subexpression *e* into variable *V* |
 | `on(C)[e]` | Sets the condition *C* to true for the scope of subexpression *e* |
 | `off(C)[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default) |
-| `symbol(S)[e]` | Pushes a symbol definition for symbol *S* that is equal to the captured input that matches subexpression *e* |
+| `symbol(S)[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e* |
 | `block[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e* |
 | `local[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference |
 | `local(S)[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
