@@ -67,7 +67,7 @@ Syntax Reference
 | Negative Lookahead | !*e* | Matches without consuming input if expression *e* fails to match the input |
 | Cut Before | --*e* | Issues a cut instruction before the expression *e* |
 | Cut After | *e*-- | Issues a cut instruction after the expression *e* |
-| Action Scheduling | *e* < *a* | Schedules a semantic action *a* to be evaluated if expression *e* succesfully matches the input |
+| Action Scheduling | *e* < *a* | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input |
 | Attribute Binding | *v* % *e* | Binds the return value of the last evaluated semantic action within the expression *e* to the attribute *v* |
 
 | Control | Description |
