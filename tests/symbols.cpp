@@ -10,8 +10,9 @@
 void test_symbol_match()
 {
 	using namespace lug::language;
-	rule Name = lexeme[alpha > *alnum];
-	rule Xml = chr('<') > Name > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
+	rule Xml, Name;
+	Name = lexeme[alpha > *alnum];
+	Xml = chr('<') > Name > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
 	grammar G = start(Xml > eoi);
 
 	environment E;
@@ -41,8 +42,9 @@ void test_symbol_match()
 void test_symbol_definition_and_match()
 {
 	using namespace lug::language;
-	rule Name = lexeme[alpha > *alnum];
-	rule Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
+	rule Xml, Name;
+	Name = lexeme[alpha > *alnum];
+	Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Xml > str("</") > match("TAG") > chr('>');
 	grammar G = start(Xml > eoi);
 
 	assert(lug::parse("<a></a>", G));
@@ -178,9 +180,9 @@ void test_symbol_definition_and_match_all()
 void test_symbol_nested_definition_and_match()
 {
 	using namespace lug::language;
-	rule Inner;
-	rule Name = lexeme[alpha > *alnum];
-	rule Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Inner > str("</") > match("TAG") > chr('>');
+	rule Xml, Inner, Name;
+	Name = lexeme[alpha > *alnum];
+	Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Inner > str("</") > match("TAG") > chr('>');
 	Inner = block[Xml];
 	grammar G = start(Xml > eoi);
 

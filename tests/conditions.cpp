@@ -10,8 +10,9 @@
 void test_condition()
 {
 	using namespace lug::language;
-	rule S = when("accept_ab") > "ab"_sx
-	       | unless("accept_ab") > "a"_sx;
+	rule S;
+	S = when("accept_ab") > "ab"_sx
+	  | unless("accept_ab") > "a"_sx;
 	environment E;
 	grammar G = start(S > eoi);
 	assert(lug::parse("a", G, E));
@@ -27,8 +28,9 @@ void test_condition()
 void test_condition_block()
 {
 	using namespace lug::language;
-	rule S = when("accept_ab") > "ab"_sx > ~off("accept_ab")[ S ]
-	       | unless("accept_ab") > "a"_sx > ~on("accept_ab")[ S ];
+	rule S;
+	S = when("accept_ab") > "ab"_sx > ~off("accept_ab")[ S ]
+	  | unless("accept_ab") > "a"_sx > ~on("accept_ab")[ S ];
 	grammar G = start(S > eoi);
 	assert(lug::parse("a ab a ab", G));
 	assert(!lug::parse("a a ab a ab", G));

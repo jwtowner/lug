@@ -674,8 +674,10 @@ struct symbol_match_offset_combinator
 {
 	[[nodiscard]] constexpr auto operator()(std::string_view name, std::size_t offset = 0) const noexcept
 	{
+		if (offset > (std::numeric_limits<unsigned char>::max)())
+			throw resource_limit_error{};
 		return [name, offset](encoder& d) {
-			d.skip(directives::eps).encode(Op, name, immediate{offset});
+			d.skip(directives::eps).encode(Op, name, immediate{static_cast<unsigned short>(offset)});
 		};
 	}
 };
