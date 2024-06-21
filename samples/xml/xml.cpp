@@ -32,8 +32,8 @@ public:
 		rule EncodingDecl = str("encoding") > chr('=') > ("\"UTF-8\""_sx | "'UTF-8'"_sx);
 		rule VersionInfo = str("version") > chr('=') > ("\"1.0\""_sx | "'1.0'"_sx);        
 		rule Prolog = str("<?xml") > VersionInfo > ~EncodingDecl > ~SDDecl > str("?>");
-		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
 
+		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
 		grammar_ = start(File);
 	}
 
