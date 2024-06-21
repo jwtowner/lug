@@ -83,8 +83,7 @@ Syntax Reference
 | `symbol(S)[e]` | Pushes a symbol definition for symbol *S* that is equal to the captured input that matches subexpression *e* |
 | `block[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e* |
 | `local[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference |
-| `local(S)[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*,
-except for the symbol named *S* |
+| `local(S)[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
 
 | Terminal | Description |
 | --- | --- |
