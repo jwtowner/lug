@@ -132,17 +132,3 @@ Syntax Reference
 | `_scx` | Case Sensitive Character Expression | Same as `_cx` but case sensitive |
 | `_ssx` | Case Sensitive String Expression | Same as `_sx` but case sensitive |
 | `_srx` | Case Sensitive Regular Expression | Same as `_rx` but case sensitive |
-
-TODO
----
-- parser error recovery
-- add an interactive processing mode flag to input sources?
-- handle exceptions thrown from semantic actions in semantics::accept?
-- feature: Adams-Nestra grammars and whitespace alignment
-- feature: syntax to specify number range of allowed iteration
-- optimization: tail recursion
-- optimization: reduce number of false-positive left-recursive calls even further by lazily evaluating rule mandate
-- optimization: additional instructions (test_char, test_any, test_range, test_class)
-- more samples, testing, and bug fixing
-- increase compiler warning level and fix any issues
-- documentation
