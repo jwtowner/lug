@@ -742,6 +742,11 @@ bre{};
 
 inline constexpr struct
 {
+	[[nodiscard]] constexpr auto operator()(char c) const
+	{
+		return [c](encoder& d) { d.match(std::string_view{&c, 1}); };
+	}
+
 	[[nodiscard]] constexpr auto operator()(char32_t c) const
 	{
 		return [c](encoder& d) { d.match(utf8::encode_rune(c)); };
@@ -763,12 +768,15 @@ inline constexpr struct
 }
 str{};
 
+[[nodiscard]] constexpr auto operator ""_cx(char c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
 [[nodiscard]] inline auto operator ""_rx(char const* s, std::size_t n) { return basic_regular_expression{std::string_view{s, n}}; }
+[[nodiscard]] constexpr auto operator ""_icx(char c) { return caseless[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_isx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
 [[nodiscard]] inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_scx(char c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
