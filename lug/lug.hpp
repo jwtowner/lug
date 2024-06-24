@@ -186,6 +186,8 @@ public:
 	[[nodiscard]] constexpr operator syntax_range() const noexcept { return range(); }
 	[[nodiscard]] constexpr bool empty() const noexcept { return capture_.empty(); }
 	[[nodiscard]] constexpr std::size_t size() const noexcept { return capture_.size(); }
+	[[nodiscard]] constexpr bool operator==(syntax const& other) const noexcept { return capture_ == other.capture_ && index_ == other.index_; }
+	[[nodiscard]] constexpr bool operator!=(syntax const& other) const noexcept { return capture_ != other.capture_ || index_ != other.index_; }
 };
 
 class environment
