@@ -55,7 +55,7 @@ void test_association_and_precedence()
 	N = chr('1') | chr('2') | chr('3');
 	E = E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
 	  | E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
-	  | N <[&out](csyntax& x){ out += x.capture(); };
+	  | N <[&out](syntax x){ out += x.capture(); };
 	S = E > eoi;
 	grammar G = start(S);
 	out.clear();

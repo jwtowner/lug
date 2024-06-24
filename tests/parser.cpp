@@ -51,10 +51,10 @@ void test_line_column_tracking()
 		using namespace lug::language;
 
 		rule Word = lexeme[
-				  str("officiates") < [&](csyntax& x) { startpos[0] = x.start(); endpos[0] = x.end(); }
-				| str("Everyone") < [&](csyntax& x) { endpos[1] = x.end(); startpos[1] = x.start();  }
-				| str("Friday") < [&](csyntax& x) { startpos[2] = x.start(); endpos[2] = x.end(); }
-				| str("story") < [&](csyntax& x) { endpos[3] = x.end(); startpos[3] = x.start(); }
+				  str("officiates") < [&](environment& e, syntax x) { startpos[0] = e.position_begin(x); endpos[0] = e.position_end(x); }
+				| str("Everyone") < [&](environment& e, syntax x) { endpos[1] = e.position_end(x); startpos[1] = e.position_begin(x);  }
+				| str("Friday") < [&](environment& e, syntax x) { startpos[2] = e.position_begin(x); endpos[2] = e.position_end(x); }
+				| str("story") < [&](environment& e, syntax x) { endpos[3] = e.position_end(x); startpos[3] = e.position_begin(x); }
 				| +alpha
 			];
 
