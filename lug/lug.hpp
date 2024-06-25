@@ -1078,8 +1078,10 @@ class parser
 
 	[[nodiscard]] bool read_more()
 	{
-		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
+		if (sources_.empty())
+			return false;
 		std::string text;
+		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		while (!sources_.empty() && text.empty()) {
 			text.clear();
 			bool const more = sources_.back()(text);
