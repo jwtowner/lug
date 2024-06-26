@@ -789,11 +789,10 @@ str{};
 
 struct implicit_space_rule
 {
+	std::function<void(encoder&)> prev_rule;
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	implicit_space_rule(E const& e)
-	{
-		grammar::implicit_space = std::function<void(encoder&)>{make_expression(e)};
-	}
+	implicit_space_rule(E const& e) : prev_rule{std::exchange(grammar::implicit_space, std::function<void(encoder&)>{make_expression(e)})} {}
+	~implicit_space_rule() { grammar::implicit_space = std::move(prev_rule); }
 };
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -1025,7 +1024,6 @@ inline thread_local std::function<void(encoder&)> grammar::implicit_space{langua
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
 		ioffset.off = static_cast<int>(rel_addr);
 	}
-	grammar::implicit_space = language::operator*(language::space);
 	return grammar{std::move(grprogram)};
 }
 
@@ -1651,8 +1649,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 [[nodiscard]] inline grammar basic_regular_expression::make_grammar()
 {
 	using namespace language;
-	auto old_implicit_space = grammar::implicit_space;
-	grammar::implicit_space = nop;
+	implicit_space_rule default_space = nop;
 	rule Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
 	rule Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
 	rule Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.capture()); }
@@ -1661,9 +1658,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 	rule Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
 	    > Element > *(!chr(']') > Element) > chr(']')   <[](generator& g) { g.bracket_commit(); };
 	rule Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.capture()); };
-	grammar grmr = start((+(Dot | Bracket | Sequence) | Empty) > eoi);
-	grammar::implicit_space = old_implicit_space;
-	return grmr;
+	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
 
 LUG_DIAGNOSTIC_POP
