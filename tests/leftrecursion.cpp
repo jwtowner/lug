@@ -10,7 +10,7 @@
 void test_direct_left_recursion()
 {
 	using namespace lug::language;
-	grammar::implicit_space = nop;
+	implicit_space_rule Space = nop;
 	rule R, S;
 	R = R > chr('a') | chr('a');
 	S = R > !chr('a');
@@ -29,7 +29,7 @@ void test_direct_left_recursion()
 void test_indirect_left_recursion()
 {
 	using namespace lug::language;
-	grammar::implicit_space = nop;
+	implicit_space_rule Space = nop;
 	rule Q, R, S;
 	Q = R > chr('a');
 	R = Q | chr('a');
@@ -49,7 +49,7 @@ void test_indirect_left_recursion()
 void test_association_and_precedence()
 {
 	using namespace lug::language;
-	grammar::implicit_space = nop;
+	implicit_space_rule Space = nop;
 	std::string out;
 	rule N, E, S;
 	N = chr('1') | chr('2') | chr('3');
@@ -79,7 +79,7 @@ void test_association_and_precedence()
 void test_hidden_left_recursion()
 {
 	using namespace lug::language;
-	grammar::implicit_space = nop;
+	implicit_space_rule Space = nop;
 	rule R = *chr('b') > R > chr('a') | chr('a');
 	rule S = R > !(chr('a') | chr('b'));
 	grammar G = start(S);

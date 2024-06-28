@@ -44,9 +44,13 @@ Abstraction is often one floor above you.
 
 void test_line_column_tracking()
 {
-	std::array<lug::syntax_position, 4> startpos, endpos;
-	lug::grammar G;
+	std::array<lug::syntax_position, 4> startpos;
+	startpos.fill({0, 0});
 
+	std::array<lug::syntax_position, 4> endpos;
+	endpos.fill({0, 0});
+
+	const lug::grammar G = [&]
 	{
 		using namespace lug::language;
 
@@ -58,14 +62,14 @@ void test_line_column_tracking()
 				| +alpha
 			];
 
-		G = start(*(Word | punct) > eoi);
-	}
+		return start(*(Word | punct) > eoi);
+	}();
 
 	lug::environment E;
 	lug::parser p{G, E};
 
-	bool success = p.parse(std::begin(sentences1), std::end(sentences1));
-	assert(success);
+	bool const success1 = p.parse(std::begin(sentences1), std::end(sentences1));
+	assert(success1);
 	assert(p.match() == sentences1);
 
 	assert(startpos[0].line == 1 && startpos[0].column == 14);
@@ -81,8 +85,8 @@ void test_line_column_tracking()
 	assert(p.max_subject_index() == sentences1.size());
 	assert(p.max_subject_position().line == 20 && p.max_subject_position().column == 52);
 
-	success = p.parse(std::begin(sentences2), std::end(sentences2));
-	assert(success);
+	bool const success2 = p.parse(std::begin(sentences2), std::end(sentences2));
+	assert(success2);
 	assert(p.match() == sentences2);
 
 	assert(startpos[0].line == 25 && startpos[0].column == 14);

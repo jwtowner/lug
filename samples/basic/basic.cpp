@@ -41,12 +41,12 @@ public:
 
 		rule NL     = lexeme["\n"_sx | "\r\n" | "\r"];
 		rule Delim  = lexeme[","_sx | ";"];
-		rule LineNo = lexeme[capture(txt_)[+"[0-9]"_rx]]                <[this]{ return std::stoi(std::string{*txt_}); };
-		rule Real   = lexeme[capture(txt_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
-		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]      <[this]{ return std::stod(std::string{*txt_}); };
-		rule String = lexeme["\"" > capture(txt_)[*"[^\"]"_rx] > "\""]  <[this]{ return *txt_; };
-		rule Var    = lexeme[capture(id_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(*id_); };
-		rule Fn     = lexeme["FN"_isx > capture(fn_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(*fn_); };
+		rule LineNo = lexeme[capture(sx_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{sx_}); };
+		rule Real   = lexeme[capture(sx_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
+		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]      <[this]{ return std::stod(std::string{sx_}); };
+		rule String = lexeme["\"" > capture(sx_)[*"[^\"]"_rx] > "\""]   <[this]{ return sx_.capture(); };
+		rule Var    = lexeme[capture(sx_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(sx_); };
+		rule Fn     = lexeme["FN"_isx > capture(sx_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(sx_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 		            | ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -56,66 +56,66 @@ public:
 		            | "<"                             <[]() -> RelOpFn { return std::isless; };
 
 		rule Ref    = id_%Var > "(" > r1_%Expr > ","
-		                            > r2_%Expr > ")"            <[this]{ return &at(tables_[*id_], *r1_, *r2_); }
-		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ return &at(lists_[*id_], *r1_); }
-		            | id_%Var                                   <[this]{ return &vars_[*id_]; };
+		                            > r2_%Expr > ")"            <[this]{ return &at(tables_[id_], r1_, r2_); }
+		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ return &at(lists_[id_], r1_); }
+		            | id_%Var                                   <[this]{ return &vars_[id_]; };
 
 		rule Value  = !"[A-Z][A-Z][A-Z]"_irx
-		            > ( ref_%Ref                                <[this]{ return **ref_; }
+		            > ( ref_%Ref                                <[this]{ return *ref_; }
 		              | Real | "(" > Expr > ")" )
-		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(*fn_, *r1_); }
-		            | "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(*r1_); }
-		            | "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(*r1_); }
-		            | "TAN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::tan(*r1_); }
-		            | "ATN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::atan(*r1_); }
-		            | "EXP"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::exp(*r1_); }
-		            | "ABS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::abs(*r1_); }
-		            | "LOG"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::log(*r1_); }
-		            | "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(*r1_); }
-		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(*r1_); }
+		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(fn_, r1_); }
+		            | "SIN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sin(r1_); }
+		            | "COS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::cos(r1_); }
+		            | "TAN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::tan(r1_); }
+		            | "ATN"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::atan(r1_); }
+		            | "EXP"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::exp(r1_); }
+		            | "ABS"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::abs(r1_); }
+		            | "LOG"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::log(r1_); }
+		            | "SQR"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::sqrt(r1_); }
+		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(r1_); }
 		            | "RND"_isx > ~ ( "(" > ~Expr > ")" )       <[this]{ return std::uniform_real_distribution{}(random_); };
 
-		rule Factor = r1_%Value > ~("[↑^]"_rx > r2_%Value       <[this]{ *r1_ = std::pow(*r1_, *r2_); }
-		            )                                           <[this]{ return *r1_; };
+		rule Factor = r1_%Value > ~("[↑^]"_rx > r2_%Value       <[this]{ r1_ = std::pow(r1_, r2_); }
+		            )                                           <[this]{ return r1_; };
 
 		rule Term   = r1_%Factor > *(
-		                  "*"_sx > r2_%Factor                   <[this]{ *r1_ *= *r2_; }
-		                | "/"_sx > r2_%Factor                   <[this]{ *r1_ /= *r2_; }
-		            )                                           <[this]{ return *r1_; };
+		                  "*"_sx > r2_%Factor                   <[this]{ r1_ *= r2_; }
+		                | "/"_sx > r2_%Factor                   <[this]{ r1_ /= r2_; }
+		            )                                           <[this]{ return r1_; };
 
 		     Expr   = (  ~ "+"_sx > r1_%Term
-		                 | "-"_sx > r1_%Term                    <[this]{ *r1_ = -*r1_; }
-		            ) > *( "+"_sx > r2_%Term                    <[this]{ *r1_ += *r2_; }
-		                 | "-"_sx > r2_%Term                    <[this]{ *r1_ -= *r2_; }
-		            )                                           <[this]{ return *r1_; };
+		                 | "-"_sx > r1_%Term                    <[this]{ r1_ = -r1_; }
+		            ) > *( "+"_sx > r2_%Term                    <[this]{ r1_ += r2_; }
+		                 | "-"_sx > r2_%Term                    <[this]{ r1_ -= r2_; }
+		            )                                           <[this]{ return r1_; };
 
 		rule Rem    = "REM"_isx > *( !NL > any );
 
-		rule FnEval = r1_%Expr > ~Rem > eoi                     <[this]{ fn_result_ = *r1_; };
+		rule FnEval = r1_%Expr > ~Rem > eoi                     <[this]{ fn_result_ = r1_; };
 
 		rule DimEl  = id_%Var > "(" > r1_%Expr > ","
-		                            > r2_%Expr > ")"            <[this]{ dim(tables_[*id_], *r1_, *r2_); }
-		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dim(lists_[*id_], *r1_); };
-		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
-		rule DataEl = r1_%Real                                  <[this]{ data(*r1_); };
-		rule InptEl = ref_%Ref                                  <[this]{ std::cin >> **ref_; };
-		rule PrntEl = txt_%String                               <[this]{ std::cout << *txt_; }
-		            | r1_%Expr                                  <[this]{ std::cout << *r1_; };
+		                            > r2_%Expr > ")"            <[this]{ dim(tables_[id_], r1_, r2_); }
+		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dim(lists_[id_], r1_); };
+		rule ReadEl = ref_%Ref                                  <[this]{ read(ref_); };
+		rule DataEl = r1_%Real                                  <[this]{ data(r1_); };
+		rule InptEl = ref_%Ref                                  <[this]{ std::cin >> *ref_; };
+		rule PrntEl = txt_%String                               <[this]{ std::cout << txt_; }
+		            | r1_%Expr                                  <[this]{ std::cout << r1_; };
 
 		     Stmnt  = "IF"_isx > r1_%Expr
-		                > rop_%RelOp > r2_%Expr                 <[this]{ if (!(*rop_)(*r1_, *r2_)) { environment_.escape(); } }
+		                > rop_%RelOp > r2_%Expr                 <[this]{ if (!(rop_)(r1_, r2_)) { environment_.escape(); } }
 		                > "THEN"_isx > ( Stmnt
-		                               | no_%LineNo             <[this]{ goto_line(*no_); } )
+		                               | no_%LineNo             <[this]{ goto_line(no_); } )
 		            | "FOR"_isx > id_%Var > "=" > r1_%Expr
 		                > "TO"_isx > r2_%Expr
 		                > ( "STEP"_isx > r3_%Expr
-		                  | &NL < [this]{ *r3_ = 1.0; } )       <[this]{ for_to_step(*id_, *r1_, *r2_, *r3_); }
-		            | "NEXT"_isx > id_%Var                      <[this]{ next(*id_); }
-		            | "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(*no_); }
+		                  | &NL < [this]{ r3_ = 1.0; } )        <[this]{ for_to_step(id_, r1_, r2_, r3_); }
+		            | "NEXT"_isx > id_%Var                      <[this]{ next(id_); }
+		            | "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(no_); }
 		            | "DEF"_isx > fn_%Fn
 		                > "(" > id_%Var > ")"
-		                > "=" > capture(txt_)[*(!NL > any)]     <[this]{ fn_param_body_[*fn_] = { *id_, std::string{*txt_} }; }
-		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ **ref_ = *r1_; }
+		                > "=" > capture(sx_)[*(!NL > any)]      <[this]{ fn_param_body_[fn_] = { id_, std::string{sx_} }; }
+		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ *ref_ = r1_; }
 		            | "DIM"_isx > DimEl > *(Delim > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
 		            | "READ"_isx > ReadEl > *(Delim > ReadEl)
@@ -124,7 +124,7 @@ public:
 		            | "PRINT"_isx > ~PrntEl > *(Delim > PrntEl)
 		                          > ( Delim                     <[]    { std::cout << " "; }
 		                            | &NL                       <[]    { std::cout << "\n"; } )
-		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(*no_); }
+		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
 		            | "END"_isx                                 <[this]{ line_ = lines_.end(); }
@@ -133,14 +133,14 @@ public:
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
 		            | "LIST"_isx                                <[this]{ list(std::cout); }
-		            | "LOAD"_isx > txt_%String                  <[this]{ load(*txt_); }
+		            | "LOAD"_isx > txt_%String                  <[this]{ load(txt_); }
 		            | "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
-		            | "SAVE"_isx > txt_%String                  <[this]{ save(*txt_); };
+		            | "SAVE"_isx > txt_%String                  <[this]{ save(txt_); };
 
 		rule Line   = Stmnt > ~Rem > NL
 		            | Cmnd > ~Rem > NL
 		            | no_%LineNo
-		                > capture(txt_)[*(!NL > any) > NL]      <[this]{ update_line(*no_, *txt_); }
+		                > capture(sx_)[*(!NL > any) > NL]       <[this]{ update_line(no_, sx_); }
 		            | Rem > NL
 		            | NL
 		            | ( *(!NL > any) > NL )                     <[this]{ print_error("ILLEGAL FORMULA"); };
@@ -423,15 +423,16 @@ private:
 
 	lug::grammar grammar_;
 	lug::environment environment_;
-	lug::variable<std::string> fn_{environment_};
-	lug::variable<std::string> id_{environment_};
-	lug::variable<std::string_view> txt_{environment_};
-	lug::variable<double> r1_{environment_};
-	lug::variable<double> r2_{environment_};
-	lug::variable<double> r3_{environment_};
-	lug::variable<int> no_{environment_};
-	lug::variable<double*> ref_{environment_};
-	lug::variable<RelOpFn> rop_{environment_};
+	lug::syntax sx_;
+	std::string fn_;
+	std::string id_;
+	std::string_view txt_;
+	double r1_{0.0};
+	double r2_{0.0};
+	double r3_{0.0};
+	int no_{0};
+	double* ref_{nullptr};
+	RelOpFn rop_{nullptr};
 	std::default_random_engine random_{std::random_device{}()};
 	std::list<double> data_;
 	std::list<double>::const_iterator read_itr_{data_.cbegin()};
