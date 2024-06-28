@@ -204,8 +204,9 @@ class environment
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	static inline const std::vector<std::string> empty_symbols_{};
-	unsigned int tab_width_{8};
-	unsigned int tab_alignment_{8};
+	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
+	unsigned int tab_width_{8}, tab_alignment_{8};
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
@@ -224,19 +225,21 @@ class environment
 		parser_stack_.pop_back();
 	}
 
-	void start_accept()
+	unsigned short start_accept()
 	{
 		if (accept_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
 			throw resource_limit_error{};
 		accept_stack_.emplace_back();
 		on_accept_started();
+		return call_depth_;
 	}
 
-	void end_accept()
+	void end_accept(unsigned short prior_call_depth)
 	{
 		if (accept_stack_.empty())
 			throw accept_context_error{};
 		on_accept_ended();
+		reset_call_depth(prior_call_depth);
 		accept_stack_.pop_back();
 	}
 
@@ -245,6 +248,12 @@ class environment
 		if (accept_stack_.empty())
 			throw accept_context_error{};
 		return accept_stack_.back();
+	}
+
+	void reset_call_depth(unsigned short depth) noexcept
+	{
+		prune_depth_ = max_call_depth;
+		call_depth_ = depth;
 	}
 
 public:
@@ -267,10 +276,9 @@ public:
 	[[nodiscard]] syntax_position position_begin(syntax_range const& range);
 	[[nodiscard]] syntax_position position_end(syntax_range const& range);
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range);
-	[[nodiscard]] unsigned short parse_depth() const { return static_cast<unsigned short>(parser_stack_.size()); }
-	[[nodiscard]] unsigned short call_depth() const;
-	[[nodiscard]] unsigned short prune_depth() const;
-	void escape();
+	[[nodiscard]] unsigned short call_depth() const noexcept { return call_depth_; }
+	[[nodiscard]] unsigned short prune_depth() const noexcept { return prune_depth_; }
+	void escape() { prune_depth_ = call_depth_; }
 
 	template <class T>
 	void push_attribute(T&& x)
@@ -1250,7 +1258,6 @@ class parser
 	enum class subject_location : std::size_t {};
 	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
 	static inline constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
 	static inline constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
 	lug::grammar const& grammar_;
 	lug::environment& environment_;
@@ -1271,7 +1278,6 @@ class parser
 	std::vector<std::unordered_map<std::string_view, std::vector<std::string>>> symbol_table_stack_;
 	std::vector<lrmemo> lrmemo_stack_;
 	std::vector<semantic_response> responses_;
-	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
 
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
@@ -1361,15 +1367,15 @@ class parser
 	void accept(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
 	{
 		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-		environment_.start_accept();
-		detail::scope_exit const cleanup{[this]{ environment_.end_accept(); }};
+		auto const prior_call_depth = environment_.start_accept();
+		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_.end_accept(prior_call_depth); }};
 		auto const& actions = grammar_.program().actions;
 		auto const& captures = grammar_.program().captures;
 		auto const full_match = match();
 		for (auto& response : responses_) {
-			if (prune_depth_ <= response.call_depth)
+			if (environment_.prune_depth() <= response.call_depth)
 				continue;
-			prune_depth_ = max_call_depth, call_depth_ = response.call_depth;
+			environment_.reset_call_depth(response.call_depth);
 			if (response.range.index < max_size)
 				captures[response.action_index](environment_, syntax{full_match.substr(response.range.index, response.range.size), response.range.index});
 			else
@@ -1445,9 +1451,6 @@ public:
 	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
 	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
-	[[nodiscard]] unsigned short call_depth() const noexcept { return call_depth_; }
-	[[nodiscard]] unsigned short prune_depth() const noexcept { return prune_depth_; }
-	void escape() { prune_depth_ = call_depth_; }
 
 	[[nodiscard]] syntax_position position_at(std::size_t index)
 	{
@@ -1523,7 +1526,6 @@ public:
 		detail::scope_exit const cleanup{[this]{ environment_.end_parse(); }};
 		auto [sr, mr, rc, pc, fc] = drain();
 		bool result = false, done = false;
-		prune_depth_ = max_call_depth, call_depth_ = 0;
 		pc = 0, fc = 0;
 		while (!done) {
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
@@ -1850,9 +1852,6 @@ inline bool parse(grammar const& grmr)
 [[nodiscard]] inline syntax_position environment::position_begin(syntax_range const& range) { return parser().position_begin(range); }
 [[nodiscard]] inline syntax_position environment::position_end(syntax_range const& range) { return parser().position_end(range); }
 [[nodiscard]] inline std::pair<syntax_position, syntax_position> environment::position_range(syntax_range const& range) { return parser().position_range(range); }
-[[nodiscard]] inline unsigned short environment::call_depth() const { return parser().call_depth(); }
-[[nodiscard]] inline unsigned short environment::prune_depth() const { return parser().prune_depth(); }
-inline void environment::escape() { parser().escape(); }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
