@@ -8,19 +8,19 @@ A C++ embedded domain specific language for expressing parsers as extended [pars
 
 Features
 ---
-- Natural syntax more akin to external parser generator languages
-- Separation of syntatic and lexical rules, with customizable implicit whitespace skipping
-- Direct and indirect left recursion with precedence levels to disambiguate subexpressions with mixed left/right recursion
-- Traditional PEG syntax has been extended to support attribute grammars and semantic actions
-- Support for most context-sensitive grammars with symbol tables, conditions and syntactic predicates
-- Cut operator to commit to currently matched parse prefix and prune all backtrack entries
-- Deferred evaluation of semantic actions, ensuring actions do not execute on failed branches or invalid input
+- Natural syntax similar to other external parser generator languages
+- Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping
+- Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion
+- Extended PEG syntax to include attribute grammars and semantic actions
+- Ability to handle context-sensitive grammars with symbol tables, conditions, and syntactic predicates
+- Cut operator to commit to the currently matched parse prefix and prune all backtrack entries
+- Deferred evaluation of semantic actions, ensuring actions only execute on successful branches and valid input
 - Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine
-- UTF-8 text parsing with complete Level 1 and partial Level 2 support of the UTS #18 Unicode Regular Expressions technical standard
-- Automatic line and column tracking with customizable tab width and alignment
-- Uses expression template functors to implement the rules of the domain specific language
-- Header only library using C++17 language and library features
-- Relatively small with the intent of parser core to remain under 2000 lines of terse code
+- Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard
+- Automatic tracking of line and column numbers, with customizable tab width and alignment
+- Implementation of rules in the domain-specific language using expression templates and function objects
+- Header-only library utilizing C++17 language and library features
+- Relatively small codebase, with the goal of keeping the parser core under 2000 lines of concise code
 
 It is based on research introduced in the following papers:
 
@@ -40,8 +40,9 @@ It is based on research introduced in the following papers:
 
 Building
 ---
-As a header only library, lug itself does not need to be built.
-Simply ensure the `lug` header directory is in your include path and you're good to go.
+As a header-only library, lug itself does not require any build process.
+To use lug, make sure to include the `lug` header directory in your project's include path.
+Once that is done, you are ready to start using lug in your code.
 
 As a baseline, the following compiler versions are known to work with lug.
 
@@ -56,19 +57,80 @@ To build the sample programs and unit tests, a makefile is provided for Linux an
 Syntax Reference
 ---
 
-| Operator | Syntax | Description|
-| --- | --- | --- |
-| Sequence | `e1 > e2` | Matches both expressions *e1* followed by *e2* in sequence |
-| Ordered Choice | `e1 \| e2` | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2* |
-| Zero-or-More | `*e` | Reptition matching of expression *e* zero, one or more times |
-| One-or-More | `+e` | Reptition matching of expression *e* one or more times |
-| Optional | `~e` | Matching of expression *e* zero or one times |
-| Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input |
-| Negative Lookahead | `!e` | Matches without consuming input if expression *e* fails to match the input |
-| Cut Before | `--e` | Issues a cut instruction before the expression *e* |
-| Cut After | `e--` | Issues a cut instruction after the expression *e* |
-| Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input |
-| Attribute Binding | `v % e` | Binds the return value of the last evaluated semantic action within the expression *e* to the attribute *v* |
+<style>
+  .center-text {
+    text-align: center;
+  }
+  .code-style {
+    font-family: ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace;
+    background-color: #454545;
+    border-radius: 3px;
+    padding: 2px 4px;
+    color: lightgrey;
+  }
+</style>
+<table style="width:100%">
+  <tr>
+    <th style="width:15%">Operator</th>
+    <th class="center-text" style="width:20%">Syntax</th>
+    <th style="width:65%">Description</th>
+  </tr>
+  <tr>
+    <td>Sequence</td>
+    <td class="center-text"><span class="code-style">e1 > e2</span></td>
+    <td>Matches both expressions <i>e1</i> followed by <i>e2</i> in sequence</td>
+  </tr>
+  <tr>
+    <td>Ordered Choice</td>
+    <td class="center-text"><span class="code-style">e1 | e2</span></td>
+    <td>Attempts to first match expression <i>e1</i>, and if that fails backtracks then attempts to match <i>e2</i></td>
+  </tr>
+  <tr>
+    <td>Zero-or-More</td>
+    <td class="center-text"><span class="code-style">*e</span></td>
+    <td>Reptition matching of expression <i>e</i> zero, one or more times</td>
+  </tr>
+  <tr>
+    <td>One-or-More</td>
+    <td class="center-text"><span class="code-style">+e</span></td>
+    <td>Reptition matching of expression <i>e</i> one or more times</td>
+  </tr>
+  <tr>
+    <td>Optional</td>
+    <td class="center-text"><span class="code-style">~e</span></td>
+    <td>Matching of expression <i>e</i> zero or one times</td>
+  </tr>
+  <tr>
+    <td>Positive Lookahead</td>
+    <td class="center-text"><span class="code-style">&e</span></td>
+    <td>Matches without consuming input if expression <i>e</i> succeeds to match the input</td>
+  </tr>
+  <tr>
+    <td>Cut Before</td>
+    <td class="center-text"><span class="code-style">--e</span></td>
+    <td>Issues a cut instruction before the expression <i>e</i></td>
+  </tr>
+  <tr>
+    <td>Cut After</td>
+    <td class="center-text"><span class="code-style">e--</span></td>
+    <td>Issues a cut instruction after the expression <i>e</i></td>
+  </tr>
+  <tr>
+    <td>Action Scheduling</td>
+    <td class="center-text"><span class="code-style">e < a</span></td>
+    <td>Schedules a semantic action <i>a</i> to be evaluated if expression <i>e</i> successfully matches the input</td>
+  </tr>
+  <tr>
+    <td>Attribute Binding</td>
+    <td class="center-text"><span class="code-style">v % e</span></td>
+    <td>Assigns the return value of the last evaluated semantic action within the expression <i>e</i> to the variable <i>v</i></td>
+  </tr>
+  <tr>
+    <td>Syntactic Capture</td>
+    <td class="center-text"><span class="code-style">capture(v)[e]</span></td>
+    <td>Captures the text matching the subexpression <i>e</i> into variable <i>v</i></td>
+  </tr>
+</table>
 
 | Control | Description |
 | --- | --- |
@@ -77,7 +139,6 @@ Syntax Reference
 | `skip[e]` | Turns on all whitespace skipping for subexpression *e* (the default) |
 | `noskip[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace |
 | `lexeme[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping |
-| `capture(V)[e]` | Syntactic capture of the matching subexpression *e* into variable *V* |
 | `on(C)[e]` | Sets the condition *C* to true for the scope of subexpression *e* |
 | `off(C)[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default) |
 | `symbol(S)[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e* |
@@ -103,6 +164,7 @@ Syntax Reference
 | `alpha` | Matches any alphabetical character |
 | `alnum` | Matches any alphabetical character or numerical digit |
 | `blank` | Matches any space or tab character |
+| `cntrl` | Matches any control character |
 | `digit` | Matches any decimal digit |
 | `graph` | Matches any graphical character |
 | `lower` | Matches any lowercase alphabetical character |
