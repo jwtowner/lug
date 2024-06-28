@@ -1,5 +1,12 @@
 # Changelog
 
+## Release v0.3.0 (Under Development)
+
+* Removed the `lug::variable` template class and instead allow for natural use of types and variables in captures and attribute bindings. Variable state is automatically saved and restored across rule boundaries.
+* Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
+* `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.
+* Handle situation where compilation with RTTI is disabled.
+
 ## Release v0.2.0 (June 21, 2024)
 
 * Feature: Implemented new support for context-sensitive grammars with symbol tables and parsing conditions, based on the PEG extensions described in the paper *"A Declarative Extension of Parsing Expression Grammars for Recognizing Most Programming Languages (2015)"* by Tetsuro Matsumura and Kimio Kuramitsu.
