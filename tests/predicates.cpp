@@ -16,10 +16,10 @@ void test_simple_predicates()
 	assert(lug::parse("ab", G));
 }
 
-void test_subject_index_predicate()
+void test_match_size_predicate()
 {
 	using namespace lug::language;
-	rule S = +("a"_sx > [](environment& e){ return e.parser().subject_index() <= 4; });
+	rule S = +("a"_sx > [](environment& e){ return e.match().size() <= 4; });
 	grammar G = start(S > eoi);
 	assert(!lug::parse("", G));
 	assert(!lug::parse("b", G));
@@ -34,7 +34,7 @@ int main()
 {
 	try {
 		test_simple_predicates();
-		test_subject_index_predicate();
+		test_match_size_predicate();
 	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
 		return -1;

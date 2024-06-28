@@ -197,7 +197,6 @@ class environment
 {
 	friend class lug::parser;
 
-	std::vector<lug::parser*> parser_stack_;
 	std::vector<std::vector<std::any>> accept_stack_;
 	std::vector<std::pair<void*, std::size_t>> frame_stack_;
 	detail::frame_allocator frame_stack_allocator_;
@@ -207,29 +206,25 @@ class environment
 	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
 	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
 	unsigned int tab_width_{8}, tab_alignment_{8};
+	syntax_position origin_{1, 1};
+	std::vector<std::pair<std::size_t, syntax_position>> positions_;
+	std::string_view match_, subject_;
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
-	void start_parse(lug::parser& p)
+	void start_parse()
 	{
-		if (parser_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
-			throw resource_limit_error{};
-		parser_stack_.emplace_back(&p);
+		origin_ = position_at(match_.size());
+		reset_match_and_subject(std::string_view{}, std::string_view{});
 	}
 
-	void end_parse()
-	{
-		if (parser_stack_.empty())
-			throw parse_context_error{};
-		parser_stack_.pop_back();
-	}
-
-	unsigned short start_accept()
+	unsigned short start_accept(std::string_view m, std::string_view s)
 	{
 		if (accept_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
 			throw resource_limit_error{};
 		accept_stack_.emplace_back();
+		reset_match_and_subject(m, s);
 		on_accept_started();
 		return call_depth_;
 	}
@@ -240,6 +235,7 @@ class environment
 			throw accept_context_error{};
 		on_accept_ended();
 		reset_call_depth(prior_call_depth);
+		origin_ = position_at(match_.size());
 		accept_stack_.pop_back();
 	}
 
@@ -256,10 +252,15 @@ class environment
 		call_depth_ = depth;
 	}
 
+	void reset_match_and_subject(std::string_view m, std::string_view s)
+	{
+		match_ = m;
+		subject_ = s;
+		positions_.clear();
+	}
+
 public:
 	virtual ~environment() = default;
-	[[nodiscard]] lug::parser& parser() { if (parser_stack_.empty()) throw parse_context_error{}; return *(parser_stack_.back()); }
-	[[nodiscard]] lug::parser const& parser() const { if (parser_stack_.empty()) throw parse_context_error{}; return *(parser_stack_.back()); }
 	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
@@ -271,14 +272,50 @@ public:
 	[[nodiscard]] std::vector<std::string> const& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
 	void add_symbol(std::string_view name, std::string value) { symbols_[name].emplace_back(std::move(value)); }
 	void clear_symbols(std::string_view name) { symbols_.erase(name); }
-	[[nodiscard]] std::string_view match() const;
-	[[nodiscard]] syntax_position position_at(std::size_t index);
-	[[nodiscard]] syntax_position position_begin(syntax_range const& range);
-	[[nodiscard]] syntax_position position_end(syntax_range const& range);
-	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range);
+	[[nodiscard]] std::string_view match() const noexcept { return match_; }
+	[[nodiscard]] std::string_view subject() const noexcept { return subject_; }
+	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return position_at(range.index); }
+	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return position_at(range.index + range.size); }
+	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] unsigned short call_depth() const noexcept { return call_depth_; }
 	[[nodiscard]] unsigned short prune_depth() const noexcept { return prune_depth_; }
 	void escape() { prune_depth_ = call_depth_; }
+
+	[[nodiscard]] syntax_position position_at(std::size_t index)
+	{
+		auto const pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
+		if (pos != std::end(positions_) && index == pos->first)
+			return pos->second;
+		std::size_t startindex = 0;
+		syntax_position position = origin_;
+		if (pos != std::begin(positions_)) {
+			auto prevpos = std::prev(pos);
+			startindex = prevpos->first;
+			position = prevpos->second;
+		}
+		auto first = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(startindex));
+		auto const last = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(index));
+		char32_t rune, prevrune = U'\0';
+		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
+			std::tie(next, rune) = utf8::decode_rune(curr, last);
+			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
+				position.column = 1, ++position.line;
+				first = next;
+			}
+		}
+		for (auto curr = first, next = curr; curr < last; curr = next) {
+			std::tie(next, rune) = utf8::decode_rune(curr, last);
+			if (rune != U'\t') {
+				position.column += unicode::ucwidth(rune);
+			} else {
+				auto const oldcolumn = position.column;
+				auto const newcolumn = oldcolumn + tab_width_;
+				auto const alignedcolumn = newcolumn - ((newcolumn - 1) % tab_alignment_);
+				position.column = (std::max)((std::min)(newcolumn, alignedcolumn), oldcolumn);
+			}
+		}
+		return positions_.insert(pos, std::make_pair(index, position))->second;
+	}
 
 	template <class T>
 	void push_attribute(T&& x)
@@ -1264,8 +1301,6 @@ class parser
 	std::vector<std::function<bool(std::string&)>> sources_;
 	std::string input_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
-	syntax_position origin_{1, 1};
-	std::vector<std::pair<std::size_t, syntax_position>> positions_;
 	parser_registers registers_{0, 0, 0, 0, 0};
 	bool parsing_{false}, reading_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
@@ -1367,11 +1402,11 @@ class parser
 	void accept(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
 	{
 		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-		auto const prior_call_depth = environment_.start_accept();
+		auto const full_match = match();
+		auto const prior_call_depth = environment_.start_accept(full_match, subject());
 		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_.end_accept(prior_call_depth); }};
 		auto const& actions = grammar_.program().actions;
 		auto const& captures = grammar_.program().captures;
-		auto const full_match = match();
 		for (auto& response : responses_) {
 			if (environment_.prune_depth() <= response.call_depth)
 				continue;
@@ -1385,10 +1420,8 @@ class parser
 
 	[[nodiscard]] auto drain()
 	{
-		origin_ = position_at(registers_.sr);
 		input_.erase(0, registers_.sr);
 		casefolded_subjects_.clear();
-		positions_.clear();
 		responses_.clear();
 		registers_.mr -= registers_.sr;
 		registers_.sr = 0, registers_.rc = 0;
@@ -1443,50 +1476,15 @@ public:
 	[[nodiscard]] std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
 	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
 	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
-	[[nodiscard]] syntax_position subject_position() { return position_at(registers_.sr); }
-	[[nodiscard]] syntax_position max_subject_position() { return position_at(registers_.mr); }
-	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return position_at(range.index); }
-	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return position_at(range.index + range.size); }
+	[[nodiscard]] syntax_position subject_position() { return environment_.position_at(registers_.sr); }
+	[[nodiscard]] syntax_position max_subject_position() { return environment_.position_at(registers_.mr); }
+	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_.position_at(index); }
+	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_.position_at(range.index); }
+	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_.position_at(range.index + range.size); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
 	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
-
-	[[nodiscard]] syntax_position position_at(std::size_t index)
-	{
-		auto const pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
-		if (pos != std::end(positions_) && index == pos->first)
-			return pos->second;
-		std::size_t startindex = 0;
-		syntax_position position = origin_;
-		if (pos != std::begin(positions_)) {
-			auto prevpos = std::prev(pos);
-			startindex = prevpos->first;
-			position = prevpos->second;
-		}
-		auto first = std::next(std::begin(input_), static_cast<std::ptrdiff_t>(startindex));
-		auto const last = std::next(std::begin(input_), static_cast<std::ptrdiff_t>(index));
-		char32_t rune, prevrune = U'\0';
-		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
-			std::tie(next, rune) = utf8::decode_rune(curr, last);
-			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
-				position.column = 1, ++position.line;
-				first = next;
-			}
-		}
-		for (auto curr = first, next = curr; curr < last; curr = next) {
-			std::tie(next, rune) = utf8::decode_rune(curr, last);
-			if (rune != U'\t') {
-				position.column += unicode::ucwidth(rune);
-			} else {
-				auto const oldcolumn = position.column;
-				auto const newcolumn = oldcolumn + environment_.tab_width();
-				auto const alignedcolumn = newcolumn - ((newcolumn - 1) % environment_.tab_alignment());
-				position.column = (std::max)((std::min)(newcolumn, alignedcolumn), oldcolumn);
-			}
-		}
-		return positions_.insert(pos, std::make_pair(index, position))->second;
-	}
 
 	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
 	parser& enqueue(InputIt first, InputIt last)
@@ -1522,8 +1520,7 @@ public:
 		program const& prog = grammar_.program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
-		environment_.start_parse(*this);
-		detail::scope_exit const cleanup{[this]{ environment_.end_parse(); }};
+		environment_.start_parse();
 		auto [sr, mr, rc, pc, fc] = drain();
 		bool result = false, done = false;
 		pc = 0, fc = 0;
@@ -1686,6 +1683,7 @@ public:
 				} break;
 				case opcode::predicate: {
 					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
+					environment_.reset_match_and_subject(match(), subject());
 					bool const accepted = prog.predicates[imm](environment_);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
 					pop_responses_after(rc);
@@ -1846,12 +1844,6 @@ inline bool parse(grammar const& grmr)
 {
 	return parse(std::cin, grmr);
 }
-
-[[nodiscard]] inline std::string_view environment::match() const { return parser().match(); }
-[[nodiscard]] inline syntax_position environment::position_at(std::size_t index) { return parser().position_at(index); }
-[[nodiscard]] inline syntax_position environment::position_begin(syntax_range const& range) { return parser().position_begin(range); }
-[[nodiscard]] inline syntax_position environment::position_end(syntax_range const& range) { return parser().position_end(range); }
-[[nodiscard]] inline std::pair<syntax_position, syntax_position> environment::position_range(syntax_range const& range) { return parser().position_range(range); }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 
