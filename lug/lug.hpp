@@ -84,7 +84,7 @@ union instruction
 		if ((pf.aux & operands::str) != operands::none) {
 			str = std::string_view{code[static_cast<std::size_t>(pc)].str.data(), static_cast<unsigned int>((imm & 0xff) + 1)};
 			pc += ((imm & 0xff) + 4) >> 2;
-			imm >>= 8;
+			imm = static_cast<unsigned short>(imm >> 8);
 		}
 		return std::make_tuple(pf.op, imm, off, str);
 	}

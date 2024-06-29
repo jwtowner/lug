@@ -59,9 +59,9 @@ inline constexpr std::array<unsigned char, 108> dfa_transition_table
 
 [[nodiscard]] constexpr unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state)
 {
-	unsigned int const symbol = static_cast<unsigned char>(octet);
-	unsigned int const dfa_class = detail::dfa_class_table[symbol];
-	rune = state == detail::decode_accept ? symbol & (0xff >> dfa_class) : (symbol & 0x3f) | (rune << 6);
+	unsigned int const symbol = static_cast<unsigned int>(static_cast<unsigned char>(octet));
+	unsigned int const dfa_class = static_cast<unsigned int>(detail::dfa_class_table[symbol]);
+	rune = state == detail::decode_accept ? (symbol & (0xffU >> dfa_class)) : ((symbol & 0x3fU) | (rune << 6));
 	return detail::dfa_transition_table[state + dfa_class];
 }
 

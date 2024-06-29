@@ -46,8 +46,10 @@ As a baseline, the following compiler versions are known to work with lug.
 | Compiler | Language Mode |
 | --- | --- |
 | Clang 14.0.0 (March 2022) | -std=c++17 or -std=gnu++17 |
-| GCC 7.1.0 (May 2017) | -std=c++17 or -std=gnu++17 |
-| Microsoft Visual C++ 2017 15.5 (December 2017) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| GCC 10.3 (April 8, 2021) | -std=c++17 or -std=gnu++17 |
+| Microsoft Visual C++ 2017 15.9 (November 2018) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2019 16.11 (August 2021) | Platform Toolset: Visual Studio 2019 Toolset (v142), Language Standard: ISO C++17 Standard (/std:c++17) |
+| Microsoft Visual C++ 2022 17.10 (May 2024) | Platform Toolset: Visual Studio 2022 Toolset (v143), Language Standard: ISO C++17 Standard (/std:c++17) |
 
 To build the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
 
