@@ -579,14 +579,14 @@ template <class E1>
 struct unary_encoder_expression_interface
 {
 	using expression_trait = encoder_expression_trait_tag; E1 e1;
-	template <class X1> constexpr explicit unary_encoder_expression_interface(X1&& x1) noexcept : e1{std::forward<X1>(x1)} {}
+	template <class X1> constexpr explicit unary_encoder_expression_interface(X1&& x1) noexcept : e1(std::forward<X1>(x1)) {}
 };
 
 template <class E1, class E2>
 struct binary_encoder_expression_interface
 {
 	using expression_trait = encoder_expression_trait_tag; E1 e1; E2 e2;
-	template <class X1, class X2> constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) noexcept : e1{std::forward<X1>(x1)}, e2{std::forward<X2>(x2)} {}
+	template <class X1, class X2> constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) noexcept : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
 };
 
 class basic_regular_expression : public terminal_encoder_expression_interface
@@ -700,7 +700,7 @@ template <class Pred>
 struct predicate_expression : terminal_encoder_expression_interface
 {
 	Pred pred;
-	template <class P> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred{std::forward<P>(p)} {}
+	template <class P> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::predicate, syntactic_predicate{pred}); return m; }
 };
 
@@ -776,10 +776,22 @@ struct directive_modifier
 	struct directive_expression : unary_encoder_expression_interface<E1>
 	{
 		using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
-		template <class M> [[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const { d.dpsh(EnableMask, DisableMask); auto m2 = d.evaluate(this->e1, m); d.dpop(RelayMask); return m2; }
+
+		template <class M>
+		[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
+		{
+			d.dpsh(EnableMask, DisableMask);
+			auto m2 = d.evaluate(this->e1, m);
+			d.dpop(RelayMask);
+			return m2;
+		}
 	};
-	template <class X1> directive_expression(X1&&) -> directive_expression<std::decay_t<X1>>;
-	template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return directive_expression{make_expression(e)}; }
+
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+	{
+		return directive_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e)};
+	}
 };
 
 inline constexpr directive_modifier<directives::none, directives::none, directives::none> matches_eps{};
@@ -851,12 +863,15 @@ struct condition_block_combinator
 		}
 	};
 
-	template <class X1> condition_block_expression(X1&&, std::string_view n) -> condition_block_expression<std::decay_t<X1>>;
-
 	struct condition_block_group
 	{
 		std::string_view name;
-		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return condition_block_expression{make_expression(e), name}; }
+
+		template <class E, class = std::enable_if_t<is_expression_v<E>>>
+		[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+		{
+			return condition_block_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e), name};
+		}
 	};
 
 	[[nodiscard]] constexpr condition_block_group operator()(std::string_view name) const noexcept { return condition_block_group{name}; }
@@ -980,7 +995,7 @@ template <class Derived, class E1, class Operand>
 struct attribute_action_expression : unary_encoder_expression_interface<E1>
 {
 	Operand operand;
-	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) noexcept : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, operand{std::forward<O>(o)} {}
+	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) noexcept : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
 
 	template <class M>
 	[[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const
