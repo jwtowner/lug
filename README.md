@@ -8,19 +8,16 @@ A C++ embedded domain specific language for expressing parsers as extended [pars
 
 Features
 ---
-- Natural syntax similar to other external parser generator languages
-- Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping
-- Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion
-- Extended PEG syntax to include attribute grammars and semantic actions
-- Ability to handle context-sensitive grammars with symbol tables, conditions, and syntactic predicates
-- Cut operator to commit to the currently matched parse prefix and prune all backtrack entries
-- Deferred evaluation of semantic actions, ensuring actions only execute on successful branches and valid input
-- Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine
-- Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard
-- Automatic tracking of line and column numbers, with customizable tab width and alignment
-- Implementation of rules in the domain-specific language using expression templates and function objects
-- Header-only library utilizing C++17 language and library features
-- Relatively small codebase, with the goal of keeping the parser core under 2000 lines of concise code
+- Natural syntax resembling external parser generator languages.
+- Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine.
+- Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping.
+- Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion.
+- Extended PEG syntax to include attribute grammars and semantic actions.
+- Ability to handle context-sensitive grammars with symbol tables, conditions, and syntactic predicates.
+- Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard.
+- Automatic tracking of line and column numbers, with customizable tab width and alignment.
+- Header-only library utilizing C++17 language and library features.
+- Relatively small codebase, with the goal of keeping the parser core under 2000 lines of terse code.
 
 It is based on research introduced in the following papers:
 
@@ -57,14 +54,13 @@ To build the sample programs and unit tests, a makefile is provided for Linux an
 Syntax Reference
 ---
 
-
 | Operator | Syntax | Description |
 | --- | --- | --- |
 | Ordered Choice | `e1 \| e2` | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2*. |
 | Sequence | `e1 > e2` | Matches both expressions *e1* followed by *e2* in sequence. |
-| List | `e1 >> e2` | Repetiton matching of a sequence of one or more *e1* expressions delimited by *e2*. Shorthand for `e1 > *(e2 > e1)`. |
-| Zero-or-More | `*e` | Repetiton matching of expression *e* zero, one or more times. |
-| One-or-More | `+e` | Repetiton matching of expression *e* one or more times. |
+| List | `e1 >> e2` | Repetition matching of a sequence of one or more *e1* expressions delimited by *e2*. Shorthand for `e1 > *(e2 > e1)`. |
+| Zero-or-More | `*e` | Repetition matching of expression *e* zero, one or more times. |
+| One-or-More | `+e` | Repetition matching of expression *e* one or more times. |
 | Optional | `~e` | Matches expression *e* zero or one times. |
 | Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input. |
 | Negative Lookahead | `~e` | Matches without consuming input if expression *e* fails to match the input. |

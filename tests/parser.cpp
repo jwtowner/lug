@@ -50,7 +50,7 @@ void test_line_column_tracking()
 	std::array<lug::syntax_position, 4> endpos;
 	endpos.fill({0, 0});
 
-	const lug::grammar G = [&]
+	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
 

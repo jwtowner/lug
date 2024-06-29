@@ -7,14 +7,14 @@ VERSION = 0.3.0-pre
 # paths
 PREFIX = /usr/local
 
-# unicode character database version
-UCD_VERSION = 15.1.0
-
 # toolchain
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -ffunction-sections -fdata-sections -I.
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
+
+# unicode character database version
+UCD_VERSION = 15.1.0
 
 # samples
 SAMPLES = basic/basic calc/calc json/json xml/xml
@@ -22,7 +22,7 @@ SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # tests
-TESTS = conditions leftrecursion nonterminals parser predicates symbols terminals
+TESTS = captures conditions leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 

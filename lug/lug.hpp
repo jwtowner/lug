@@ -21,9 +21,14 @@ class rule;
 class grammar;
 class encoder;
 class rule_encoder;
-class parser;
 class syntax;
 class environment;
+class string_view_input_source;
+class string_input_source;
+class buffered_istream_input_source;
+class multi_input_source;
+template <class> class basic_parser;
+using parser = basic_parser<multi_input_source>;
 struct program;
 struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
@@ -72,8 +77,8 @@ union instruction
 
 	[[nodiscard]] static auto decode(std::vector<instruction> const& code, std::ptrdiff_t& pc)
 	{
-		const prefix pf = code[static_cast<std::size_t>(pc++)].pf;
-		const int off = ((pf.aux & operands::off) != operands::none) ? code[static_cast<std::size_t>(pc++)].off : 0;
+		prefix const pf = code[static_cast<std::size_t>(pc++)].pf;
+		int const off = ((pf.aux & operands::off) != operands::none) ? code[static_cast<std::size_t>(pc++)].off : 0;
 		unsigned short imm = pf.val;
 		std::string_view str;
 		if ((pf.aux & operands::str) != operands::none) {
@@ -195,7 +200,7 @@ public:
 
 class environment
 {
-	friend class lug::parser;
+	template <class> friend class basic_parser;
 
 	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
 	static inline const std::vector<std::string> empty_symbols_{};
@@ -213,12 +218,6 @@ class environment
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
-	void start_parse()
-	{
-		origin_ = position_at(match_.size());
-		reset_match_and_subject(std::string_view{}, std::string_view{});
-	}
-
 	unsigned short start_accept(std::string_view m, std::string_view s)
 	{
 		if (accept_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
@@ -235,7 +234,6 @@ class environment
 			throw accept_context_error{};
 		on_accept_ended();
 		reset_call_depth(prior_call_depth);
-		origin_ = position_at(match_.size());
 		accept_stack_.pop_back();
 	}
 
@@ -250,6 +248,12 @@ class environment
 	{
 		prune_depth_ = max_call_depth;
 		call_depth_ = depth;
+	}
+
+	void reset_origin()
+	{
+		origin_ = position_at(match_.size());
+		reset_match_and_subject(std::string_view{}, std::string_view{});
 	}
 
 	void reset_match_and_subject(std::string_view m, std::string_view s)
@@ -1283,6 +1287,81 @@ inline thread_local std::function<void(encoder&)> grammar::implicit_space{make_s
 	return grammar{std::move(grprogram)};
 }
 
+namespace detail {
+
+template <typename T, typename = void> struct input_source_enqueue_drains : std::false_type {};
+template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::enqueue_drains::value>> : std::true_type {};
+template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
+template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T>().fill_buffer())>>> : std::true_type {};
+template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
+template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
+template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
+template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>()))>> : std::true_type {};
+
+} // namespace detail
+
+class string_view_input_source
+{
+	std::string_view buffer_;
+
+public:
+	using enqueue_drains = std::true_type;
+	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
+	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
+	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = std::string_view{&(*first), static_cast<std::size_t>(last - first)}; }
+};
+
+class string_input_source
+{
+	std::string buffer_;
+
+public:
+	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
+	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
+	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
+};
+
+class multi_input_source
+{
+	std::string buffer_;
+	std::vector<std::function<bool(std::string&)>> sources_;
+	bool reading_{false};
+
+public:
+	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
+	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
+
+	[[nodiscard]] bool fill_buffer()
+	{
+		if (sources_.empty())
+			return false;
+		std::string text;
+		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
+		while (!sources_.empty() && text.empty()) {
+			text.clear();
+			bool const more = sources_.back()(text);
+			buffer_.insert(buffer_.end(), text.begin(), text.end());
+			if (!more)
+				sources_.pop_back();
+		}
+		return !text.empty();
+	}
+
+	template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
+	void enqueue(InputIt first, InputIt last)
+	{
+		buffer_.insert(buffer_.end(), first, last);
+	}
+
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
+	void push_source(InputFunc&& func)
+	{
+		if (reading_)
+			throw reenterant_read_error{};
+		sources_.emplace_back(std::forward<InputFunc>(func));
+	}
+};
+
 struct parser_registers
 {
 	std::size_t sr, mr, rc; std::ptrdiff_t pc; std::size_t fc;
@@ -1290,7 +1369,8 @@ struct parser_registers
 	[[nodiscard]] auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
 };
 
-class parser
+template <class InputSource>
+class basic_parser
 {
 	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall, symbol_definition, symbol_table };
 	enum class subject_location : std::size_t {};
@@ -1299,11 +1379,10 @@ class parser
 	static inline constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
 	lug::grammar const& grammar_;
 	lug::environment& environment_;
-	std::vector<std::function<bool(std::string&)>> sources_;
-	std::string input_;
+	InputSource input_source_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
 	parser_registers registers_{0, 0, 0, 0, 0};
-	bool parsing_{false}, reading_{false}, cut_deferred_{false};
+	bool parsing_{false}, cut_deferred_{false};
 	std::size_t cut_frame_{0};
 	std::vector<stack_frame_type> stack_frames_;
 	std::vector<std::tuple<std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // sr, rc, pc
@@ -1317,36 +1396,26 @@ class parser
 
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
-		do {
-			if (sn <= (input_.size() - sr))
-				return true;
-			if (sr < input_.size())
-				return false;
-		} while (read_more());
-		return false;
-	}
-
-	[[nodiscard]] bool read_more()
-	{
-		if (sources_.empty())
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			do {
+				std::size_t const buffer_size = input_source_.buffer().size();
+				if ((sr <= buffer_size) && (sn <= (buffer_size - sr)))
+					return true;
+				if (sr < buffer_size)
+					return false;
+			} while (input_source_.fill_buffer());
 			return false;
-		std::string text;
-		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
-		while (!sources_.empty() && text.empty()) {
-			text.clear();
-			bool const more = sources_.back()(text);
-			input_.insert(input_.end(), text.begin(), text.end());
-			if (!more)
-				sources_.pop_back();
+		} else {
+			std::size_t const buffer_size = input_source_.buffer().size();
+			return (sr <= buffer_size) && (sn <= (buffer_size - sr));
 		}
-		return !text.empty();
 	}
 
 	[[nodiscard]] int casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
 	{
 		auto& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
-			subject = utf8::tocasefold(std::string_view{input_.data() + sr, sn});
+			subject = utf8::tocasefold(input_source_.buffer().substr(sr, sn));
 		return subject.compare(0, sn, str);
 	}
 
@@ -1365,7 +1434,9 @@ class parser
 	{
 		if (!available(sr, 1))
 			return false;
-		auto const curr = input_.cbegin() + static_cast<std::ptrdiff_t>(sr), last = input_.cend();
+		auto const buffer = input_source_.buffer();
+		auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(sr);
+		auto const last = buffer.cend();
 		auto [next, rune] = utf8::decode_rune(curr, last);
 		bool matched;
 		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
@@ -1421,7 +1492,8 @@ class parser
 
 	[[nodiscard]] auto drain()
 	{
-		input_.erase(0, registers_.sr);
+		environment_.reset_origin();
+		input_source_.drain_buffer(registers_.sr);
 		casefolded_subjects_.clear();
 		responses_.clear();
 		registers_.mr -= registers_.sr;
@@ -1470,11 +1542,11 @@ class parser
 	}
 
 public:
-	parser(lug::grammar const& g, lug::environment& e) : grammar_{g}, environment_{e} {}
+	basic_parser(lug::grammar const& g, lug::environment& e) : grammar_{g}, environment_{e} {}
 	[[nodiscard]] lug::grammar const& grammar() const noexcept { return grammar_; }
 	[[nodiscard]] lug::environment& environment() const noexcept { return environment_; }
-	[[nodiscard]] std::string_view match() const noexcept { return {input_.data(), registers_.sr}; }
-	[[nodiscard]] std::string_view subject() const noexcept { return {input_.data() + registers_.sr, input_.size() - registers_.sr}; }
+	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
+	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
 	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
 	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
 	[[nodiscard]] syntax_position subject_position() { return environment_.position_at(registers_.sr); }
@@ -1487,29 +1559,29 @@ public:
 	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
-	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
-	parser& enqueue(InputIt first, InputIt last)
+	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
+	basic_parser& enqueue(InputIt first, InputIt last)
 	{
-		input_.insert(input_.end(), first, last);
+		if constexpr (detail::input_source_enqueue_drains<InputSource>::value)
+			(void)drain();
+		input_source_.enqueue(std::move(first), std::move(last));
 		return *this;
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
-	parser& push_source(InputFunc&& func)
+	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
+	basic_parser& push_source(InputFunc&& func)
 	{
-		if (reading_)
-			throw reenterant_read_error{};
-		sources_.emplace_back(std::forward<InputFunc>(func));
+		input_source_.push_source(std::forward<InputFunc>(func));
 		return *this;
 	}
 
-	template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
+	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
 	bool parse(InputIt first, InputIt last)
 	{
 		return enqueue(first, last).parse();
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
+	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
 	bool parse(InputFunc&& func)
 	{
 		return push_source(std::forward<InputFunc>(func)).parse();
@@ -1521,7 +1593,6 @@ public:
 		program const& prog = grammar_.program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
-		environment_.start_parse();
 		auto [sr, mr, rc, pc, fc] = drain();
 		bool result = false, done = false;
 		pc = 0, fc = 0;
@@ -1529,7 +1600,7 @@ public:
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
 			switch (op) {
 				case opcode::match: {
-					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
 						goto failure;
 				} break;
 				case opcode::match_casefold: {
@@ -1743,7 +1814,7 @@ public:
 						goto failure;
 					std::size_t tsr = sr;
 					for (const auto& symbol : symbols)
-						if (!match_sequence(tsr, symbol, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+						if (!match_sequence(tsr, symbol, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
 							goto failure;
 					sr = tsr;
 				} break;
@@ -1753,7 +1824,7 @@ public:
 						goto failure;
 					bool matched = false;
 					for (const auto& symbol : symbols) {
-						if (match_sequence(sr, symbol, [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; })) {
+						if (match_sequence(sr, symbol, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; })) {
 							matched = true;
 							break;
 						}
@@ -1765,14 +1836,14 @@ public:
 					auto const& symbols = environment_.get_symbols(str);
 					if (imm >= symbols.size())
 						goto failure;
-					if (!match_sequence(sr, symbols[imm], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+					if (!match_sequence(sr, symbols[imm], [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
 						goto failure;
 				} break;
 				case opcode::symbol_tail: {
 					auto const& symbols = environment_.get_symbols(str);
 					if (imm >= symbols.size())
 						goto failure;
-					if (!match_sequence(sr, symbols[symbols.size() - imm - 1], [this](auto i, auto n, auto s) { return input_.compare(i, n, s) == 0; }))
+					if (!match_sequence(sr, symbols[symbols.size() - imm - 1], [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
 						goto failure;
 				} break;
 				case opcode::symbol_push: {
@@ -1796,13 +1867,16 @@ public:
 	}
 };
 
-template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
+template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, envr}.enqueue(first, last).parse();
+	if constexpr (detail::is_char_contiguous_iterator_v<InputIt>)
+		return basic_parser<string_view_input_source>{grmr, envr}.enqueue(first, last).parse();
+	else
+		return basic_parser<string_input_source>{grmr, envr}.enqueue(first, last).parse();
 }
 
-template <class InputIt, class = utf8::enable_if_char_input_iterator_t<InputIt>>
+template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 {
 	environment envr;
@@ -1811,7 +1885,7 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 
 inline bool parse(std::istream& input, grammar const& grmr, environment& envr)
 {
-	return parser{grmr, envr}.push_source([&input](std::string& line) {
+	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
 			line.push_back('\n');
 			return true;

@@ -14,12 +14,6 @@
 
 namespace lug::utf8 {
 
-template <class InputIt, class T = void>
-using enable_if_char_input_iterator_t =
-	std::enable_if_t<!std::is_integral_v<InputIt> &&
-	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<InputIt>::iterator_category> &&
-	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<InputIt>::value_type>>, T>;
-
 namespace detail {
 
 inline constexpr unsigned int decode_accept = 0;
@@ -71,7 +65,7 @@ inline constexpr std::array<unsigned char, 108> dfa_transition_table
 	return detail::dfa_transition_table[state + dfa_class];
 }
 
-template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
+template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
 {
 	char32_t rune = U'\0';
@@ -82,13 +76,13 @@ template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
 	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), U'\U0000fffd');
 }
 
-template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
+template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr InputIt next_rune(InputIt first, InputIt last)
 {
 	return lug::utf8::decode_rune(first, last).first;
 }
 
-template <class InputIt, class = enable_if_char_input_iterator_t<InputIt>>
+template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr std::size_t count_runes(InputIt first, InputIt last)
 {
 	std::size_t count = 0;
@@ -104,7 +98,7 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 		*dst++ = static_cast<char>(rune);
 	} else {
 		if (0x00110000U <= rune || (rune & 0xfffff800U) == 0x0000d800U)
-			return {std::copy_n("\U0000fffd", 3, dst), false};
+			return {std::copy_n(reinterpret_cast<char const*>(u8"\U0000fffd"), 3, dst), false};
 		unsigned int const n = rune >= 0x00010000U ? 4 : rune >= 0x00000800U ? 3 : 2;
 		for (unsigned int i = 0, c = (0xf0 << (4 - n)) & 0xf0; i < n; ++i, c = 0x80)
 			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3f) | c);

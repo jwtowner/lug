@@ -105,6 +105,23 @@ template <class T> struct remove_cvref_from_tuple<T const volatile> : remove_cvr
 template <class... Args> struct remove_cvref_from_tuple<std::tuple<Args...>> { using type = std::tuple<std::remove_cv_t<std::remove_reference_t<Args>>...>; };
 template <class T> using remove_cvref_from_tuple_t = typename remove_cvref_from_tuple<T>::type;
 
+template <class It>
+inline constexpr bool is_char_contiguous_iterator_v =
+	std::is_convertible_v<It, std::vector<char>::const_iterator> ||
+	std::is_convertible_v<It, std::string::const_iterator> ||
+	std::is_convertible_v<It, std::string_view::const_iterator> ||
+	std::is_same_v<std::decay_t<It>, char*> ||
+	std::is_same_v<std::decay_t<It>, const char*>;
+
+template <class It, class T = void>
+using enable_if_char_input_iterator_t = std::enable_if_t<
+	!std::is_integral_v<It> &&
+	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<It>::iterator_category> &&
+	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<It>::value_type>>, T>;
+
+template <class It, class T = void>
+using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
+
 template <class... Args>
 constexpr void ignore(Args&&...) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward,hicpp-named-parameter,readability-named-parameter)
 

@@ -8,6 +8,7 @@
 * `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.
 * Moved `call_depth()`, `prune_depth()` and `escape()` functions into the `lug::environment` class since they are used exclusively during semantic action phase.
 * Moved line/column tracking and current match/subject string views to `lug::environment` class, fully removing the environment's dependency on `lug::parser`.
+* Turned `lug::parser` into an alias of a new `lug::basic_parser` template class parameterized with an input source strategy. This allows for parsing and capturing of text without making a copy of the input.
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
 * Enabled `-Wconversion` and `-Wshadow` warnings for Clang and GCC and fixed warnings.
 * Handle situation where compilation with RTTI is disabled.
