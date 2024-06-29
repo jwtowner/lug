@@ -329,7 +329,7 @@ public:
 			if (++block == frame_blocks_.end())
 				block = current_frame_block_ = frame_blocks_.insert(block, frame_block{});
 			prev_offset = 0;
-			start_offset = (sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);;
+			start_offset = (sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
 			end_offset = start_offset + size;
 		}
 		std::byte* const ptr = &block->data->bytes[start_offset];

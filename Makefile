@@ -12,7 +12,7 @@ UCD_VERSION = 15.1.0
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wextra -Wextra-semi -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -ffunction-sections -fdata-sections -fmerge-all-constants -I.
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -ffunction-sections -fdata-sections -I.
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 

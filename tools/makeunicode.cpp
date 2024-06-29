@@ -1298,7 +1298,7 @@ inline record query(char32_t r)
 		index = table->stage1[r >> )c++" << std::dec << block_shift << R"c++(];
 		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
 	}
-	return record{table->records.data() + index};
+	return record{&table->records[index]};
 }
 
 // Checks if the rune matches all of the string-packed property classes

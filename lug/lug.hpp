@@ -197,18 +197,18 @@ class environment
 {
 	friend class lug::parser;
 
+	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	static inline const std::vector<std::string> empty_symbols_{};
 	std::vector<std::vector<std::any>> accept_stack_;
 	std::vector<std::pair<void*, std::size_t>> frame_stack_;
 	detail::frame_allocator frame_stack_allocator_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
-	static inline const std::vector<std::string> empty_symbols_{};
-	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
-	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
-	unsigned int tab_width_{8}, tab_alignment_{8};
-	syntax_position origin_{1, 1};
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
 	std::string_view match_, subject_;
+	syntax_position origin_{1, 1};
+	unsigned int tab_width_{8}, tab_alignment_{8};
+	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
@@ -299,7 +299,8 @@ public:
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);
 			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
-				position.column = 1, ++position.line;
+				position.column = 1;
+				++position.line;
 				first = next;
 			}
 		}
@@ -472,12 +473,12 @@ public:
 		return do_call(&r, &r.program_, 0, prec);
 	}
 
-	template <class M, class... Args>
-	[[nodiscard]] auto call_with_frame(M const& m, Args&&... args) -> M const&
+	template <class M, class T, class... Args>
+	[[nodiscard]] auto call_with_frame(M const& m, T&& target, unsigned short prec, Args&&... args) -> M const&
 	{
 		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
 			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_frame(frame); }});
-		call(std::forward<Args>(args)...);
+		call(std::forward<T>(target), prec, std::forward<Args>(args)...);
 		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
 			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) mutable { envr.pop_frame(frame); }});
 		return m;
@@ -720,7 +721,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E> && !is_encoder_ex
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
 [[nodiscard]] constexpr auto make_space_expression(E&& e)
 {
-	return [e = make_expression(std::forward<E>(e))](encoder& d) { (void)e(d, encoder_metadata{}); };
+	return [x = make_expression(std::forward<E>(e))](encoder& d) { (void)x(d, encoder_metadata{}); };
 }
 
 template <class E, class M, class>
@@ -1036,7 +1037,7 @@ template <class E1>
 struct symbol_assign_expression : unary_encoder_expression_interface<E1>
 {
 	std::string_view name;
-	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view name) : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, name{name} {}
+	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, name{n} {}
 	template <class M> [[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const { d.skip().encode(opcode::symbol_start, name); auto m2 = d.evaluate(this->e1, m); d.encode(opcode::symbol_end); return m2; }
 };
 
@@ -1589,7 +1590,7 @@ public:
 				case opcode::call: {
 					if (imm != 0) {
 						auto const memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
-								[sr = sr, pca = pc + off](auto const& m){ return m.srr == sr && m.pca == pca ? 1 : (m.srr < sr ? 0 : -1); });
+								[srr = sr, pca = pc + off](auto const& m){ return m.srr == srr && m.pca == pca ? 1 : (m.srr < srr ? 0 : -1); });
 						if (memo != lrmemo_stack_.crend()) {
 							if (memo->sra == lrfailcode || imm < memo->prec)
 								goto failure;

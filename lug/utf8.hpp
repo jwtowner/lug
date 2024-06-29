@@ -104,7 +104,7 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 		*dst++ = static_cast<char>(rune);
 	} else {
 		if (0x00110000U <= rune || (rune & 0xfffff800U) == 0x0000d800U)
-			return {std::copy_n(u8"\U0000fffd", 3, dst), false};
+			return {std::copy_n("\U0000fffd", 3, dst), false};
 		unsigned int const n = rune >= 0x00010000U ? 4 : rune >= 0x00000800U ? 3 : 2;
 		for (unsigned int i = 0, c = (0xf0 << (4 - n)) & 0xf0; i < n; ++i, c = 0x80)
 			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3f) | c);
