@@ -76,59 +76,69 @@ Syntax Reference
     <th style="width:65%">Description</th>
   </tr>
   <tr>
-    <td>Sequence</td>
-    <td class="center-text"><span class="code-style">e1 > e2</span></td>
-    <td>Matches both expressions <i>e1</i> followed by <i>e2</i> in sequence</td>
-  </tr>
-  <tr>
     <td>Ordered Choice</td>
     <td class="center-text"><span class="code-style">e1 | e2</span></td>
-    <td>Attempts to first match expression <i>e1</i>, and if that fails backtracks then attempts to match <i>e2</i></td>
+    <td>Attempts to first match expression <i>e1</i>, and if that fails backtracks then attempts to match <i>e2</i>.</td>
+  </tr>
+  <tr>
+    <td>Sequence</td>
+    <td class="center-text"><span class="code-style">e1 > e2</span></td>
+    <td>Matches both expressions <i>e1</i> followed by <i>e2</i> in sequence.</td>
+  </tr>
+  <tr>
+    <td>List</td>
+    <td class="center-text"><span class="code-style">e1 >> e2</span></td>
+    <td>Repetiton matching of a sequence of one or more <i>e1</i> expressions delimited by <i>e2</i>. Shorthand for <span class="code-style">e1 > *(e2 > e1)</span>.</td>
   </tr>
   <tr>
     <td>Zero-or-More</td>
     <td class="center-text"><span class="code-style">*e</span></td>
-    <td>Reptition matching of expression <i>e</i> zero, one or more times</td>
+    <td>Repetiton matching of expression <i>e</i> zero, one or more times.</td>
   </tr>
   <tr>
     <td>One-or-More</td>
     <td class="center-text"><span class="code-style">+e</span></td>
-    <td>Reptition matching of expression <i>e</i> one or more times</td>
+    <td>Repetiton matching of expression <i>e</i> one or more times.</td>
   </tr>
   <tr>
     <td>Optional</td>
     <td class="center-text"><span class="code-style">~e</span></td>
-    <td>Matching of expression <i>e</i> zero or one times</td>
+    <td>Matches expression <i>e</i> zero or one times.</td>
   </tr>
   <tr>
     <td>Positive Lookahead</td>
     <td class="center-text"><span class="code-style">&e</span></td>
-    <td>Matches without consuming input if expression <i>e</i> succeeds to match the input</td>
+    <td>Matches without consuming input if expression <i>e</i> succeeds to match the input.</td>
+  </tr>
+  <tr>
+    <td>Negative Lookahead</td>
+    <td class="center-text"><span class="code-style">~e</span></td>
+    <td>Matches without consuming input if expression <i>e</i> fails to match the input.</td>
   </tr>
   <tr>
     <td>Cut Before</td>
     <td class="center-text"><span class="code-style">--e</span></td>
-    <td>Issues a cut instruction before the expression <i>e</i></td>
+    <td>Issues a cut instruction before the expression <i>e</i>.</td>
   </tr>
   <tr>
     <td>Cut After</td>
     <td class="center-text"><span class="code-style">e--</span></td>
-    <td>Issues a cut instruction after the expression <i>e</i></td>
+    <td>Issues a cut instruction after the expression <i>e</i>.</td>
   </tr>
   <tr>
     <td>Action Scheduling</td>
     <td class="center-text"><span class="code-style">e < a</span></td>
-    <td>Schedules a semantic action <i>a</i> to be evaluated if expression <i>e</i> successfully matches the input</td>
+    <td>Schedules a semantic action <i>a</i> to be evaluated if expression <i>e</i> successfully matches the input.</td>
   </tr>
   <tr>
     <td>Attribute Binding</td>
     <td class="center-text"><span class="code-style">v % e</span></td>
-    <td>Assigns the return value of the last evaluated semantic action within the expression <i>e</i> to the variable <i>v</i></td>
+    <td>Assigns the return value of the last evaluated semantic action within the expression <i>e</i> to the variable <i>v</i>.</td>
   </tr>
   <tr>
     <td>Syntactic Capture</td>
     <td class="center-text"><span class="code-style">capture(v)[e]</span></td>
-    <td>Captures the text matching the subexpression <i>e</i> into variable <i>v</i></td>
+    <td>Captures the text matching the subexpression <i>e</i> into variable <i>v</i>.</td>
   </tr>
 </table>
 

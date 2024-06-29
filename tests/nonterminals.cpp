@@ -115,6 +115,23 @@ void test_predicate()
 	assert(!lug::parse("x  x", G));
 }
 
+void test_list()
+{
+	using namespace lug::language;
+	rule S = noskip[ chr('a') >> "," > eoi ];
+	grammar G = start(S);
+	assert(lug::parse("a", G));
+	assert(lug::parse("a,a", G));
+	assert(lug::parse("a,a,a", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse("a,", G));
+	assert(!lug::parse("a,a,", G));
+	assert(!lug::parse("a,b", G));
+	assert(!lug::parse("azb3", G));
+	assert(!lug::parse("a z b", G));
+	assert(!lug::parse(" a z b", G));
+}
+
 int main()
 {
 	try {
@@ -125,6 +142,7 @@ int main()
 		test_one_or_many();
 		test_not();
 		test_predicate();
+		test_list();
 	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
 		return -1;
