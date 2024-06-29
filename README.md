@@ -57,104 +57,36 @@ To build the sample programs and unit tests, a makefile is provided for Linux an
 Syntax Reference
 ---
 
-<style>
-  .center-text {
-    text-align: center;
-  }
-  .code-style {
-    font-family: ui-monospace,SFMono-Regular,SF Mono,Menlo,Consolas,Liberation Mono,monospace;
-    background-color: #454545;
-    border-radius: 3px;
-    padding: 2px 4px;
-    color: lightgrey;
-  }
-</style>
-<table style="width:100%">
-  <tr>
-    <th style="width:15%">Operator</th>
-    <th class="center-text" style="width:20%">Syntax</th>
-    <th style="width:65%">Description</th>
-  </tr>
-  <tr>
-    <td>Ordered Choice</td>
-    <td class="center-text"><span class="code-style">e1 | e2</span></td>
-    <td>Attempts to first match expression <i>e1</i>, and if that fails backtracks then attempts to match <i>e2</i>.</td>
-  </tr>
-  <tr>
-    <td>Sequence</td>
-    <td class="center-text"><span class="code-style">e1 > e2</span></td>
-    <td>Matches both expressions <i>e1</i> followed by <i>e2</i> in sequence.</td>
-  </tr>
-  <tr>
-    <td>List</td>
-    <td class="center-text"><span class="code-style">e1 >> e2</span></td>
-    <td>Repetiton matching of a sequence of one or more <i>e1</i> expressions delimited by <i>e2</i>. Shorthand for <span class="code-style">e1 > *(e2 > e1)</span>.</td>
-  </tr>
-  <tr>
-    <td>Zero-or-More</td>
-    <td class="center-text"><span class="code-style">*e</span></td>
-    <td>Repetiton matching of expression <i>e</i> zero, one or more times.</td>
-  </tr>
-  <tr>
-    <td>One-or-More</td>
-    <td class="center-text"><span class="code-style">+e</span></td>
-    <td>Repetiton matching of expression <i>e</i> one or more times.</td>
-  </tr>
-  <tr>
-    <td>Optional</td>
-    <td class="center-text"><span class="code-style">~e</span></td>
-    <td>Matches expression <i>e</i> zero or one times.</td>
-  </tr>
-  <tr>
-    <td>Positive Lookahead</td>
-    <td class="center-text"><span class="code-style">&e</span></td>
-    <td>Matches without consuming input if expression <i>e</i> succeeds to match the input.</td>
-  </tr>
-  <tr>
-    <td>Negative Lookahead</td>
-    <td class="center-text"><span class="code-style">~e</span></td>
-    <td>Matches without consuming input if expression <i>e</i> fails to match the input.</td>
-  </tr>
-  <tr>
-    <td>Cut Before</td>
-    <td class="center-text"><span class="code-style">--e</span></td>
-    <td>Issues a cut instruction before the expression <i>e</i>.</td>
-  </tr>
-  <tr>
-    <td>Cut After</td>
-    <td class="center-text"><span class="code-style">e--</span></td>
-    <td>Issues a cut instruction after the expression <i>e</i>.</td>
-  </tr>
-  <tr>
-    <td>Action Scheduling</td>
-    <td class="center-text"><span class="code-style">e < a</span></td>
-    <td>Schedules a semantic action <i>a</i> to be evaluated if expression <i>e</i> successfully matches the input.</td>
-  </tr>
-  <tr>
-    <td>Attribute Binding</td>
-    <td class="center-text"><span class="code-style">v % e</span></td>
-    <td>Assigns the return value of the last evaluated semantic action within the expression <i>e</i> to the variable <i>v</i>.</td>
-  </tr>
-  <tr>
-    <td>Syntactic Capture</td>
-    <td class="center-text"><span class="code-style">capture(v)[e]</span></td>
-    <td>Captures the text matching the subexpression <i>e</i> into variable <i>v</i>.</td>
-  </tr>
-</table>
+
+| Operator | Syntax | Description |
+| --- | --- | --- |
+| Ordered Choice | `e1 \| e2` | Attempts to first match expression *e1*, and if that fails backtracks then attempts to match *e2*. |
+| Sequence | `e1 > e2` | Matches both expressions *e1* followed by *e2* in sequence. |
+| List | `e1 >> e2` | Repetiton matching of a sequence of one or more *e1* expressions delimited by *e2*. Shorthand for `e1 > *(e2 > e1)`. |
+| Zero-or-More | `*e` | Repetiton matching of expression *e* zero, one or more times. |
+| One-or-More | `+e` | Repetiton matching of expression *e* one or more times. |
+| Optional | `~e` | Matches expression *e* zero or one times. |
+| Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input. |
+| Negative Lookahead | `~e` | Matches without consuming input if expression *e* fails to match the input. |
+| Cut Before | `--e` | Issues a cut instruction before the expression *e*. |
+| Cut After | `e--` | Issues a cut instruction after the expression *e*. |
+| Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input. |
+| Attribute Binding | `v % e` | Assigns the return value of the last evaluated semantic action within the expression *e* to the variable *v*. |
+| Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
 
 | Control | Description |
 | --- | --- |
-| `cased[e]` | Case sensitive matching for the subexpression *e* (the default) |
-| `caseless[e]` | Case insensitive matching for subexpression *e* |
-| `skip[e]` | Turns on all whitespace skipping for subexpression *e* (the default) |
-| `noskip[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace |
-| `lexeme[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping |
-| `on(C)[e]` | Sets the condition *C* to true for the scope of subexpression *e* |
-| `off(C)[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default) |
-| `symbol(S)[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e* |
-| `block[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e* |
-| `local[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference |
-| `local(S)[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
+| `cased⁠[e]` | Case sensitive matching for the subexpression *e* (the default) |
+| `caseless⁠[e]` | Case insensitive matching for subexpression *e* |
+| `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default) |
+| `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace |
+| `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping |
+| `on(C)⁠[e]` | Sets the condition *C* to true for the scope of subexpression *e* |
+| `off(C)⁠[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default) |
+| `symbol(S)⁠[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e* |
+| `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e* |
+| `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference |
+| `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
 
 | Terminal | Description |
 | --- | --- |
@@ -183,15 +115,15 @@ Syntax Reference
 | `space` | Matches any whitespace character |
 | `upper` | Matches any uppercase alphabetical character |
 | `xdigit` | Matches any hexadecimal digit  |
-| `when(C)` | Matches if the condition named *C* is *true*, without consuming input |
-| `unless(C)` | Matches if the condition named *C* is *false*, without consuming input |
-| `exists(S)` | Matches if there is a definition for symbol *S* in the current scope |
-| `missing(S)` | Matches if there is no definition for symbol *S* in the current scope |
-| `match(S)` | Matches the last definition for symbol named *S* |
-| `match_any(S)` | Matches against any prior definition for symbol named *S* |
-| `match_all(S)` | Matches against all prior definitions for symbol named *S*, in sequence from least to most recent |
-| `match_front(S,N=0)` | Matches against the *N*-th least recent definition for symbol named *S* |
-| `match_back(S,N=0)` | Matches against the *N*-th most recent definition for symbol named *S* |
+| `when⁠(C)` | Matches if the condition named *C* is *true*, without consuming input |
+| `unless⁠(C)` | Matches if the condition named *C* is *false*, without consuming input |
+| `exists⁠(S)` | Matches if there is a definition for symbol *S* in the current scope |
+| `missing⁠(S)` | Matches if there is no definition for symbol *S* in the current scope |
+| `match⁠(S)` | Matches the last definition for symbol named *S* |
+| `match_any⁠(S)` | Matches against any prior definition for symbol named *S* |
+| `match_all⁠(S)` | Matches against all prior definitions for symbol named *S*, in sequence from least to most recent |
+| `match_front⁠(S,N=0)` | Matches against the *N*-th least recent definition for symbol named *S* |
+| `match_back⁠(S,N=0)` | Matches against the *N*-th most recent definition for symbol named *S* |
 
 | Literal | Name | Description |
 | --- | --- | --- |
