@@ -592,14 +592,14 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 
 	[[nodiscard]] static grammar make_grammar();
 
-	struct generator : environment
+	struct generator final : environment
 	{
 		basic_regular_expression const& owner;
 		program_callees callees;
 		program_encoder encoder;
-		bool circumflex = false;
-		unicode::ctype classes = unicode::ctype::none;
 		unicode::rune_set runes;
+		unicode::ctype classes{unicode::ctype::none};
+		bool circumflex{false};
 
 		generator(basic_regular_expression const& se, directives mode)
 			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme}
