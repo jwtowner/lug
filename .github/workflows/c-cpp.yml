@@ -11,10 +11,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-22.04, ubuntu-20.04]
+        os: [ubuntu-24.04, ubuntu-22.04, ubuntu-20.04, windows-2022, macos-latest]
     steps:
     - uses: actions/checkout@v4
     - name: make
-      run: make
+      if: runner.os == 'Linux'
+      run: make CI_BUILD=1
     - name: make check
-      run: make check
+      if: runner.os == 'Linux'
+      run: make check CI_BUILD=1
+    - name: CMake Build (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        cmake -S . -B build -G "Visual Studio 17 2022" -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+        cmake --build build --config Release --target ALL_BUILD
+    - name: Run CTest (Windows)
+      if: runner.os == 'Windows'
+      run: cd build && ctest -C Release -T test --output-on-failure
+    - name: Install Ninja (macOS)
+      if: runner.os == 'macOS'
+      run: brew install ninja
+    - name: CMake Build (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        cmake -S . -B build -G Ninja -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+        cmake --build build
+    - name: Run CTest (macOS)
+      if: runner.os == 'macOS'
+      run: cd build && ctest --output-on-failure

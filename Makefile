@@ -9,9 +9,15 @@ PREFIX = /usr/local
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses -Os -ffunction-sections -fdata-sections -I.
+CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion $$(if [ "$(CI_BUILD)" = "1" ]; then echo "-Werror"; fi) \
+			-Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses \
+			-Wno-logical-not-parentheses -Os -ffunction-sections -fdata-sections -I.
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
+
+ifeq ($(CI_BUILD),1)
+CXXFLAGS += -Werror
+endif
 
 # unicode character database version
 UCD_VERSION = 15.1.0
@@ -35,7 +41,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md Makefile lug.sln runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore doc/ lug/ msvs/ samples/ tests/ tools/ .github/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ lug/ samples/ tests/ tools/
 
 all: options samples tests
 
