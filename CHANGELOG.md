@@ -3,9 +3,9 @@
 ## Release v0.3.0 (Under Development)
 
 * Removed the `lug::variable` template class and instead allow for natural use of types and variables in captures and attribute bindings. Variable state is automatically saved and restored across rule boundaries.
-* Rewrote the expression objects as expression template classes rather than lambdas while implementing attribute state tracking. Will allow for additional optimizations into the future.
+* Rewrote the expression function objects/lambdas as expression template classes. Allows for multiple passes over the expression tree as well as top-down and bottom-up traversal, which was needed when implementing attribute state tracking. This will also allow for additional optimizations into the future.
 * Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it's executed during the semantic action evaluation phase.
-* Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` to push their result on to the attribute result stack.
+* Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` push their result onto the attribute result stack.
 * Attempting to bind a variable to a nonexistent value from the attribute result stack now throws an `attribute_stack_error`.
 * Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
 * `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.
@@ -14,6 +14,7 @@
 * Turned `lug::parser` into an alias of a new `lug::basic_parser` template class parameterized with an input source strategy. This allows for parsing and capturing of text without making a copy of the input.
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
 * Enabled `-Wconversion` and `-Wshadow` warnings for Clang and GCC and fixed warnings.
+* Added CMake build support and removed old MSVS solution and vcxproj files.
 * Handle situation where compilation with RTTI is disabled.
 
 ## Release v0.2.0 (June 21, 2024)
