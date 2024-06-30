@@ -583,11 +583,11 @@ void read_and_build_tables()
 					auto cflag = std::uint_least16_t{1} << j;
 					for (auto const& include : compat_prop_includes[cname])
 						if (include(args))
-							std::get<compat_filter_arg::cflags>(args) |= cflag;
+							std::get<compat_filter_arg::cflags>(args) = static_cast<unsigned short>(std::get<compat_filter_arg::cflags>(args) | cflag);
 					if (compat_prop_excludes.count(cname) != 0)
 						for (auto const& exclude : compat_prop_excludes[cname])
 							if (exclude(args))
-								std::get<compat_filter_arg::cflags>(args) &= ~cflag;
+								std::get<compat_filter_arg::cflags>(args) = static_cast<unsigned short>(std::get<compat_filter_arg::cflags>(args) & ~cflag);
 				}
 				ctable[i] = std::get<compat_filter_arg::cflags>(args);
 			}
@@ -877,7 +877,7 @@ template <class T>
 auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 {
 	// encode run-lengths
-	T const maxseqlen = (T{1} << ((CHAR_BIT * info.szbytes) - 2)) - 2;
+	T const maxseqlen = static_cast<T>((T{1} << ((CHAR_BIT * info.szbytes) - 2)) - 2);
 	T const seqmask = T{3} << ((CHAR_BIT * info.szbytes) - 2);
 	std::vector<T> pass1;
 
@@ -898,7 +898,7 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 	}
 
 	// encode interleave patterns
-	T const ilseqcode = (T{1} << (CHAR_BIT * info.szbytes)) - 1;
+	T const ilseqcode = static_cast<T>((T{1} << (CHAR_BIT * info.szbytes)) - 1);
 	T const maxilseqlen = ilseqcode - 1;
 	std::vector<T> pass2;
 	T lastval = 0;

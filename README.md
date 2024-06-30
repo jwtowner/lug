@@ -31,7 +31,7 @@ It is based on research introduced in the following papers:
 
 > Leonardo Reis et. al, [The formalization and implementation of Adaptable Parsing Expression Grammars](https://doi.org/10.1016/j.scico.2014.02.020), Science of Computer Programming, v.96 n.P2, p.191-210, December 2014
 
-> Tetsuro Matsumura, Kimio Kuramitsu, [A Declarative Extension of Parsing Expression Grammars for Recognizing Most Programming Languages](https://doi.org/10.2197/ipsjjip.24.256), Journal of Information Processing, v.24 i.2 p.256-264, November 2015
+> Tetsuro Matsumura, Kimio Kuramitsu, [A Declarative Extension of Parsing Expression Grammars for Recognizing Most Programming Languages](https://doi.org/10.2197/ipsjjip.24.256), Journal of Information Processing, v.24 i.2, p.256-264, November 2015
 
 > Sérgio Medeiros et. al, [A parsing machine for parsing expression grammars with labeled failures](https://doi.org/10.1145/2851613.2851750), Proceedings of the 31st Annual ACM symposium on Applied Computing, p.1960-1967, April 2016
 
@@ -46,7 +46,12 @@ As a baseline, the following compiler versions are known to work with lug.
 | Compiler | Language Mode |
 | --- | --- |
 | Clang 14.0.0 (March 2022) | -std=c++17 or -std=gnu++17 |
-| GCC 10.3 (April 8, 2021) | -std=c++17 or -std=gnu++17 |
+| Clang 18.1.0 (March 2024) | -std=c++17 or -std=gnu++17 |
+| GCC 9.5 (May 2022) | -std=c++17 or -std=gnu++17 |
+| GCC 10.5 (July 2023) | -std=c++17 or -std=gnu++17 |
+| GCC 11.4 (May 2023) | -std=c++17 or -std=gnu++17 |
+| GCC 12.4 (June 2024) | -std=c++17 or -std=gnu++17 |
+| GCC 13.3 (May 2024) | -std=c++17 or -std=gnu++17 |
 | Microsoft Visual C++ 2017 15.9 (November 2018) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 | Microsoft Visual C++ 2019 16.11 (August 2021) | Platform Toolset: Visual Studio 2019 Toolset (v142), Language Standard: ISO C++17 Standard (/std:c++17) |
 | Microsoft Visual C++ 2022 17.10 (May 2024) | Platform Toolset: Visual Studio 2022 Toolset (v143), Language Standard: ISO C++17 Standard (/std:c++17) |
