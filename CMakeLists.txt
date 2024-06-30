@@ -62,8 +62,10 @@ function(setup_executable_target target_name)
       -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override
       -Wunreachable-code -Wno-parentheses -Wno-logical-not-parentheses
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-ffunction-sections -fdata-sections>)
-    target_link_options(${target_name} PRIVATE
-      $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-s>)
+    if (UNIX AND NOT APPLE)
+      target_link_options(${target_name} PRIVATE
+        $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-s>)
+    endif()
   endif()
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(${target_name} PRIVATE -stdlib=libc++ -Wextra-semi-stmt -Wshadow-all)
@@ -75,7 +77,7 @@ function(setup_executable_target target_name)
   endif()
   if (MSVC)
     target_compile_options(${target_name} PRIVATE
-      /W4 /permissive /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
+      /bigobj /W4 /permissive /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
       /Zc:strictStrings /Zc:throwingNew /Zc:referenceBinding /Zc:wchar_t)
     target_link_options(${target_name} PRIVATE
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/OPT:REF /OPT:ICF>)
