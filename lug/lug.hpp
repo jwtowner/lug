@@ -34,7 +34,7 @@ struct syntax_position { std::size_t column, line; };
 struct syntax_range { std::size_t index, size; };
 struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
 using semantic_action = std::function<void(environment&)>;
-using syntactic_capture = std::function<void(environment&, syntax const&)>;
+using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
 
 struct encoder_expression_trait_tag {};
@@ -45,8 +45,8 @@ template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar,
 template <class E> inline constexpr bool is_string_v = std::is_convertible_v<std::decay_t<E>, std::string>;
 template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_callable_v<E> || is_string_v<E> || is_predicate_v<E>;
+template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
-template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_r_v<void, std::decay_t<A>, environment&, syntax const&> || std::is_invocable_r_v<void, std::decay_t<A>, syntax const&>;
 
 [[nodiscard]] grammar start(rule const& start_rule);
 
@@ -113,7 +113,7 @@ struct program
 	std::vector<instruction> instructions;
 	std::vector<unicode::rune_set> runesets;
 	std::vector<semantic_action> actions;
-	std::vector<syntactic_capture> captures;
+	std::vector<semantic_capture_action> captures;
 	std::vector<syntactic_predicate> predicates;
 	directives mandate{directives::eps};
 
@@ -340,7 +340,10 @@ public:
 	template <class T>
 	[[nodiscard]] T pop_attribute()
 	{
-		return std::any_cast<T>(detail::pop_back(current_accept_context()));
+		auto& s = current_accept_context();
+		if (s.empty())
+			throw attribute_stack_error{};
+		return std::any_cast<T>(detail::pop_back(s));
 	}
 
 	template <class Data>
@@ -388,7 +391,7 @@ class encoder
 	virtual void do_append(program const&) = 0;
 	virtual immediate do_add_rune_set(unicode::rune_set) { return immediate{0}; }
 	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
-	virtual immediate do_add_syntactic_capture(syntactic_capture) { return immediate{0}; }
+	virtual immediate do_add_semantic_capture_action(semantic_capture_action) { return immediate{0}; }
 	virtual immediate do_add_syntactic_predicate(syntactic_predicate) { return immediate{0}; }
 	virtual void do_add_callee(rule const*, program const*, std::ptrdiff_t, directives) {}
 	virtual bool do_should_evaluate_length() const noexcept { return true; }
@@ -441,7 +444,7 @@ public:
 	encoder& call(grammar const& g, unsigned short prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
 	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	encoder& encode(opcode op, syntactic_capture c) { return append(instruction{op, operands::none, do_add_syntactic_capture(std::move(c))}); }
+	encoder& encode(opcode op, semantic_capture_action c) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(c))}); }
 	encoder& encode(opcode op, syntactic_predicate p) { return append(instruction{op, operands::none, do_add_syntactic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
@@ -537,7 +540,7 @@ class program_encoder : public encoder
 	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) final { callees_.emplace_back(r, p, n, d); }
 	immediate do_add_rune_set(unicode::rune_set r) final { return add_item(program_.runesets, std::move(r)); }
 	immediate do_add_semantic_action(semantic_action a) final { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_syntactic_capture(syntactic_capture a) final { return add_item(program_.captures, std::move(a)); }
+	immediate do_add_semantic_capture_action(semantic_capture_action a) final { return add_item(program_.captures, std::move(a)); }
 	immediate do_add_syntactic_predicate(syntactic_predicate p) final { return add_item(program_.predicates, std::move(p)); }
 
 	template <class Item>
@@ -723,6 +726,8 @@ template <class E, class = std::enable_if_t<is_expression_v<E> && !is_encoder_ex
 		return string_expression{std::forward<E>(e)};
 	else if constexpr (is_predicate_v<E>)
 		return predicate_expression{std::forward<E>(e)};
+	else
+		static_assert(detail::always_false_v<E>, "invalid expression type");
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -1033,8 +1038,8 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 {
 	using attribute_action_expression<capture_expression<E1, Action>, E1, Action>::attribute_action_expression;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
-	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, syntactic_capture{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, syntactic_capture{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 };
 
 template <class E1, class Target>
@@ -1051,8 +1056,8 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 {
 	using attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
-	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, syntactic_capture{[t = &this->operand](environment&, syntax const& sx) { *t = sx; }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, syntactic_capture{[f = m.attribute_frame, t = &this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); *t = sx; }}); }
+	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = &this->operand](environment&, syntax const& sx) { *t = sx; }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = &this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); *t = sx; }}); }
 };
 
 template <class E1>
@@ -1196,16 +1201,24 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] c
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 [[nodiscard]] constexpr auto operator<(E const& e, A&& a)
 {
-	if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>)
+	if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>, syntax>)
 		return capture_expression{make_expression(e), std::forward<A>(a)};
-	else if constexpr (std::is_invocable_v<A, syntax>)
+	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>)
+		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr, syntax const& sx) { envr.push_attribute(aa(detail::dynamic_cast_if_base_of<environment&>{envr}, sx)); }};
+	else if constexpr (detail::is_invocable_r_exact_v<void, A, syntax>)
 		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment&, syntax const& sx) { aa(sx); }};
-	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>)
+	else if constexpr (std::is_invocable_v<A, syntax>)
+		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr, syntax const& sx) { envr.push_attribute(aa(sx)); }};
+	else if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>>)
 		return action_expression{make_expression(e), std::forward<A>(a)};
-	else if constexpr (std::is_invocable_v<A> && std::is_same_v<void, std::invoke_result_t<A>>)
+	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>)
+		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr) { envr.push_attribute(aa(detail::dynamic_cast_if_base_of<environment&>{envr})); }};
+	else if constexpr (detail::is_invocable_r_exact_v<void, A>)
 		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment&) { aa(); }};
 	else if constexpr (std::is_invocable_v<A>)
 		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr) { envr.push_attribute(aa()); }};
+	else
+		static_assert(detail::always_false_v<A>, "invalid action type");
 }
 
 inline constexpr struct

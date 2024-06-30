@@ -3,7 +3,6 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
-
 #include <sstream>
 
 #undef NDEBUG

@@ -11,9 +11,9 @@ shift
 while [ $# -gt 0 ]; do
 	output=$($1 2>&1)
 	if [ $? -eq 0 ]; then
-		printf "[PASSED] "
+		printf "[PASS] "
 	else
-		printf "[FAILED] "
+		printf "[FAIL] "
 	fi
 	printf "%s\n" "$1"
 	if [ -n "$output" ]; then

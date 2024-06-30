@@ -98,6 +98,13 @@ constexpr T& operator^=(T& x, T y) noexcept
 
 namespace detail {
 
+template <class T> inline constexpr bool always_false_v = false;
+
+template <class V, class R, class Fn, class... Args> struct is_invocable_r_exact_impl : std::false_type {};
+template <class R, class Fn, class... Args> struct is_invocable_r_exact_impl<std::void_t<std::enable_if_t<std::is_same_v<R, std::invoke_result_t<Fn, Args...>>>>, R, Fn, Args...> : std::true_type {};
+template <class R, class Fn, class... Args> struct is_invocable_r_exact : is_invocable_r_exact_impl<void, R, Fn, Args...> {};
+template <class R, class Fn, class... Args> inline constexpr bool is_invocable_r_exact_v = is_invocable_r_exact<R, Fn, Args...>::value;
+
 template <class T> struct remove_cvref_from_tuple;
 template <class T> struct remove_cvref_from_tuple<T const> : remove_cvref_from_tuple<T> {};
 template <class T> struct remove_cvref_from_tuple<T volatile> : remove_cvref_from_tuple<T> {};

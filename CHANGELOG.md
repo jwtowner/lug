@@ -4,6 +4,9 @@
 
 * Removed the `lug::variable` template class and instead allow for natural use of types and variables in captures and attribute bindings. Variable state is automatically saved and restored across rule boundaries.
 * Rewrote the expression objects as expression template classes rather than lambdas while implementing attribute state tracking. Will allow for additional optimizations into the future.
+* Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it's executed during the semantic action evaluation phase.
+* Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` to push their result on to the attribute result stack.
+* Attempting to bind a variable to a nonexistent value from the attribute result stack now throws an `attribute_stack_error`.
 * Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
 * `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.
 * Moved `call_depth()`, `prune_depth()` and `escape()` functions into the `lug::environment` class since they are used exclusively during semantic action phase.
