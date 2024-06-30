@@ -10,6 +10,10 @@ project(
   HOMEPAGE_URL "https://github.com/jwtowner/lug"
   LANGUAGES CXX)
 
+option(BUILD_TESTS "Build tests" ON)
+option(BUILD_SAMPLES "Build sample applications" ON)
+option(CI_BUILD "Build is running on CI" OFF)
+
 include(CMakePackageConfigHelpers)
 include(CTest)
 
@@ -61,6 +65,7 @@ function(setup_executable_target target_name)
     target_compile_options(${target_name} PRIVATE
       -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override
       -Wunreachable-code -Wno-parentheses -Wno-logical-not-parentheses
+      $<$<BOOL:${CI_BUILD}>:-Werror>
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-ffunction-sections -fdata-sections>)
     if (UNIX AND NOT APPLE)
       target_link_options(${target_name} PRIVATE
@@ -78,13 +83,13 @@ function(setup_executable_target target_name)
   if (MSVC)
     target_compile_options(${target_name} PRIVATE
       /bigobj /W4 /permissive /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
-      /Zc:strictStrings /Zc:throwingNew /Zc:referenceBinding /Zc:wchar_t)
+      /Zc:strictStrings /Zc:throwingNew /Zc:referenceBinding /Zc:wchar_t
+      $<$<BOOL:${CI_BUILD}>:/WX>)
     target_link_options(${target_name} PRIVATE
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/OPT:REF /OPT:ICF>)
   endif()
 endfunction()
 
-option(BUILD_TESTS "Build tests" ON)
 if(BUILD_TESTS)
   enable_testing()
   file(GLOB TEST_SOURCES tests/*.cpp)
@@ -96,7 +101,6 @@ if(BUILD_TESTS)
   endforeach()
 endif()
 
-option(BUILD_SAMPLES "Build sample applications" ON)
 if(BUILD_SAMPLES)
   file(GLOB SAMPLE_DIRS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*)
   foreach(sample_dir ${SAMPLE_DIRS})
