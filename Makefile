@@ -35,7 +35,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md Makefile lug.sln runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore doc/ lug/ msvs/ samples/ tests/ tools/ .github/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ lug/ samples/ tests/ tools/
 
 all: options samples tests
 
