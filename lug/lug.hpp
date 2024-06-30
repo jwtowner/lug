@@ -23,10 +23,9 @@ class encoder;
 class rule_encoder;
 class syntax;
 class environment;
-class string_view_input_source;
-class string_input_source;
-class buffered_istream_input_source;
 class multi_input_source;
+class string_input_source;
+class string_view_input_source;
 template <class> class basic_parser;
 using parser = basic_parser<multi_input_source>;
 struct program;
@@ -1338,27 +1337,6 @@ template <typename T, class InputFunc> struct input_source_has_push_source<T, In
 
 } // namespace detail
 
-class string_view_input_source
-{
-	std::string_view buffer_;
-
-public:
-	using enqueue_drains = std::true_type;
-	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
-	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
-	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = std::string_view{&(*first), static_cast<std::size_t>(last - first)}; }
-};
-
-class string_input_source
-{
-	std::string buffer_;
-
-public:
-	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
-	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
-	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
-};
-
 class multi_input_source
 {
 	std::string buffer_;
@@ -1398,6 +1376,27 @@ public:
 			throw reenterant_read_error{};
 		sources_.emplace_back(std::forward<InputFunc>(func));
 	}
+};
+
+class string_input_source
+{
+	std::string buffer_;
+
+public:
+	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
+	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
+	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
+};
+
+class string_view_input_source
+{
+	std::string_view buffer_;
+
+public:
+	using enqueue_drains = std::true_type;
+	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
+	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
+	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = std::string_view{&(*first), static_cast<std::size_t>(last - first)}; }
 };
 
 struct parser_registers

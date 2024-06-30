@@ -56,7 +56,7 @@ void test_line_column_tracking()
 
 		rule Word = lexeme[
 				  str("officiates") < [&](environment& e, syntax x) { startpos[0] = e.position_begin(x); endpos[0] = e.position_end(x); }
-				| str("Everyone") < [&](environment& e, syntax x) { endpos[1] = e.position_end(x); startpos[1] = e.position_begin(x);  }
+				| str("Everyone") < [&](environment& e, syntax x) { endpos[1] = e.position_end(x); startpos[1] = e.position_begin(x); }
 				| str("Friday") < [&](environment& e, syntax x) { startpos[2] = e.position_begin(x); endpos[2] = e.position_end(x); }
 				| str("story") < [&](environment& e, syntax x) { endpos[3] = e.position_end(x); startpos[3] = e.position_begin(x); }
 				| +alpha
