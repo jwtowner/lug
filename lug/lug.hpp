@@ -45,6 +45,8 @@ template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar,
 template <class E> inline constexpr bool is_string_v = std::is_convertible_v<std::decay_t<E>, std::string>;
 template <class E> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_callable_v<E> || is_string_v<E> || is_predicate_v<E>;
+template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
+template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_r_v<void, std::decay_t<A>, environment&, syntax const&> || std::is_invocable_r_v<void, std::decay_t<A>, syntax const&>;
 
 [[nodiscard]] grammar start(rule const& start_rule);
 
@@ -190,6 +192,7 @@ public:
 	constexpr syntax(std::string_view c, std::size_t i) noexcept : capture_{c}, index_{i} {}
 	[[nodiscard]] constexpr std::string_view capture() const noexcept { return capture_; }
 	[[nodiscard]] constexpr syntax_range range() const noexcept { return syntax_range{index_, capture_.size()}; }
+	[[nodiscard]] operator std::string() const noexcept { return std::string{capture_}; }
 	[[nodiscard]] constexpr operator std::string_view() const noexcept { return capture_; }
 	[[nodiscard]] constexpr operator syntax_range() const noexcept { return range(); }
 	[[nodiscard]] constexpr bool empty() const noexcept { return capture_.empty(); }
@@ -1213,7 +1216,14 @@ inline constexpr struct
 		Target& target;
 		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return capture_to_expression{make_expression(e), target}; }
 	};
-	template <class Target> [[nodiscard]] constexpr capture_to<Target> operator()(Target& t) const noexcept { return capture_to<Target>{t}; }
+	template <class Action>
+	struct capture_with
+	{
+		Action action;
+		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return e < action; }
+	};
+	template <class Target, class = std::enable_if_t<is_capture_target_v<Target>>> [[nodiscard]] constexpr capture_to<Target> operator()(Target& t) const noexcept { return capture_to<Target>{t}; }
+	template <class Action, class = std::enable_if_t<is_capture_action_v<Action>>> [[nodiscard]] constexpr capture_with<std::decay_t<Action>> operator()(Action&& a) const noexcept { return capture_with<std::decay_t<Action>>{std::forward<Action>(a)}; }
 }
 capture{};
 
