@@ -112,7 +112,7 @@ void test_capture_comma_delimited_list()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		return start((capture(item)[+"[a-zA-Z0-9_-]"_rx] <[&]{items.emplace_back(item);}) >> ','_cx);
+		return start((capture(item)[lexeme[+"[a-zA-Z0-9_-]"_rx]] <[&]{items.emplace_back(item);}) >> ','_cx);
 	}();
 
 	std::string const list1 = "apple, banana, cherry";
@@ -125,13 +125,14 @@ void test_capture_comma_delimited_list()
 	assert(item.capture() == "cherry"); // item should capture the last item parsed
 
 	items.clear();
-	std::string const list2 = "123,456,789";
+	std::string const list2 = "123 , 456 ,789,987";
 	assert(lug::parse(list2, G));
-	assert(items.size() == 3);
+	assert(items.size() == 4);
 	assert(items[0] == "123");
 	assert(items[1] == "456");
 	assert(items[2] == "789");
-	assert(item.capture() == "789"); // item should capture the last item parsed
+	assert(items[3] == "987");
+	assert(item.capture() == "987"); // item should capture the last item parsed
 
 	items.clear();
 	std::string_view const list3 = "one_single-item";
@@ -165,7 +166,7 @@ void test_capture_nested_calls()
     {
         using namespace lug::language;
         rule call;
-        call = capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx] > ~('('_cx > call > ')'_cx) < add_to_sequence;
+        call = lexeme[capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx]] > ~('('_cx > call > ')'_cx) < add_to_sequence;
         return start(call > eoi);
     }();
 
