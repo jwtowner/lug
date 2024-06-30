@@ -24,7 +24,7 @@ jobs:
       if: runner.os == 'Windows'
       run: |
         cmake -S . -B build -G "Visual Studio 17 2022" -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
-        cmake --build build
+        cmake --build build --config Release --target ALL_BUILD
     - name: Run CTest (Windows)
       if: runner.os == 'Windows'
       run: cd build && ctest -C Release -T test --output-on-failure
