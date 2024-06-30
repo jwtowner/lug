@@ -44,28 +44,32 @@ Abstraction is often one floor above you.
 
 void test_line_column_tracking()
 {
-	std::array<lug::syntax_position, 4> startpos, endpos;
-	lug::grammar G;
+	std::array<lug::syntax_position, 4> startpos;
+	startpos.fill({0, 0});
 
+	std::array<lug::syntax_position, 4> endpos;
+	endpos.fill({0, 0});
+
+	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
 
 		rule Word = lexeme[
-				  str("officiates") < [&](csyntax& x) { startpos[0] = x.start(); endpos[0] = x.end(); }
-				| str("Everyone") < [&](csyntax& x) { endpos[1] = x.end(); startpos[1] = x.start();  }
-				| str("Friday") < [&](csyntax& x) { startpos[2] = x.start(); endpos[2] = x.end(); }
-				| str("story") < [&](csyntax& x) { endpos[3] = x.end(); startpos[3] = x.start(); }
+				  str("officiates") < [&](environment& e, syntax x) { startpos[0] = e.position_begin(x); endpos[0] = e.position_end(x); }
+				| str("Everyone") < [&](environment& e, syntax x) { endpos[1] = e.position_end(x); startpos[1] = e.position_begin(x);  }
+				| str("Friday") < [&](environment& e, syntax x) { startpos[2] = e.position_begin(x); endpos[2] = e.position_end(x); }
+				| str("story") < [&](environment& e, syntax x) { endpos[3] = e.position_end(x); startpos[3] = e.position_begin(x); }
 				| +alpha
 			];
 
-		G = start(*(Word | punct) > eoi);
-	}
+		return start(*(Word | punct) > eoi);
+	}();
 
 	lug::environment E;
 	lug::parser p{G, E};
 
-	bool success = p.parse(std::begin(sentences1), std::end(sentences1));
-	assert(success);
+	bool const success1 = p.parse(std::begin(sentences1), std::end(sentences1));
+	assert(success1);
 	assert(p.match() == sentences1);
 
 	assert(startpos[0].line == 1 && startpos[0].column == 14);
@@ -81,8 +85,8 @@ void test_line_column_tracking()
 	assert(p.max_subject_index() == sentences1.size());
 	assert(p.max_subject_position().line == 20 && p.max_subject_position().column == 52);
 
-	success = p.parse(std::begin(sentences2), std::end(sentences2));
-	assert(success);
+	bool const success2 = p.parse(std::begin(sentences2), std::end(sentences2));
+	assert(success2);
 	assert(p.match() == sentences2);
 
 	assert(startpos[0].line == 25 && startpos[0].column == 14);

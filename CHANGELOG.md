@@ -1,8 +1,24 @@
 # Changelog
 
+## Release v0.3.0 (Under Development)
+
+* Removed the `lug::variable` template class and instead allow for natural use of types and variables in captures and attribute bindings. Variable state is automatically saved and restored across rule boundaries.
+* Rewrote the expression objects as expression template classes rather than lambdas while implementing attribute state tracking. Will allow for additional optimizations into the future.
+* Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it's executed during the semantic action evaluation phase.
+* Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` to push their result on to the attribute result stack.
+* Attempting to bind a variable to a nonexistent value from the attribute result stack now throws an `attribute_stack_error`.
+* Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
+* `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.
+* Moved `call_depth()`, `prune_depth()` and `escape()` functions into the `lug::environment` class since they are used exclusively during semantic action phase.
+* Moved line/column tracking and current match/subject string views to `lug::environment` class, fully removing the environment's dependency on `lug::parser`.
+* Turned `lug::parser` into an alias of a new `lug::basic_parser` template class parameterized with an input source strategy. This allows for parsing and capturing of text without making a copy of the input.
+* Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
+* Enabled `-Wconversion` and `-Wshadow` warnings for Clang and GCC and fixed warnings.
+* Handle situation where compilation with RTTI is disabled.
+
 ## Release v0.2.0 (June 21, 2024)
 
-* Feature: Implemented new support for context-sensitive grammars with symbol tables and parsing conditions, based on the PEG extensions described in the paper *"A Declarative Extension of Parsing Expression Grammars for Recognizing Most Programming Languages (2015)"* by Tetsuro Matsumura and Kimio Kuramitsu.
+* Feature: Implemented new support for context-sensitive grammars with symbol tables and parsing conditions, based on the PEG extensions described in the paper *"A Declarative Extension of Parsing Expression Grammars for Recognizing Most Programming Languages"* by Tetsuro Matsumura and Kimio Kuramitsu (2015).
 * Added an XML Standard 1.0 matcher sample program demonstrating use of symbol tables.
 * Finished the BASIC language interpreter sample program, which is now feature complete, using parsing conditions.
 * Updated Unicode support to version 15.1.0 and automated Unicode table generation via Makefile build.

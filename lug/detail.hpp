@@ -9,9 +9,24 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <vector>
+
+#ifndef LUG_NO_RTTI
+#if defined __GNUC__
+#ifndef __GXX_RTTI
+#define LUG_NO_RTTI
+#endif
+#elif defined _MSC_VER
+#ifndef _CPPRTTI
+#define LUG_NO_RTTI
+#endif
+#endif
+#endif // LUG_NO_RTTI
 
 #ifdef __GNUC__
 
@@ -83,6 +98,37 @@ constexpr T& operator^=(T& x, T y) noexcept
 
 namespace detail {
 
+template <class T> inline constexpr bool always_false_v = false;
+
+template <class V, class R, class Fn, class... Args> struct is_invocable_r_exact_impl : std::false_type {};
+template <class R, class Fn, class... Args> struct is_invocable_r_exact_impl<std::void_t<std::enable_if_t<std::is_same_v<R, std::invoke_result_t<Fn, Args...>>>>, R, Fn, Args...> : std::true_type {};
+template <class R, class Fn, class... Args> struct is_invocable_r_exact : is_invocable_r_exact_impl<void, R, Fn, Args...> {};
+template <class R, class Fn, class... Args> inline constexpr bool is_invocable_r_exact_v = is_invocable_r_exact<R, Fn, Args...>::value;
+
+template <class T> struct remove_cvref_from_tuple;
+template <class T> struct remove_cvref_from_tuple<T const> : remove_cvref_from_tuple<T> {};
+template <class T> struct remove_cvref_from_tuple<T volatile> : remove_cvref_from_tuple<T> {};
+template <class T> struct remove_cvref_from_tuple<T const volatile> : remove_cvref_from_tuple<T> {};
+template <class... Args> struct remove_cvref_from_tuple<std::tuple<Args...>> { using type = std::tuple<std::remove_cv_t<std::remove_reference_t<Args>>...>; };
+template <class T> using remove_cvref_from_tuple_t = typename remove_cvref_from_tuple<T>::type;
+
+template <class It>
+inline constexpr bool is_char_contiguous_iterator_v =
+	std::is_convertible_v<It, std::vector<char>::const_iterator> ||
+	std::is_convertible_v<It, std::string::const_iterator> ||
+	std::is_convertible_v<It, std::string_view::const_iterator> ||
+	std::is_same_v<std::decay_t<It>, char*> ||
+	std::is_same_v<std::decay_t<It>, const char*>;
+
+template <class It, class T = void>
+using enable_if_char_input_iterator_t = std::enable_if_t<
+	!std::is_integral_v<It> &&
+	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<It>::iterator_category> &&
+	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<It>::value_type>>, T>;
+
+template <class It, class T = void>
+using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
+
 template <class... Args>
 constexpr void ignore(Args&&...) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward,hicpp-named-parameter,readability-named-parameter)
 
@@ -146,17 +192,22 @@ template <class MemberPtrType, MemberPtrType MemberPtr, class ObjectIterator>
 template <class T>
 class dynamic_cast_if_base_of
 {
-	std::remove_reference_t<T>& value; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+	std::remove_reference_t<T>& value_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
 
 public:
-	constexpr explicit dynamic_cast_if_base_of(std::remove_reference_t<T>& x) noexcept
-		: value{x}
-	{}
+	constexpr explicit dynamic_cast_if_base_of(std::remove_reference_t<T>& x) noexcept : value_{x} {}
 
 	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
 	[[nodiscard]] constexpr operator U&() const // NOLINT(hicpp-explicit-conversions)
 	{
-		return dynamic_cast<std::remove_reference_t<U>&>(value);
+#ifndef LUG_NO_RTTI
+		if constexpr (std::is_same_v<std::decay_t<T>, std::decay_t<U>>)
+#endif // LUG_NO_RTTI
+			return static_cast<std::remove_reference_t<U>&>(value_);
+#ifndef LUG_NO_RTTI
+		else
+			return dynamic_cast<std::remove_reference_t<U>&>(value_);
+#endif // LUG_NO_RTTI
 	}
 };
 
@@ -274,6 +325,68 @@ template <class Integral>
 {
 	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }
+
+class frame_allocator
+{
+	static inline constexpr std::size_t large_object_size = 4096;
+	static inline constexpr std::size_t frame_block_data_size = 65536;
+	struct alignas(large_object_size) frame_block_data { std::byte bytes[frame_block_data_size]; };
+
+	struct frame_block
+	{
+		std::unique_ptr<frame_block_data> data{std::make_unique<frame_block_data>()};
+		std::size_t offset{0};
+	};
+
+	std::vector<frame_block> frame_blocks_{1};
+	std::vector<frame_block>::iterator current_frame_block_{frame_blocks_.begin()};
+
+public:
+	void* allocate(std::size_t size, std::size_t alignment)
+	{
+		alignment = (alignment < alignof(std::size_t)) ? alignof(std::size_t) : alignment;
+		std::vector<frame_block>::iterator block = current_frame_block_;
+		std::size_t prev_offset = current_frame_block_->offset;
+		std::size_t start_offset = (prev_offset + sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
+		std::size_t end_offset = (start_offset + size + (alignof(std::size_t) - 1)) & ~(alignof(std::size_t) - 1);
+		if (end_offset > frame_block_data_size) {
+			if (++block == frame_blocks_.end())
+				block = current_frame_block_ = frame_blocks_.insert(block, frame_block{});
+			prev_offset = 0;
+			start_offset = (sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
+			end_offset = start_offset + size;
+		}
+		std::byte* const ptr = &block->data->bytes[start_offset];
+		block->offset = end_offset;
+		*reinterpret_cast<std::size_t*>(ptr - sizeof(std::size_t)) = prev_offset;
+		return ptr;
+	}
+
+	void deallocate(void* ptr, std::size_t size, std::size_t alignment) noexcept
+	{
+		alignment = (alignment < alignof(std::size_t)) ? alignof(std::size_t) : alignment;
+		std::size_t const prev_offset = *reinterpret_cast<std::size_t*>(static_cast<std::byte*>(ptr) - sizeof(std::size_t));
+		std::size_t const start_offset = (prev_offset + sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
+		std::size_t const end_offset = (start_offset + size + (alignof(std::size_t) - 1)) & ~(alignof(std::size_t) - 1);
+		if (end_offset != current_frame_block_->offset)
+			std::terminate();
+		current_frame_block_->offset = prev_offset;
+		if ((prev_offset == 0) && (current_frame_block_ != frame_blocks_.begin()))
+			--current_frame_block_;
+	}
+
+	template <class T>
+	T* allocate()
+	{
+		return static_cast<T*>(allocate(sizeof(T), alignof(T)));
+	}
+
+	template <class T>
+	void deallocate(T* ptr) noexcept
+	{
+		deallocate(ptr, sizeof(T), alignof(T));
+	}
+};
 
 } // namespace detail
 

@@ -782,7 +782,7 @@ inline record query(char32_t r)
 		index = table->stage1[r >> 7];
 		index = table->stage2[(index << 7) | (r & 0x7f)];
 	}
-	return record{table->records.data() + index};
+	return record{&table->records[index]};
 }
 
 // Checks if the rune matches all of the string-packed property classes

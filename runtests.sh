@@ -9,7 +9,16 @@ printf "=============================================\n"
 
 shift
 while [ $# -gt 0 ]; do
-	printf "%s\n" "$1" && $1;
+	output=$($1 2>&1)
+	if [ $? -eq 0 ]; then
+		printf "[PASS] "
+	else
+		printf "[FAIL] "
+	fi
+	printf "%s\n" "$1"
+	if [ -n "$output" ]; then
+		printf "%s\n" "$output"
+	fi
 	shift
 done
 
