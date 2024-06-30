@@ -10,6 +10,9 @@ project(
   HOMEPAGE_URL "https://github.com/jwtowner/lug"
   LANGUAGES CXX)
 
+include(CMakePackageConfigHelpers)
+include(CTest)
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -26,8 +29,6 @@ target_include_directories(lug INTERFACE
   $<INSTALL_INTERFACE:include>)
 
 target_compile_features(lug INTERFACE cxx_std_17)
-
-include(CMakePackageConfigHelpers)
 
 write_basic_package_version_file(
   lug-config-version.cmake
@@ -92,11 +93,14 @@ if(BUILD_TESTS)
   endforeach()
 endif()
 
-option(BUILD_EXAMPLES "Build sample applications" ON)
-if(BUILD_EXAMPLES)
-  set(SAMPLES basic calc json xml)
-  foreach(sample_name ${SAMPLES})
-    add_executable(${sample_name} samples/${sample_name}/${sample_name}.cpp)
-    setup_executable_target(${sample_name})
+option(BUILD_SAMPLES "Build sample applications" ON)
+if(BUILD_SAMPLES)
+  file(GLOB SAMPLE_DIRS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*)
+  foreach(sample_dir ${SAMPLE_DIRS})
+    get_filename_component(sample_name ${sample_dir} NAME_WE)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${sample_dir}/${sample_name}.cpp)
+      add_executable(${sample_name} ${sample_dir}/${sample_name}.cpp)
+      setup_executable_target(${sample_name})
+    endif()
   endforeach()
 endif()
