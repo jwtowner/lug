@@ -179,7 +179,7 @@ public:
 	grammar() = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	static thread_local std::shared_ptr<std::function<void(encoder&)>> implicit_space;
+	static thread_local std::shared_ptr<std::function<void(encoder&)>> const implicit_space;
 };
 
 class syntax
@@ -1239,18 +1239,18 @@ inline constexpr struct
 }
 local{};
 
-struct implicit_space_rule
+class implicit_space_rule
 {
-	std::function<void(encoder&)> prev_rule;
-	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref;
-	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	implicit_space_rule(E const& e) : prev_rule{std::exchange(*grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})}, implicit_space_ref{grammar::implicit_space} {}
-	~implicit_space_rule() { if (auto const implicit_space = implicit_space_ref.lock(); implicit_space) { *implicit_space = std::move(prev_rule); } }
+	std::function<void(encoder&)> prev_rule_;
+	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref_;
+public:
+	template <class E, class = std::enable_if_t<is_expression_v<E>>> implicit_space_rule(E const& e) : prev_rule_{std::exchange(*grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})}, implicit_space_ref_{grammar::implicit_space} {}
+	~implicit_space_rule() { if (auto const implicit_space = implicit_space_ref_.lock(); implicit_space) { *implicit_space = std::move(prev_rule_); } }
 };
 
 } // namespace language
 
-inline thread_local std::shared_ptr<std::function<void(encoder&)>> grammar::implicit_space{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
+inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar::implicit_space{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
@@ -1594,9 +1594,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	bool parse(InputFunc&& func)
+	bool parse(InputFunc&& func, bool interactive = false)
 	{
-		return push_source(std::forward<InputFunc>(func)).parse();
+		return push_source(std::forward<InputFunc>(func), interactive).parse();
 	}
 
 	bool parse()
