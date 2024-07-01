@@ -1143,6 +1143,8 @@ inline constexpr struct
 }
 str{};
 
+inline namespace operators {
+
 [[nodiscard]] constexpr auto operator ""_cx(char c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
@@ -1190,6 +1192,8 @@ template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 	else
 		static_assert(detail::always_false_v<A>, "invalid action type");
 }
+
+} // namespace operators
 
 inline constexpr struct
 {
