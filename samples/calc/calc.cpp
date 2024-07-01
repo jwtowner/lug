@@ -41,7 +41,7 @@ rule Stmt   = (   "quit"_isx         <[]{ std::exit(EXIT_SUCCESS); }
             ) > EOL
             | *( !EOL > any ) > EOL  <[]{ std::cerr << "SYNTAX ERROR\n"; };
 
-grammar Grammar = start(Stmt);
+grammar Grammar = start(Stmt > eoi);
 
 } // namespace samples::calc
 

@@ -9,12 +9,29 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <vector>
+
+#ifndef LUG_NO_ISATTY
+#ifdef _MSC_VER
+#define LUG_HAS_ISATTY_MSVC
+#else
+#ifdef __has_include
+#if __has_include(<unistd.h>)
+#define LUG_HAS_ISATTY_POSIX
+#endif
+#endif
+#endif
+#endif // LUG_NO_ISATTY
+
+#if defined LUG_HAS_ISATTY_MSVC
+#include <io.h>
+#elif defined LUG_HAS_ISATTY_POSIX
+#include <unistd.h>
+#endif
 
 #ifndef LUG_NO_RTTI
 #if defined __GNUC__
@@ -49,6 +66,17 @@ _Pragma("GCC diagnostic pop")
 #endif
 
 namespace lug {
+
+[[nodiscard]] inline bool is_stdin_tty() noexcept
+{
+#if defined LUG_HAS_ISATTY_MSVC
+	return _isatty(_fileno(stdin)) != 0;
+#elif defined LUG_HAS_ISATTY_POSIX
+	return isatty(fileno(stdin)) != 0;
+#else
+	return false;
+#endif
+}
 
 inline namespace bitfield_ops {
 
@@ -325,68 +353,6 @@ template <class Integral>
 {
 	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 }
-
-class frame_allocator
-{
-	static inline constexpr std::size_t large_object_size = 4096;
-	static inline constexpr std::size_t frame_block_data_size = 65536;
-	struct alignas(large_object_size) frame_block_data { std::byte bytes[frame_block_data_size]; };
-
-	struct frame_block
-	{
-		std::unique_ptr<frame_block_data> data{std::make_unique<frame_block_data>()};
-		std::size_t offset{0};
-	};
-
-	std::vector<frame_block> frame_blocks_{1};
-	std::vector<frame_block>::iterator current_frame_block_{frame_blocks_.begin()};
-
-public:
-	void* allocate(std::size_t size, std::size_t alignment)
-	{
-		alignment = (alignment < alignof(std::size_t)) ? alignof(std::size_t) : alignment;
-		std::vector<frame_block>::iterator block = current_frame_block_;
-		std::size_t prev_offset = current_frame_block_->offset;
-		std::size_t start_offset = (prev_offset + sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
-		std::size_t end_offset = (start_offset + size + (alignof(std::size_t) - 1)) & ~(alignof(std::size_t) - 1);
-		if (end_offset > frame_block_data_size) {
-			if (++block == frame_blocks_.end())
-				block = current_frame_block_ = frame_blocks_.insert(block, frame_block{});
-			prev_offset = 0;
-			start_offset = (sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
-			end_offset = start_offset + size;
-		}
-		std::byte* const ptr = &block->data->bytes[start_offset];
-		block->offset = end_offset;
-		*reinterpret_cast<std::size_t*>(ptr - sizeof(std::size_t)) = prev_offset;
-		return ptr;
-	}
-
-	void deallocate(void* ptr, std::size_t size, std::size_t alignment) noexcept
-	{
-		alignment = (alignment < alignof(std::size_t)) ? alignof(std::size_t) : alignment;
-		std::size_t const prev_offset = *reinterpret_cast<std::size_t*>(static_cast<std::byte*>(ptr) - sizeof(std::size_t));
-		std::size_t const start_offset = (prev_offset + sizeof(std::size_t) + (alignment - 1)) & ~(alignment - 1);
-		std::size_t const end_offset = (start_offset + size + (alignof(std::size_t) - 1)) & ~(alignof(std::size_t) - 1);
-		if (end_offset != current_frame_block_->offset)
-			std::terminate();
-		current_frame_block_->offset = prev_offset;
-		if ((prev_offset == 0) && (current_frame_block_ != frame_blocks_.begin()))
-			--current_frame_block_;
-	}
-
-	template <class T>
-	T* allocate()
-	{
-		return static_cast<T*>(allocate(sizeof(T), alignof(T)));
-	}
-
-	template <class T>
-	void deallocate(T* ptr) noexcept
-	{
-		deallocate(ptr, sizeof(T), alignof(T));
-	}
-};
 
 } // namespace detail
 

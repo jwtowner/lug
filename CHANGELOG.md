@@ -13,6 +13,7 @@
 * Moved line/column tracking and current match/subject string views to `lug::environment` class, fully removing the environment's dependency on `lug::parser`.
 * Turned `lug::parser` into an alias of a new `lug::basic_parser` template class parameterized with an input source strategy. This allows for parsing and capturing of text without making a copy of the input.
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
+* Added an interactive processing mode flag to input sources to ignore `eoi` tokens for TTY input sources.
 * Enabled `-Wconversion` and `-Wshadow` warnings for Clang and GCC and fixed warnings.
 * Added CMake build support and removed old MSVS solution and vcxproj files.
 * Handle situation where compilation with RTTI is disabled.

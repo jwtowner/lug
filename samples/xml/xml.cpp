@@ -34,7 +34,7 @@ public:
 		rule Prolog = str("<?xml") > VersionInfo > ~EncodingDecl > ~SDDecl > str("?>");
 
 		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
-		grammar_ = start(File);
+		grammar_ = start(File > eoi);
 	}
 
 	bool parse(std::istream& input)

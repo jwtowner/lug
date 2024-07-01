@@ -24,7 +24,7 @@ public:
 		rule Array          = "[" > JSON > *("," > JSON) > "]";
 		rule Object         = "{" > String > ":" > JSON > *("," > String > ":" > JSON) > "}";
 		JSON                = Object | Array | String | Number | Boolean | Null;
-		grammar_ = start(JSON);
+		grammar_ = start(JSON > eoi);
 	}
 
 	bool parse(std::istream& input)

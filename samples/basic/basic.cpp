@@ -19,13 +19,8 @@
 #include <vector>
 
 #ifdef _MSC_VER
-#include <io.h>
-#define fileno _fileno
-#define isatty _isatty
 #define strcasecmp _stricmp
 #define strncasecmp _strnicmp
-#else
-#include <unistd.h>
 #endif
 
 class basic_interpreter
@@ -92,7 +87,7 @@ public:
 
 		rule Rem    = "REM"_isx > *( !NL > any );
 
-		rule FnEval = r1_%Expr > ~Rem > eoi                     <[this]{ fn_result_ = r1_; };
+		rule FnEval = r1_%Expr > ~Rem                           <[this]{ fn_result_ = r1_; };
 
 		rule DimEl  = id_%Var > "(" > r1_%Expr > ","
 		                            > r2_%Expr > ")"            <[this]{ dim(tables_[id_], r1_, r2_); }
@@ -150,7 +145,7 @@ public:
 		rule Init   = when("fnev") > FnEval
 		            | unless("fnev") > Line;
 
-		grammar_ = start(Init);
+		grammar_ = start(Init > eoi);
 	}
 
 	void repl()
@@ -170,7 +165,7 @@ public:
 				out.push_back('\n');
 			}
 			return true;
-		});
+		}, stdin_tty_);
 		std::cout.precision(10);
 		while (parser.parse()) ;
 	}
@@ -450,7 +445,7 @@ private:
 	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
 	double fn_result_{0.0};
 	bool fn_eval_{false};
-	bool stdin_tty_{isatty(fileno(stdin)) != 0};
+	bool stdin_tty_{lug::is_stdin_tty()};
 	bool quit_{false};
 };
 
