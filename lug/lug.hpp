@@ -10,6 +10,7 @@
 
 #include <any>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
@@ -178,7 +179,7 @@ public:
 	grammar() = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	static thread_local std::function<void(encoder&)> implicit_space;
+	static thread_local std::shared_ptr<std::function<void(encoder&)>> implicit_space;
 };
 
 class syntax
@@ -398,7 +399,7 @@ protected:
 	void do_skip()
 	{
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
-		grammar::implicit_space(*this);
+		(*grammar::implicit_space)(*this);
 	}
 
 public:
@@ -1241,14 +1242,15 @@ local{};
 struct implicit_space_rule
 {
 	std::function<void(encoder&)> prev_rule;
+	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref;
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	implicit_space_rule(E const& e) : prev_rule{std::exchange(grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})} {}
-	~implicit_space_rule() { grammar::implicit_space = std::move(prev_rule); }
+	implicit_space_rule(E const& e) : prev_rule{std::exchange(*grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})}, implicit_space_ref{grammar::implicit_space} {}
+	~implicit_space_rule() { if (auto const implicit_space = implicit_space_ref.lock(); implicit_space) { *implicit_space = std::move(prev_rule); } }
 };
 
 } // namespace language
 
-inline thread_local std::function<void(encoder&)> grammar::implicit_space{make_space_expression(language::operator*(language::space))};
+inline thread_local std::shared_ptr<std::function<void(encoder&)>> grammar::implicit_space{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
