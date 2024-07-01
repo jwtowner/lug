@@ -40,6 +40,7 @@ Building
 As a header-only library, lug itself does not require any build process.
 To use lug, make sure to include the `lug` header directory in your project's include path.
 Once that is done, you are ready to start using lug in your code.
+To build the sample programs and unit tests both [CMake](https://cmake.org/) and [make](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/make.html) are supported.
 
 As a baseline, the following compiler versions are known to work with lug.
 
@@ -55,8 +56,6 @@ As a baseline, the following compiler versions are known to work with lug.
 | Microsoft Visual C++ 2017 15.9 (November 2018) | Platform Toolset: Visual Studio 2017 Toolset (v141), Language Standard: ISO C++17 Standard (/std:c++17) |
 | Microsoft Visual C++ 2019 16.11 (August 2021) | Platform Toolset: Visual Studio 2019 Toolset (v142), Language Standard: ISO C++17 Standard (/std:c++17) |
 | Microsoft Visual C++ 2022 17.10 (May 2024) | Platform Toolset: Visual Studio 2022 Toolset (v143), Language Standard: ISO C++17 Standard (/std:c++17) |
-
-To build the sample programs and unit tests, a makefile is provided for Linux and BSD platforms and a Visual Studio solution is available for use on Windows.
 
 Syntax Reference
 ---

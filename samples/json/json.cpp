@@ -27,9 +27,9 @@ public:
 		grammar_ = start(JSON);
 	}
 
-	bool parse(std::istream& input)
+	bool parse(std::istream& input, bool interactive = false)
 	{
-		return lug::parse(input, grammar_);
+		return lug::parse(input, grammar_, interactive);
 	}
 
 private:
@@ -40,7 +40,7 @@ int main()
 {
 	try {
 		json_matcher matcher;
-		if (!matcher.parse(std::cin)) {
+		if (!matcher.parse(std::cin, lug::is_stdin_tty())) {
 			std::cout << "Invalid JSON!\n";
 			return -1;
 		}

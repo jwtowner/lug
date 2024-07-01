@@ -37,9 +37,9 @@ public:
 		grammar_ = start(File);
 	}
 
-	bool parse(std::istream& input)
+	bool parse(std::istream& input, bool interactive = false)
 	{
-		return lug::parse(input, grammar_);
+		return lug::parse(input, grammar_, interactive);
 	}
 
 private:
@@ -50,7 +50,7 @@ int main()
 {
 	try {
 		xml_matcher matcher;
-		if (!matcher.parse(std::cin)) {
+		if (!matcher.parse(std::cin, lug::is_stdin_tty())) {
 			std::cout << "Invalid XML!\n";
 			return -1;
 		}

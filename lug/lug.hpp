@@ -10,10 +10,12 @@
 
 #include <any>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <regex>
 
 namespace lug {
 
@@ -51,15 +53,13 @@ template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<st
 
 enum class opcode : unsigned char
 {
-	match,          match_casefold, match_any,      match_any_of,
-	match_all_of,   match_none_of,  match_set,      match_eol,
-	choice,         commit,         commit_back,    commit_partial,
-	jump,           call,           ret,            fail,
-	accept,         accept_final,   action,         predicate,
-	capture_start,  capture_end,    condition_test, condition_push,
-	condition_pop,  symbol_start,   symbol_end,     symbol_exists,
-	symbol_all,     symbol_any,     symbol_head,    symbol_tail,
-	symbol_push,    symbol_pop
+	match,          match_casefold, match_any,      match_any_of,   match_all_of,
+	match_none_of,  match_set,      match_eol,      choice,         commit,
+	commit_back,    commit_partial, jump,           call,           ret,
+	fail,           accept,         accept_final,   action,         predicate,
+	capture_start,  capture_end,    condition_test, condition_push, condition_pop,
+	symbol_start,   symbol_end,     symbol_exists,  symbol_all,     symbol_any,
+	symbol_head,    symbol_tail,    symbol_push,    symbol_pop
 };
 
 enum class immediate : unsigned short {};
@@ -179,7 +179,7 @@ public:
 	grammar() = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	static thread_local std::function<void(encoder&)> implicit_space;
+	static thread_local std::shared_ptr<std::function<void(encoder&)>> const implicit_space;
 };
 
 class syntax
@@ -206,9 +206,8 @@ class environment
 
 	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
 	static inline const std::vector<std::string> empty_symbols_{};
-	std::vector<std::vector<std::any>> accept_stack_;
-	std::vector<std::pair<void*, std::size_t>> frame_stack_;
-	detail::frame_allocator frame_stack_allocator_;
+	std::vector<std::any> attribute_frame_stack_;
+	std::vector<std::any> attribute_result_stack_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
@@ -222,9 +221,6 @@ class environment
 
 	unsigned short start_accept(std::string_view m, std::string_view s)
 	{
-		if (accept_stack_.size() >= (std::numeric_limits<unsigned short>::max)())
-			throw resource_limit_error{};
-		accept_stack_.emplace_back();
 		reset_match_and_subject(m, s);
 		on_accept_started();
 		return call_depth_;
@@ -232,18 +228,8 @@ class environment
 
 	void end_accept(unsigned short prior_call_depth)
 	{
-		if (accept_stack_.empty())
-			throw accept_context_error{};
 		on_accept_ended();
 		reset_call_depth(prior_call_depth);
-		accept_stack_.pop_back();
-	}
-
-	[[nodiscard]] std::vector<std::any>& current_accept_context()
-	{
-		if (accept_stack_.empty())
-			throw accept_context_error{};
-		return accept_stack_.back();
 	}
 
 	void reset_call_depth(unsigned short depth) noexcept
@@ -252,17 +238,17 @@ class environment
 		call_depth_ = depth;
 	}
 
-	void reset_origin()
-	{
-		origin_ = position_at(match_.size());
-		reset_match_and_subject(std::string_view{}, std::string_view{});
-	}
-
 	void reset_match_and_subject(std::string_view m, std::string_view s)
 	{
 		match_ = m;
 		subject_ = s;
 		positions_.clear();
+	}
+
+	void reset_origin()
+	{
+		origin_ = position_at(match_.size());
+		reset_match_and_subject(std::string_view{}, std::string_view{});
 	}
 
 public:
@@ -324,47 +310,32 @@ public:
 		return positions_.insert(pos, std::make_pair(index, position))->second;
 	}
 
+	template <class Frame>
+	void push_attribute_frame(Frame const& frame)
+	{
+		attribute_frame_stack_.emplace_back(std::in_place_type<detail::remove_cvref_from_tuple_t<Frame>>, frame);
+	}
+
+	template <class Frame>
+	void pop_attribute_frame(Frame& frame)
+	{
+		if (attribute_frame_stack_.empty())
+			throw attribute_stack_error{};
+		frame = std::any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
+	}
+
 	template <class T>
 	void push_attribute(T&& x)
 	{
-		current_accept_context().emplace_back(std::in_place_type<T>, std::forward<T>(x));
-	}
-
-	template <class T, class... Args>
-	void push_attribute(Args&&... args)
-	{
-		current_accept_context().emplace_back(std::in_place_type<T>, std::forward<Args>(args)...);
+		attribute_result_stack_.emplace_back(std::in_place_type<T>, std::forward<T>(x));
 	}
 
 	template <class T>
 	[[nodiscard]] T pop_attribute()
 	{
-		auto& s = current_accept_context();
-		if (s.empty())
+		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		return std::any_cast<T>(detail::pop_back(s));
-	}
-
-	template <class Data>
-	void push_frame(Data const& data)
-	{
-		using frame_data = detail::remove_cvref_from_tuple_t<Data>;
-		frame_stack_.push_back(std::pair{new(frame_stack_allocator_.allocate<frame_data>()) frame_data(data), sizeof(frame_data)});
-	}
-
-	template <class Data>
-	void pop_frame(Data& data)
-	{
-		if (frame_stack_.empty())
-			throw attribute_stack_error{};
-		const auto& frame = frame_stack_.back();
-		if (frame.second != sizeof(detail::remove_cvref_from_tuple_t<Data>))
-			throw attribute_stack_error{};
-		auto frame_data = static_cast<detail::remove_cvref_from_tuple_t<Data>*>(frame.first);
-		data = *frame_data;
-		std::destroy_at(frame_data);
-		frame_stack_allocator_.deallocate(frame_data);
-		frame_stack_.pop_back();
+		return std::any_cast<T>(detail::pop_back(attribute_result_stack_));
 	}
 };
 
@@ -428,7 +399,7 @@ protected:
 	void do_skip()
 	{
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
-		grammar::implicit_space(*this);
+		(*grammar::implicit_space)(*this);
 	}
 
 public:
@@ -486,10 +457,10 @@ public:
 	[[nodiscard]] auto call_with_frame(M const& m, T&& target, unsigned short prec, Args&&... args) -> M const&
 	{
 		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
-			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_frame(frame); }});
+			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_attribute_frame(frame); }});
 		call(std::forward<T>(target), prec, std::forward<Args>(args)...);
 		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
-			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) mutable { envr.pop_frame(frame); }});
+			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) mutable { envr.pop_attribute_frame(frame); }});
 		return m;
 	}
 
@@ -808,7 +779,7 @@ inline constexpr directive_modifier<directives::preskip, directives::postskip, d
 
 struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder&, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2).encode(opcode::match_any).encode(opcode::fail, immediate{1}); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2).encode(opcode::match_any, immediate{0x8000}).encode(opcode::fail, immediate{1}); return m; } };
 struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
 struct cut_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept); return m; } };
 
@@ -1008,7 +979,7 @@ struct attribute_action_expression : unary_encoder_expression_interface<E1>
 	[[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const
 	{
 		if constexpr (is_callable_encoder_expression_v<std::decay_t<E1>> && (std::tuple_size_v<typename M::attribute_frame_type> != 0)) {
-			d.encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_frame(frame); }});
+			d.encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_attribute_frame(frame); }});
 			static_cast<Derived const&>(*this).do_prologue(d); d.call(this->e1.target, 0); static_cast<Derived const&>(*this).do_epilogue_inlined(d, m); return m;
 		} else {
 			static_cast<Derived const&>(*this).do_prologue(d); auto m2 = d.evaluate(this->e1, m); static_cast<Derived const&>(*this).do_epilogue(d); return m2;
@@ -1029,7 +1000,7 @@ struct action_expression : attribute_action_expression<action_expression<E1, Act
 	using attribute_action_expression<action_expression<E1, Action>, E1, Action>::attribute_action_expression;
 	constexpr void do_prologue(encoder&) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, a = this->operand](environment& envr) mutable { envr.pop_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 };
 
 template <class E1, class Action>
@@ -1038,7 +1009,7 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 	using attribute_action_expression<capture_expression<E1, Action>, E1, Action>::attribute_action_expression;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 };
 
 template <class E1, class Target>
@@ -1047,7 +1018,7 @@ struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<
 	using attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
 	constexpr void do_prologue(encoder&) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = &this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = &this->operand](environment& envr) mutable { envr.pop_frame(f); *t = envr.pop_attribute<Target>(); }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = &this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
 };
 
 template <class E1, class Target>
@@ -1056,7 +1027,7 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 	using attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = &this->operand](environment&, syntax const& sx) { *t = sx; }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = &this->operand](environment& envr, syntax const& sx) mutable { envr.pop_frame(f); *t = sx; }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = &this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
 };
 
 template <class E1>
@@ -1268,17 +1239,18 @@ inline constexpr struct
 }
 local{};
 
-struct implicit_space_rule
+class implicit_space_rule
 {
-	std::function<void(encoder&)> prev_rule;
-	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	implicit_space_rule(E const& e) : prev_rule{std::exchange(grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})} {}
-	~implicit_space_rule() { grammar::implicit_space = std::move(prev_rule); }
+	std::function<void(encoder&)> prev_rule_;
+	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref_;
+public:
+	template <class E, class = std::enable_if_t<is_expression_v<E>>> implicit_space_rule(E const& e) : prev_rule_{std::exchange(*grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})}, implicit_space_ref_{grammar::implicit_space} {}
+	~implicit_space_rule() { if (auto const implicit_space = implicit_space_ref_.lock(); implicit_space) { *implicit_space = std::move(prev_rule_); } }
 };
 
 } // namespace language
 
-inline thread_local std::function<void(encoder&)> grammar::implicit_space{make_space_expression(language::operator*(language::space))};
+inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar::implicit_space{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
@@ -1328,22 +1300,25 @@ namespace detail {
 
 template <typename T, typename = void> struct input_source_enqueue_drains : std::false_type {};
 template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::enqueue_drains::value>> : std::true_type {};
+template <typename T, typename = void> struct input_source_has_interactive : std::false_type {};
+template <typename T> struct input_source_has_interactive<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T const&>().interactive())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
 template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T>().fill_buffer())>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
-template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>()))>> : std::true_type {};
+template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>(), std::declval<bool>()))>> : std::true_type {};
 
 } // namespace detail
 
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::function<bool(std::string&)>> sources_;
+	std::vector<std::pair<std::function<bool(std::string&)>, bool>> sources_;
 	bool reading_{false};
 
 public:
+	[[nodiscard]] bool interactive() const noexcept { return !sources_.empty() && sources_.back().second; }
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
@@ -1355,7 +1330,7 @@ public:
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		while (!sources_.empty() && text.empty()) {
 			text.clear();
-			bool const more = sources_.back()(text);
+			bool const more = sources_.back().first(text);
 			buffer_.insert(buffer_.end(), text.begin(), text.end());
 			if (!more)
 				sources_.pop_back();
@@ -1370,11 +1345,11 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
-	void push_source(InputFunc&& func)
+	void push_source(InputFunc&& func, bool interactive = false)
 	{
 		if (reading_)
 			throw reenterant_read_error{};
-		sources_.emplace_back(std::forward<InputFunc>(func));
+		sources_.emplace_back(std::forward<InputFunc>(func), interactive);
 	}
 };
 
@@ -1606,9 +1581,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	basic_parser& push_source(InputFunc&& func)
+	basic_parser& push_source(InputFunc&& func, bool interactive = false)
 	{
-		input_source_.push_source(std::forward<InputFunc>(func));
+		input_source_.push_source(std::forward<InputFunc>(func), interactive);
 		return *this;
 	}
 
@@ -1619,9 +1594,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	bool parse(InputFunc&& func)
+	bool parse(InputFunc&& func, bool interactive = false)
 	{
-		return push_source(std::forward<InputFunc>(func)).parse();
+		return push_source(std::forward<InputFunc>(func), interactive).parse();
 	}
 
 	bool parse()
@@ -1645,6 +1620,10 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_any: {
+					if constexpr (detail::input_source_has_interactive<InputSource>::value) {
+						if (((imm & 0x8000) != 0) && input_source_.interactive())
+							goto failure;
+					}
 					if (!match_single(sr, []{ return true; }))
 						goto failure;
 				} break;
@@ -1920,7 +1899,7 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 	return parse(first, last, grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr, bool interactive = false)
 {
 	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
@@ -1928,13 +1907,13 @@ inline bool parse(std::istream& input, grammar const& grmr, environment& envr)
 			return true;
 		}
 		return false;
-	}).parse();
+	}, interactive).parse();
 }
 
-inline bool parse(std::istream& input, grammar const& grmr)
+inline bool parse(std::istream& input, grammar const& grmr, bool interactive = false)
 {
 	environment envr;
-	return parse(input, grmr, envr);
+	return parse(input, grmr, envr, interactive);
 }
 
 inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
@@ -1949,12 +1928,12 @@ inline bool parse(std::string_view sv, grammar const& grmr)
 
 inline bool parse(grammar const& grmr, environment& envr)
 {
-	return parse(std::cin, grmr, envr);
+	return parse(std::cin, grmr, envr, is_stdin_tty());
 }
 
 inline bool parse(grammar const& grmr)
 {
-	return parse(std::cin, grmr);
+	return parse(std::cin, grmr, is_stdin_tty());
 }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
