@@ -42,8 +42,8 @@ struct encoder_expression_trait_tag {};
 template <class E, class = void> struct is_encoder_expression : std::false_type {};
 template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
 template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
-template <class E> inline constexpr bool is_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
+template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
 
@@ -689,7 +689,7 @@ template <class E, class = std::enable_if_t<is_encoder_expression_v<E>>>
 template <class E, class = std::enable_if_t<!is_encoder_expression_v<E> && is_expression_v<E>>>
 [[nodiscard]] constexpr auto make_expression(E&& e)
 {
-	if constexpr (is_callable_v<E>)
+	if constexpr (is_encoder_callable_v<E>)
 		return callable_expression{std::forward<E>(e)};
 	else if constexpr (std::is_same_v<std::decay_t<E>, char>)
 		return char_expression{std::forward<E>(e)};
