@@ -8,6 +8,7 @@ Checks:
   - -cert-dcl21-cpp
   - concurrency-*
   - cppcoreguidelines-*
+  - -cppcoreguidelines-avoid-magic-numbers
   - darwin-*
   - hicpp-*
   - -hicpp-braces-around-statements
@@ -21,6 +22,7 @@ Checks:
   - readability-*
   - -readability-braces-around-statements
   - -readability-identifier-length
+  - -readability-magic-numbers
 WarningsAsErrors: ''
 HeaderFileExtensions:
   - ''
