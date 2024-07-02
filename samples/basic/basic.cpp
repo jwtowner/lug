@@ -165,7 +165,7 @@ public:
 				out.push_back('\n');
 			}
 			return true;
-		}, stdin_tty_);
+		}, stdin_tty_ ? lug::source_options::interactive : lug::source_options::none);
 		std::cout.precision(10);
 		while (parser.parse()) ;
 	}
@@ -445,7 +445,7 @@ private:
 	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
 	double fn_result_{0.0};
 	bool fn_eval_{false};
-	bool stdin_tty_{lug::is_stdin_tty()};
+	bool stdin_tty_{lug::stdin_isatty()};
 	bool quit_{false};
 };
 

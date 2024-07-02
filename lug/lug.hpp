@@ -1300,29 +1300,31 @@ inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar
 	return grammar{std::move(grprogram)};
 }
 
+enum class source_options : unsigned int { none = 0, interactive = 0x01, is_bitfield_enum };
+
 namespace detail {
 
 template <typename T, typename = void> struct input_source_enqueue_drains : std::false_type {};
 template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::enqueue_drains::value>> : std::true_type {};
-template <typename T, typename = void> struct input_source_has_interactive : std::false_type {};
-template <typename T> struct input_source_has_interactive<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T const&>().interactive())>>> : std::true_type {};
+template <typename T, typename = void> struct input_source_has_options : std::false_type {};
+template <typename T> struct input_source_has_options<T, std::enable_if_t<std::is_same_v<source_options, decltype(std::declval<T const&>().options())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
 template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T>().fill_buffer())>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
-template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>(), std::declval<bool>()))>> : std::true_type {};
+template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>(), std::declval<source_options>()))>> : std::true_type {};
 
 } // namespace detail
 
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::string&)>, bool>> sources_;
+	std::vector<std::pair<std::function<bool(std::string&)>, source_options>> sources_;
 	bool reading_{false};
 
 public:
-	[[nodiscard]] bool interactive() const noexcept { return !sources_.empty() && sources_.back().second; }
+	[[nodiscard]] source_options options() const noexcept { return !sources_.empty() ? sources_.back().second : source_options::none; }
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
@@ -1349,11 +1351,11 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
-	void push_source(InputFunc&& func, bool interactive = false)
+	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
 			throw reenterant_read_error{};
-		sources_.emplace_back(std::forward<InputFunc>(func), interactive);
+		sources_.emplace_back(std::forward<InputFunc>(func), opt);
 	}
 };
 
@@ -1585,9 +1587,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	basic_parser& push_source(InputFunc&& func, bool interactive = false)
+	basic_parser& push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
-		input_source_.push_source(std::forward<InputFunc>(func), interactive);
+		input_source_.push_source(std::forward<InputFunc>(func), opt);
 		return *this;
 	}
 
@@ -1598,9 +1600,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	bool parse(InputFunc&& func, bool interactive = false)
+	bool parse(InputFunc&& func, source_options opt = source_options::none)
 	{
-		return push_source(std::forward<InputFunc>(func), interactive).parse();
+		return push_source(std::forward<InputFunc>(func), opt).parse();
 	}
 
 	bool parse()
@@ -1624,8 +1626,8 @@ public:
 						goto failure;
 				} break;
 				case opcode::match_any: {
-					if constexpr (detail::input_source_has_interactive<InputSource>::value) {
-						if (((imm & 0x8000) != 0) && input_source_.interactive())
+					if constexpr (detail::input_source_has_options<InputSource>::value) {
+						if (((imm & 0x8000) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
 							goto failure;
 					}
 					if (!match_single(sr, []{ return true; }))
@@ -1903,7 +1905,7 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 	return parse(first, last, grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr, bool interactive = false)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
 {
 	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
@@ -1911,13 +1913,13 @@ inline bool parse(std::istream& input, grammar const& grmr, environment& envr, b
 			return true;
 		}
 		return false;
-	}, interactive).parse();
+	}, opt).parse();
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, bool interactive = false)
+inline bool parse(std::istream& input, grammar const& grmr, source_options opt = source_options::none)
 {
 	environment envr;
-	return parse(input, grmr, envr, interactive);
+	return parse(input, grmr, envr, opt);
 }
 
 inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
@@ -1932,12 +1934,12 @@ inline bool parse(std::string_view sv, grammar const& grmr)
 
 inline bool parse(grammar const& grmr, environment& envr)
 {
-	return parse(std::cin, grmr, envr, is_stdin_tty());
+	return parse(std::cin, grmr, envr, stdin_isatty() ? source_options::interactive : source_options::none);
 }
 
 inline bool parse(grammar const& grmr)
 {
-	return parse(std::cin, grmr, is_stdin_tty());
+	return parse(std::cin, grmr, stdin_isatty() ? source_options::interactive : source_options::none);
 }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE
