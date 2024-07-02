@@ -5,6 +5,8 @@
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
 * Allow for use of variables of all types in attribute bindings, removing the `lug::variable` template class and instead. Variable state is automatically saved and restored across rule boundaries.
 * Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
+* Symbols now respects `caseless` mode, allowing for case-insensitive matching against symbol definitions.
+* Added `lug::source_options::interactive` flag that ignores `eoi` tokens for TTY input sources.
 * Rewrote the expression function objects/lambdas as expression template classes. Allows for multiple passes over the expression tree as well as top-down and bottom-up traversal, which was needed when implementing attribute state tracking. This will also allow for additional optimizations into the future.
 * Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it's executed during the semantic action evaluation phase.
 * Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` push their result onto the attribute result stack.
@@ -14,7 +16,6 @@
 * Moved line/column tracking and current match/subject string views to `lug::environment` class, fully removing the environment's dependency on `lug::parser`.
 * Turned `lug::parser` into an alias of a new `lug::basic_parser` template class parameterized with an input source strategy. This allows for parsing and capturing of text without making a copy of the input.
 * Placed all DSL operator overloads inside of an inline namespace `operators` within `lug::language`. This allows only the operators to be imported into the current scope if desired.
-* Added `lug::source_options::interactive` flag that ignores `eoi` tokens for TTY input sources.
 * Enabled `-Wconversion` and `-Wshadow` warnings for Clang and GCC and fixed warnings.
 * Added CMake build support and removed old MSVS solution and vcxproj files.
 * Handle situation where compilation with RTTI is disabled.

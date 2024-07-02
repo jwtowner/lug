@@ -7,6 +7,31 @@
 #undef NDEBUG
 #include <cassert>
 
+void test_symbol_exists()
+{
+	using namespace lug::language;
+
+	int Count = 0;
+
+	rule Name = lexeme[+alpha];
+	rule OptionalName = ~symbol("Name")[Name] >
+			( exists("Name") <[&Count] { ++Count; }
+			| missing("Name") <[&Count] { --Count; } );
+	grammar G = start(OptionalName);
+
+	assert(Count == 0);
+	assert(lug::parse("Apple", G));
+	assert(Count == 1);
+
+	Count = 0;
+	assert(lug::parse("123132", G));
+	assert(Count == -1);
+
+	Count = 0;
+	assert(lug::parse("Banana Banana", G));
+	assert(Count == 1);
+}
+
 void test_symbol_match()
 {
 	using namespace lug::language;
@@ -25,6 +50,8 @@ void test_symbol_match()
 	assert(lug::parse("<a></a>", G, E));
 	assert(lug::parse("< a ></ a>", G, E));
 	assert(!lug::parse("<a></b>", G, E));
+	assert(!lug::parse("<a></B>", G, E));
+	assert(!lug::parse("<a></A>", G, E));
 
 	assert(E.has_symbol("TAG"));
 	E.clear_symbols("TAG");
@@ -36,6 +63,7 @@ void test_symbol_match()
 	assert(lug::parse("<b ></ b>", G, E));
 	assert(!lug::parse("<b ></a>", G, E));
 	assert(!lug::parse("<b ></ a>", G, E));
+	assert(!lug::parse("<b></B>", G, E));
 
 	assert(E.has_symbol("TAG"));
 	E.add_symbol("TAG", "body");
@@ -46,6 +74,8 @@ void test_symbol_match()
 	assert(lug::parse("< body></body >", G, E));
 	assert(!lug::parse("<body></broken>", G, E));
 	assert(!lug::parse("<body></ broken>", G, E));
+	assert(!lug::parse("<body></BODY>", G, E));
+	assert(!lug::parse("<BODY></boDY>", G, E));
 }
 
 void test_symbol_definition_and_match()
@@ -59,6 +89,7 @@ void test_symbol_definition_and_match()
 	grammar G = start(Xml > eoi);
 
 	assert(lug::parse("<a></a>", G));
+	assert(lug::parse("<A></A>", G));
 	assert(lug::parse("<a></ a>", G));
 	assert(lug::parse("< a></a>", G));
 	assert(lug::parse("< b></b>", G));
@@ -68,15 +99,24 @@ void test_symbol_definition_and_match()
 	assert(lug::parse("<body></body>", G));
 	assert(lug::parse("<body></ body>", G));
 	assert(lug::parse("< body></body >", G));
+	assert(lug::parse("<BODY></BODY>", G));
+	assert(lug::parse("<BODY></ BODY>", G));
+	assert(lug::parse("< BODY></BODY >", G));
 
 	assert(!lug::parse("<a></b>", G));
 	assert(!lug::parse("<a></aa>", G));
 	assert(!lug::parse("<aa></a>", G));
+	assert(!lug::parse("<a></A>", G));
+	assert(!lug::parse("<A></a>", G));
 	assert(!lug::parse("<b></a>", G));
 	assert(!lug::parse("< b></ a>", G));
 	assert(!lug::parse("<b ></a>", G));
 	assert(!lug::parse("<body></broken>", G));
 	assert(!lug::parse("<body></ broken>", G));
+	assert(!lug::parse("<body></body2>", G));
+	assert(!lug::parse("<body></BODY>", G));
+	assert(!lug::parse("<BODY></body>", G));
+	assert(!lug::parse("<BODY></BODY2>", G));
 }
 
 void test_symbol_definition_and_match_2()
@@ -229,34 +269,109 @@ void test_symbol_nested_definition_and_match()
 	assert(!lug::parse("<body></ broken>", G));
 }
 
-void test_symbol_exists()
+void test_symbol_match_caseless()
 {
 	using namespace lug::language;
 
-	int Count = 0;
+	rule Xml, Name;
+	Name = lexeme[alpha > *alnum];
+	Xml = chr('<') > Name > chr('>') > ~Xml > str("</") > caseless[match("TAG")] > chr('>');
 
-	rule Name = lexeme[+alpha];
-	rule OptionalName = ~symbol("Name")[Name] >
-			( exists("Name") <[&Count] { ++Count; }
-			| missing("Name") <[&Count] { --Count; } );
-	grammar G = start(OptionalName);
+	grammar G = start(Xml > eoi);
 
-	assert(Count == 0);
-	assert(lug::parse("Apple", G));
-	assert(Count == 1);
+	environment E;
+	assert(!E.has_symbol("TAG"));
+	E.add_symbol("TAG", "a");
+	assert(E.has_symbol("TAG"));
 
-	Count = 0;
-	assert(lug::parse("123132", G));
-	assert(Count == -1);
+	assert(lug::parse("<a></a>", G, E));
+	assert(lug::parse("<a></A>", G, E));
+	assert(lug::parse("< a ></ a>", G, E));
+	assert(lug::parse("< A ></ a>", G, E));
+	assert(!lug::parse("<a></b>", G, E));
+	assert(!lug::parse("<a></B>", G, E));
 
-	Count = 0;
-	assert(lug::parse("Banana Banana", G));
-	assert(Count == 1);
+	assert(E.has_symbol("TAG"));
+	E.clear_symbols("TAG");
+	assert(!E.has_symbol("TAG"));
+	E.add_symbol("TAG", "b");
+	assert(E.has_symbol("TAG"));
+
+	assert(lug::parse("<b></b>", G, E));
+	assert(lug::parse("<b></B>", G, E));
+	assert(lug::parse("<B></b>", G, E));
+	assert(lug::parse("<b ></ b>", G, E));
+	assert(!lug::parse("<b ></a>", G, E));
+	assert(!lug::parse("<B ></a>", G, E));
+	assert(!lug::parse("<b ></ a>", G, E));
+	assert(!lug::parse("<b ></A>", G, E));
+
+	assert(E.has_symbol("TAG"));
+	E.add_symbol("TAG", "body");
+	assert(E.has_symbol("TAG"));
+
+	assert(lug::parse("<body></body>", G, E));
+	assert(lug::parse("<body></BoDy>", G, E));
+	assert(lug::parse("<body></BODY>", G, E));
+	assert(lug::parse("<body></ body>", G, E));
+	assert(lug::parse("<BODY></body>", G, E));
+	assert(lug::parse("<BODY></bOdy>", G, E));
+	assert(lug::parse("<BODY></BODY>", G, E));
+	assert(lug::parse("< body></body >", G, E));
+	assert(lug::parse("< boDy></BOdy >", G, E));
+	assert(!lug::parse("<body></broken>", G, E));
+	assert(!lug::parse("<body></BODY2>", G, E));
+	assert(!lug::parse("<body></ broken>", G, E));
+	assert(!lug::parse("<BODY></ broken>", G, E));
+}
+
+void test_symbol_definition_and_match_caseless()
+{
+	using namespace lug::language;
+
+	rule Xml, Name;
+	Name = lexeme[alpha > *alnum];
+	Xml = chr('<') > symbol("TAG")[Name] > chr('>') > ~Xml > str("</") > caseless[match("TAG")] > chr('>');
+
+	grammar G = start(Xml > eoi);
+
+	assert(lug::parse("<a></a>", G));
+	assert(lug::parse("<a></A>", G));
+	assert(lug::parse("<A></a>", G));
+	assert(lug::parse("<a></ a>", G));
+	assert(lug::parse("< a></a>", G));
+	assert(lug::parse("< A></a>", G));
+	assert(lug::parse("< b></b>", G));
+	assert(lug::parse("< b></B>", G));
+	assert(lug::parse("<B></ b>", G));
+	assert(lug::parse("<B></B>", G));
+	assert(lug::parse("<b></ b>", G));
+	assert(lug::parse("<b ></ b >", G));
+	assert(lug::parse("< b ></b>", G));
+	assert(lug::parse("<body></body>", G));
+	assert(lug::parse("<body></ body>", G));
+	assert(lug::parse("< body></body >", G));
+	assert(lug::parse("<body></BODY>", G));
+	assert(lug::parse("<BODY></body>", G));
+	assert(lug::parse("<BODY></BODY>", G));
+	assert(lug::parse("<body></BoDy>", G));
+
+	assert(!lug::parse("<a></b>", G));
+	assert(!lug::parse("<a></aa>", G));
+	assert(!lug::parse("<aa></a>", G));
+	assert(!lug::parse("<b></a>", G));
+	assert(!lug::parse("< b></ a>", G));
+	assert(!lug::parse("<b ></a>", G));
+	assert(!lug::parse("<body></broken>", G));
+	assert(!lug::parse("<body></ broken>", G));
+	assert(!lug::parse("<body></body2>", G));
+	assert(!lug::parse("<body></BODY2>", G));
 }
 
 int main()
 {
 	try {
+		test_symbol_exists();
 		test_symbol_match();
 		test_symbol_definition_and_match();
 		test_symbol_definition_and_match_2();
@@ -264,7 +379,8 @@ int main()
 		test_symbol_definition_and_match_any();
 		test_symbol_definition_and_match_all();
 		test_symbol_nested_definition_and_match();
-		test_symbol_exists();
+		test_symbol_match_caseless();
+		test_symbol_definition_and_match_caseless();
 	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
 		return -1;

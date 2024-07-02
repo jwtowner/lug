@@ -113,62 +113,74 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return result;
 }
 
-template <class InputIt, class OutputIt>
-inline OutputIt tocasefold(InputIt first, InputIt last, OutputIt dst)
+inline constexpr struct
 {
-	while (first != last) {
-		auto [next, rune] = lug::utf8::decode_rune(first, last);
-		dst = lug::utf8::encode_rune(dst, unicode::tocasefold(rune)).first;
-		first = next;
+	template <class InputIt, class OutputIt>
+	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	{
+		while (first != last) {
+			auto [next, rune] = lug::utf8::decode_rune(first, last);
+			dst = lug::utf8::encode_rune(dst, unicode::tocasefold(rune)).first;
+			first = next;
+		}
+		return dst;
 	}
-	return dst;
-}
 
-[[nodiscard]] inline std::string tocasefold(std::string_view src)
-{
-	std::string result;
-	result.reserve(src.size());
-	tocasefold(std::begin(src), std::end(src), std::back_inserter(result));
-	return result;
-}
-
-template <class InputIt, class OutputIt>
-inline OutputIt tolower(InputIt first, InputIt last, OutputIt dst)
-{
-	while (first != last) {
-		auto [next, rune] = lug::utf8::decode_rune(first, last);
-		dst = lug::utf8::encode_rune(dst, unicode::tolower(rune)).first;
-		first = next;
+	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	{
+		std::string result;
+		result.reserve(src.size());
+		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		return result;
 	}
-	return dst;
 }
+tocasefold{};
 
-[[nodiscard]] inline std::string tolower(std::string_view src)
+inline constexpr struct
 {
-	std::string result;
-	result.reserve(src.size());
-	tolower(std::begin(src), std::end(src), std::back_inserter(result));
-	return result;
-}
-
-template <class InputIt, class OutputIt>
-inline OutputIt toupper(InputIt first, InputIt last, OutputIt dst)
-{
-	while (first != last) {
-		auto [next, rune] = lug::utf8::decode_rune(first, last);
-		dst = lug::utf8::encode_rune(dst, unicode::toupper(rune)).first;
-		first = next;
+	template <class InputIt, class OutputIt>
+	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	{
+		while (first != last) {
+			auto [next, rune] = lug::utf8::decode_rune(first, last);
+			dst = lug::utf8::encode_rune(dst, unicode::tolower(rune)).first;
+			first = next;
+		}
+		return dst;
 	}
-	return dst;
-}
 
-[[nodiscard]] inline std::string toupper(std::string_view src)
-{
-	std::string result;
-	result.reserve(src.size());
-	toupper(std::begin(src), std::end(src), std::back_inserter(result));
-	return result;
+	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	{
+		std::string result;
+		result.reserve(src.size());
+		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		return result;
+	}
 }
+tolower{};
+
+inline constexpr struct
+{
+	template <class InputIt, class OutputIt>
+	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	{
+		while (first != last) {
+			auto [next, rune] = lug::utf8::decode_rune(first, last);
+			dst = lug::utf8::encode_rune(dst, unicode::toupper(rune)).first;
+			first = next;
+		}
+		return dst;
+	}
+
+	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	{
+		std::string result;
+		result.reserve(src.size());
+		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		return result;
+	}
+}
+toupper{};
 
 } // namespace lug::utf8
 
