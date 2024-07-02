@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index,hicpp-signed-bitwise)
+
 namespace lug::unicode {
 
 // POSIX compatibility properties
@@ -704,7 +706,7 @@ enum class eawtype : std::uint_least8_t
 };
 
 // Property Traits
-enum class property_enum
+enum class property_enum : std::uint_least8_t
 {
 	invalid,
 	ctype,
@@ -747,34 +749,34 @@ class record
 		std::array<std::uint_least16_t, 39680> stage2;
 		std::array<raw_record, 1902> records;
 	};
-	static std::int_least32_t case_mapping(std::size_t index) noexcept;
-	static std::unique_ptr<raw_record_table> decompress_table();
+	[[nodiscard]] static std::int_least32_t case_mapping(std::size_t index) noexcept;
+	[[nodiscard]] static std::unique_ptr<raw_record_table> decompress_table();
 	friend record query(char32_t r);
 public:
-	ctype compatibility() const noexcept { return static_cast<ctype>(raw_->cflags); }
-	ptype properties() const noexcept { return static_cast<ptype>(raw_->pflags); }
-	gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << raw_->gcindex); }
-	sctype script() const noexcept { return static_cast<sctype>(raw_->scindex); }
-	blktype block() const noexcept { return static_cast<blktype>(raw_->abfields & 0x3ff); }
-	agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10); }
-	eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0f); }
-	int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4) - 1; }
-	std::int_least32_t casefold_mapping() const noexcept { return case_mapping(raw_->cfindex); }
-	std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(raw_->clindex); }
-	std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
-	bool all_of(ctype c) const noexcept { return (compatibility() & c) == c; }
-	bool all_of(ptype p) const noexcept { return (properties() & p) == p; }
-	bool all_of(gctype gc) const noexcept { return (general_category() & gc) == gc; }
-	bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
-	bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
-	bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
-	bool none_of(ctype c) const noexcept { return (compatibility() & c) == ctype::none; }
-	bool none_of(ptype p) const noexcept { return (properties() & p) == ptype::None; }
-	bool none_of(gctype gc) const noexcept { return (general_category() & gc) == gctype::None; }
+	[[nodiscard]] ctype compatibility() const noexcept { return static_cast<ctype>(raw_->cflags); }
+	[[nodiscard]] ptype properties() const noexcept { return static_cast<ptype>(raw_->pflags); }
+	[[nodiscard]] gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << raw_->gcindex); }
+	[[nodiscard]] sctype script() const noexcept { return static_cast<sctype>(raw_->scindex); }
+	[[nodiscard]] blktype block() const noexcept { return static_cast<blktype>(raw_->abfields & 0x3ff); }
+	[[nodiscard]] agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10); }
+	[[nodiscard]] eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0f); }
+	[[nodiscard]] int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4) - 1; }
+	[[nodiscard]] std::int_least32_t casefold_mapping() const noexcept { return case_mapping(raw_->cfindex); }
+	[[nodiscard]] std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(raw_->clindex); }
+	[[nodiscard]] std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
+	[[nodiscard]] bool all_of(ctype c) const noexcept { return (compatibility() & c) == c; }
+	[[nodiscard]] bool all_of(ptype p) const noexcept { return (properties() & p) == p; }
+	[[nodiscard]] bool all_of(gctype gc) const noexcept { return (general_category() & gc) == gc; }
+	[[nodiscard]] bool any_of(ctype c) const noexcept { return (compatibility() & c) != ctype::none; }
+	[[nodiscard]] bool any_of(ptype p) const noexcept { return (properties() & p) != ptype::None; }
+	[[nodiscard]] bool any_of(gctype gc) const noexcept { return (general_category() & gc) != gctype::None; }
+	[[nodiscard]] bool none_of(ctype c) const noexcept { return (compatibility() & c) == ctype::none; }
+	[[nodiscard]] bool none_of(ptype p) const noexcept { return (properties() & p) == ptype::None; }
+	[[nodiscard]] bool none_of(gctype gc) const noexcept { return (general_category() & gc) == gctype::None; }
 };
 
 // Retrieves the UCD record for the given codepoint
-inline record query(char32_t r)
+[[nodiscard]] inline record query(char32_t r)
 {
 	static auto const table = record::decompress_table();
 	std::size_t index = 1901;
@@ -786,83 +788,80 @@ inline record query(char32_t r)
 }
 
 // Checks if the rune matches all of the string-packed property classes
-inline bool all_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool all_of(record const& rec, property_enum penum, std::string_view str)
 {
-	bool result;
 	switch (penum) {
-		case property_enum::ctype: result = rec.all_of(lug::detail::string_unpack<ctype>(str)); break;
-		case property_enum::ptype: result = rec.all_of(lug::detail::string_unpack<ptype>(str)); break;
-		case property_enum::gctype: result = rec.all_of(lug::detail::string_unpack<gctype>(str)); break;
-		case property_enum::sctype: result = rec.script() == lug::detail::string_unpack<sctype>(str); break;
-		case property_enum::blktype: result = rec.block() == lug::detail::string_unpack<blktype>(str); break;
-		case property_enum::agetype: result = rec.age() == lug::detail::string_unpack<agetype>(str); break;
-		case property_enum::eawtype: result = rec.eawidth() == lug::detail::string_unpack<eawtype>(str); break;
-		default: result = false; break;
+		case property_enum::invalid: return false;
+		case property_enum::ctype: return rec.all_of(lug::detail::string_unpack<ctype>(str));
+		case property_enum::ptype: return rec.all_of(lug::detail::string_unpack<ptype>(str));
+		case property_enum::gctype: return rec.all_of(lug::detail::string_unpack<gctype>(str));
+		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
+		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
+		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
+		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
 	}
-	return result;
+	return false;
 }
 
 // Checks if the rune matches any of the string-packed property classes
-inline bool any_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool any_of(record const& rec, property_enum penum, std::string_view str)
 {
-	bool result;
 	switch (penum) {
-		case property_enum::ctype: result = rec.any_of(lug::detail::string_unpack<ctype>(str)); break;
-		case property_enum::ptype: result = rec.any_of(lug::detail::string_unpack<ptype>(str)); break;
-		case property_enum::gctype: result = rec.any_of(lug::detail::string_unpack<gctype>(str)); break;
-		case property_enum::sctype: result = rec.script() == lug::detail::string_unpack<sctype>(str); break;
-		case property_enum::blktype: result = rec.block() == lug::detail::string_unpack<blktype>(str); break;
-		case property_enum::agetype: result = rec.age() == lug::detail::string_unpack<agetype>(str); break;
-		case property_enum::eawtype: result = rec.eawidth() == lug::detail::string_unpack<eawtype>(str); break;
-		default: result = false; break;
+		case property_enum::invalid: return false;
+		case property_enum::ctype: return rec.any_of(lug::detail::string_unpack<ctype>(str));
+		case property_enum::ptype: return rec.any_of(lug::detail::string_unpack<ptype>(str));
+		case property_enum::gctype: return rec.any_of(lug::detail::string_unpack<gctype>(str));
+		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
+		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
+		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
+		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
 	}
-	return result;
+	return false;
 }
 
 // Checks if the rune matches none of the string-packed property classes
-inline bool none_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool none_of(record const& rec, property_enum penum, std::string_view str)
 {
-	bool result;
 	switch (penum) {
-		case property_enum::ctype: result = rec.none_of(lug::detail::string_unpack<ctype>(str)); break;
-		case property_enum::ptype: result = rec.none_of(lug::detail::string_unpack<ptype>(str)); break;
-		case property_enum::gctype: result = rec.none_of(lug::detail::string_unpack<gctype>(str)); break;
-		case property_enum::sctype: result = rec.script() != lug::detail::string_unpack<sctype>(str); break;
-		case property_enum::blktype: result = rec.block() != lug::detail::string_unpack<blktype>(str); break;
-		case property_enum::agetype: result = rec.age() != lug::detail::string_unpack<agetype>(str); break;
-		case property_enum::eawtype: result = rec.eawidth() != lug::detail::string_unpack<eawtype>(str); break;
-		default: result = false; break;
+		case property_enum::invalid: return false;
+		case property_enum::ctype: return rec.none_of(lug::detail::string_unpack<ctype>(str));
+		case property_enum::ptype: return rec.none_of(lug::detail::string_unpack<ptype>(str));
+		case property_enum::gctype: return rec.none_of(lug::detail::string_unpack<gctype>(str));
+		case property_enum::sctype: return rec.script() != lug::detail::string_unpack<sctype>(str);
+		case property_enum::blktype: return rec.block() != lug::detail::string_unpack<blktype>(str);
+		case property_enum::agetype: return rec.age() != lug::detail::string_unpack<agetype>(str);
+		case property_enum::eawtype: return rec.eawidth() != lug::detail::string_unpack<eawtype>(str);
 	}
-	return result;
+	return false;
 }
 
 // Column width (-1 = non-displayable, 0 = non-spacing, 1 = normal, 2 = wide)
-inline int cwidth(char32_t r)
+[[nodiscard]] inline int cwidth(char32_t r)
 {
 	return query(r).cwidth();
 }
 
 // Absolute column width
-inline unsigned int ucwidth(char32_t r)
+[[nodiscard]] inline unsigned int ucwidth(char32_t r)
 {
 	auto const cw = query(r).cwidth();
 	return static_cast<unsigned int>(cw >= 0 ? cw : -cw);
 }
 
 // Simple casefold conversion
-inline char32_t tocasefold(char32_t r)
+[[nodiscard]] inline char32_t tocasefold(char32_t r)
 {
 	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).casefold_mapping());
 }
 
 // Simple lowercase conversion
-inline char32_t tolower(char32_t r)
+[[nodiscard]] inline char32_t tolower(char32_t r)
 {
 	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).lowercase_mapping());
 }
 
 // Simple uppercase conversion
-inline char32_t toupper(char32_t r)
+[[nodiscard]] inline char32_t toupper(char32_t r)
 {
 	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).uppercase_mapping());
 }
@@ -893,9 +892,10 @@ inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t
 inline void push_casefolded_range(rune_set& runes, char32_t start, char32_t end)
 {
 	ptype p = query(start).properties();
-	char32_t r1 = start, r2 = start;
+	char32_t r1 = start;
+	char32_t r2 = start;
 	for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
-		ptype q = query(start).properties();
+		ptype const q = query(start).properties();
 		if (((p ^ q) & ptype::Cased) != ptype::None) {
 			detail::push_uniform_casefolded_range(runes, p, r1, r2);
 			r1 = rn;
@@ -905,27 +905,27 @@ inline void push_casefolded_range(rune_set& runes, char32_t start, char32_t end)
 	detail::push_uniform_casefolded_range(runes, p, r1, r2);
 }
 
-inline rune_set sort_and_optimize(rune_set runes)
+[[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
 {
 	rune_set optimized_runes;
 	auto out = optimized_runes.end();
 	std::sort_heap(std::begin(runes), std::end(runes));
-	for (auto curr = std::cbegin(runes), last = std::cend(runes); curr != last; ++curr) {
-		if (out == optimized_runes.end() || curr->first < out->first || out->second < curr->first)
-			out = optimized_runes.insert(optimized_runes.end(), *curr);
+	for (auto const& r : runes) {
+		if (out == optimized_runes.end() || r.first < out->first || out->second < r.first)
+			out = optimized_runes.insert(optimized_runes.end(), r);
 		else
-			out->second = out->second < curr->second ? curr->second : out->second;
+			out->second = out->second < r.second ? r.second : out->second;
 	}
 	optimized_runes.shrink_to_fit();
 	return optimized_runes;
 }
 
-inline rune_set negate(rune_set const& runes)
+[[nodiscard]] inline rune_set negate(rune_set const& runes)
 {
 	rune_set negated_runes;
 	if (!runes.empty()) {
-		if (char32_t front = runes.front().first; U'\0' < front)
-			negated_runes.push_back({U'\0', front - 1});
+		if (char32_t const front = runes.front().first; U'\0' < front)
+			negated_runes.emplace_back(U'\0', front - 1);
 		if (runes.size() > 1) {
 			auto const last = std::cend(runes);
 			auto left = std::cbegin(runes);
@@ -933,12 +933,12 @@ inline rune_set negate(rune_set const& runes)
 				auto right = std::next(left);
 				if (right == last)
 					break;
-				negated_runes.push_back({left->second + 1, right->first - 1});
+				negated_runes.emplace_back(left->second + 1, right->first - 1);
 				left = right;
 			}
 		}
-		if (char32_t back = runes.back().second; back < U'\xFFFFFFFF')
-			negated_runes.push_back({back + 1, U'\xFFFFFFFF'});
+		if (char32_t const back = runes.back().second; back < U'\xFFFFFFFF')
+			negated_runes.emplace_back(back + 1, U'\xFFFFFFFF');
 		negated_runes.shrink_to_fit();
 	}
 	return negated_runes;
@@ -946,10 +946,10 @@ inline rune_set negate(rune_set const& runes)
 
 namespace detail {
 
-inline std::string normalize_property_label(std::string_view id)
+[[nodiscard]] inline std::string normalize_property_label(std::string_view id)
 {
 	std::string normid;
-	for (char c : id)
+	for (char const c : id)
 		if (c != ' ' && c != '\t' && c != '_' && c != '-' && c != '.' && c != ';')
 			normid.push_back(static_cast<char>(std::tolower(c)));
 	return normid;
@@ -971,8 +971,8 @@ inline std::optional<ctype> stoctype(std::string_view s)
 		{ "xdigit"sv, ct::xdigit }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<ctype>{static_cast<ctype>(c->second)} : std::nullopt;
 }
 
@@ -1014,8 +1014,8 @@ inline std::optional<ptype> stoptype(std::string_view s)
 		{ "xidcontinue"sv, pt::XID_Continue }, { "xidstart"sv, pt::XID_Start }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<ptype>{static_cast<ptype>(c->second)} : std::nullopt;
 }
 
@@ -1044,8 +1044,8 @@ inline std::optional<gctype> stogctype(std::string_view s)
 		{ "zl"sv, gc::Zl }, { "zp"sv, gc::Zp }, { "zs"sv, gc::Zs }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<gctype>{static_cast<gctype>(c->second)} : std::nullopt;
 }
 
@@ -1111,8 +1111,8 @@ inline std::optional<sctype> stosctype(std::string_view s)
 		{ "zanabazarsquare"sv, sc::Zanabazar_Square }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<sctype>{static_cast<sctype>(c->second)} : std::nullopt;
 }
 
@@ -1267,8 +1267,8 @@ inline std::optional<blktype> stoblktype(std::string_view s)
 		{ "zanabazarsquare"sv, blk::Zanabazar_Square }, { "znamennymusicalnotation"sv, blk::Znamenny_Musical_Notation }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<blktype>{static_cast<blktype>(c->second)} : std::nullopt;
 }
 
@@ -1288,8 +1288,8 @@ inline std::optional<agetype> stoagetype(std::string_view s)
 		{ "90"sv, at::v9_0 }, { "unassigned"sv, at::Unassigned }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<agetype>{static_cast<agetype>(c->second)} : std::nullopt;
 }
 
@@ -1304,8 +1304,8 @@ inline std::optional<eawtype> stoeawtype(std::string_view s)
 		{ "a"sv, eaw::A }, { "f"sv, eaw::F }, { "h"sv, eaw::H }, { "n"sv, eaw::N }, { "na"sv, eaw::Na }, { "w"sv, eaw::W }
 	} };
 
-	auto l = detail::normalize_property_label(s);
-	auto c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
+	auto const l = detail::normalize_property_label(s);
+	auto const c = std::lower_bound(labels.begin(), labels.end(), l, [](auto const& x, auto const& y) { return x.first < y; });
 	return c != labels.end() && c->first == l ? std::optional<eawtype>{static_cast<eawtype>(c->second)} : std::nullopt;
 }
 
@@ -1316,7 +1316,7 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 {
 	using value_type = typename std::iterator_traits<InputIt>::value_type;
 	constexpr auto ilseqcode = (std::numeric_limits<value_type>::max)();
-	constexpr auto seqmask = static_cast<value_type>(0x03ull << (std::numeric_limits<value_type>::digits - 2));
+	constexpr auto seqmask = static_cast<value_type>(0x03ULL << (std::numeric_limits<value_type>::digits - 2));
 	while (first != last) {
 		if (auto const lead = *first++; lead == ilseqcode) {
 			auto const count = static_cast<std::size_t>(*first++);
@@ -1340,7 +1340,7 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 } // namespace detail
 
-inline std::int_least32_t record::case_mapping(std::size_t index) noexcept
+[[nodiscard]] inline std::int_least32_t record::case_mapping(std::size_t index) noexcept
 {
 	static constexpr std::array<std::int_least32_t, 188> casemappings =
 	{
@@ -1358,7 +1358,7 @@ inline std::int_least32_t record::case_mapping(std::size_t index) noexcept
 	return casemappings[index];
 }
 
-inline std::unique_ptr<record::raw_record_table> record::decompress_table()
+[[nodiscard]] inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 {
 	using detail::run_length_decode;
 	using lug::detail::make_member_accessor;
@@ -2096,7 +2096,7 @@ inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 		512, 896, 640, 2432, 3080, 3072, 7280, 7269, 7237, 7176, 7267, 7235, 7233, 7168, 0, 128
 	};
 
-	std::array<std::uint_least8_t, 1902> flyweights;
+	std::array<std::uint_least8_t, 1902> flyweights{};
 	auto table = std::make_unique<raw_record_table>();
 	auto& records = table->records;
 
@@ -2130,5 +2130,7 @@ inline std::unique_ptr<record::raw_record_table> record::decompress_table()
 }
 
 } // namespace lug::unicode
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index,hicpp-signed-bitwise)
 
 #endif
