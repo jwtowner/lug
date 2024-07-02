@@ -16,22 +16,22 @@ public:
 
 		rule Text = noskip[+(!chr('<') > any)];
 		rule Name = lexeme[bre("[A-Za-z_:]") > *bre("[A-Za-z0-9_:.-]")];
-		rule Attribute = Name > chr('=') > ((chr('\"') > *("[^\"&]"_rx | "&quot;"_sx) > chr('\"')) | (chr('\'') > *("[^'&]"_rx | "&apos;"_sx) > chr('\'')));
+		rule Attribute = Name > '=' > (('\"' > *("[^\"&]"_rx | "&quot;"_sx) > '\"') | ('\'' > *("[^'&]"_rx | "&apos;"_sx) > '\''));
 
 		rule CData;
-		rule CDataSec = str("<![CDATA[") > CData > str("]]>");
-		CData = *(!str("]]>") > !str("<![CDATA[") > any) > ~(str("<![CDATA[") > CData > str("]]>") > CData);
+		rule CDataSec = "<![CDATA[" > CData > "]]>";
+		CData = *(!str("]]>") > !str("<![CDATA[") > any) > ~("<![CDATA[" > CData > "]]>" > CData);
 
 		rule Xml;
 		rule Content = Xml | CDataSec | Text;
-		rule Comment = str("<!--") > *(!str("-->") > any) > str("-->");
-		Xml = local[chr('<') > symbol("tag")[Name] > *Attribute > (str("/>") | (chr('>') > *(Content | Comment) > str("</") > match("tag") > chr('>')))];
+		rule Comment = "<!--" > *(!str("-->") > any) > "-->";
+		Xml = local['<' > symbol("tag")[Name] > *Attribute > ("/>" | ('>' > *(Content | Comment) > "</" > match("tag") > '>'))];
 
-		rule DTD = str("<!") > *bre("[^>]") > chr('>');
-		rule SDDecl = str("standalone") > chr('=') > ("\"yes\""_sx | "'yes'"_sx | "\"no\""_sx | "'no'"_sx);
-		rule EncodingDecl = str("encoding") > chr('=') > ("\"UTF-8\""_sx | "'UTF-8'"_sx);
-		rule VersionInfo = str("version") > chr('=') > ("\"1.0\""_sx | "'1.0'"_sx);        
-		rule Prolog = str("<?xml") > VersionInfo > ~EncodingDecl > ~SDDecl > str("?>");
+		rule DTD = "<!" > *bre("[^>]") > '>';
+		rule SDDecl = str("standalone") > '=' > ("\"yes\""_sx | "'yes'"_sx | "\"no\""_sx | "'no'"_sx);
+		rule EncodingDecl = str("encoding") > '=' > ("\"UTF-8\""_sx | "'UTF-8'"_sx);
+		rule VersionInfo = str("version") > '=' > ("\"1.0\""_sx | "'1.0'"_sx);        
+		rule Prolog = "<?xml" > VersionInfo > ~EncodingDecl > ~SDDecl > "?>";
 
 		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
 		grammar_ = start(File);

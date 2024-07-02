@@ -3,12 +3,13 @@
 ## Release v0.3.0 (Under Development)
 
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
-* Allow for use of variables of all types in attribute bindings, removing the `lug::variable` template class and instead. Variable state is automatically saved and restored across rule boundaries.
-* Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
+* Added support for parsing characters and character literals where applicable without explicitly needing to wrap them with `chr()` or `_cx`.
 * Symbols now respects `caseless` mode, allowing for case-insensitive matching against symbol definitions.
+* Allow for use of variables of all types in attribute bindings and removed the `lug::variable` template class that was used previously. Variable state is automatically saved and restored across rule boundaries.
+* Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
 * Added `lug::source_options::interactive` flag that ignores `eoi` tokens for TTY input sources.
-* Rewrote the expression function objects/lambdas as expression template classes. Allows for multiple passes over the expression tree as well as top-down and bottom-up traversal, which was needed when implementing attribute state tracking. This will also allow for additional optimizations into the future.
-* Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it's executed during the semantic action evaluation phase.
+* Rewrote the expression function objects/lambdas as expression template classes. Allows for multiple passes over the expression tree as well as top-down and bottom-up traversal, which was needed when implementing attribute state tracking. This will also allow for additional optimizations to be implemented in the future.
+* Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it is executed during the semantic action evaluation phase.
 * Make all variations of callables that return a non-void value that can be type-erased by `semantic_action` and `semantic_capture_action` push their result onto the attribute result stack.
 * Attempting to bind a variable to a nonexistent value from the attribute result stack now throws an `attribute_stack_error`.
 * `implicit_space_rule` no longer causes a compiler warning with Clang, uses RAII to push/pop the thread-local white space rule for grammars.

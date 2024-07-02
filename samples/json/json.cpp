@@ -18,7 +18,7 @@ public:
 		rule Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ];
 		rule Boolean        = lexeme[ "true"_sx | "false" ];
 		rule Null           = lexeme[ "null" ];
-		rule UnicodeEscape  = lexeme[ chr('u') > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
+		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
 		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
 		rule String         = lexeme[ "\"" > *("[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ];
 		rule Array          = "[" > JSON > *("," > JSON) > "]";
