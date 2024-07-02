@@ -3,9 +3,10 @@
 ## Release v0.3.0 (Under Development)
 
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
+* Added support for parsing characters and character literals where applicable without explicitly needing to wrap them with `chr()` or `_cx`.
+* Symbols now respects `caseless` mode, allowing for case-insensitive matching against symbol definitions.
 * Allow for use of variables of all types in attribute bindings and removed the `lug::variable` template class that was used previously. Variable state is automatically saved and restored across rule boundaries.
 * Allow for capturing text to a `lug::syntax` object or any string-like object that is convertible from `std::string_view`.
-* Symbols now respects `caseless` mode, allowing for case-insensitive matching against symbol definitions.
 * Added `lug::source_options::interactive` flag that ignores `eoi` tokens for TTY input sources.
 * Rewrote the expression function objects/lambdas as expression template classes. Allows for multiple passes over the expression tree as well as top-down and bottom-up traversal, which was needed when implementing attribute state tracking. This will also allow for additional optimizations to be implemented in the future.
 * Renamed `syntactic_capture` to `semantic_capture_action` to reflect that it is executed during the semantic action evaluation phase.

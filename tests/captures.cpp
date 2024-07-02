@@ -35,8 +35,8 @@ void test_capture_email_syntax()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		return start(lexeme[capture(username)[+"[a-zA-Z0-9._%+-]"_rx] > '@'_cx >
-							capture(domain)[+"[a-zA-Z0-9-]"_rx] > '.'_cx >
+		return start(lexeme[capture(username)[+"[a-zA-Z0-9._%+-]"_rx] > '@' >
+							capture(domain)[+"[a-zA-Z0-9-]"_rx] > '.' >
 							capture(tld)["[a-zA-Z]"_rx > +"[a-zA-Z]"_rx]]);
 	}();
 
@@ -71,7 +71,7 @@ void test_capture_url_syntax()
 		using namespace lug::language;
 		return start(lexeme[capture(protocol)["http"_sx > ~'s'_cx] > "://"_sx >
 							capture(domain)[+"[a-zA-Z0-9.-]"_rx] >
-							capture(path)['/'_cx > *"[^?#]"_rx]]);
+							capture(path)['/' > *"[^?#]"_rx]]);
 	}();
 
 	std::string_view const url1 = "https://www.example.com/path/to/resource";
@@ -111,7 +111,7 @@ void test_capture_comma_delimited_list()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		return start((capture(item)[lexeme[+"[a-zA-Z0-9_-]"_rx]] <[&]{items.emplace_back(item);}) >> ','_cx);
+		return start((capture(item)[lexeme[+"[a-zA-Z0-9_-]"_rx]] <[&]{items.emplace_back(item);}) >> ',');
 	}();
 
 	std::string const list1 = "apple, banana, cherry";
@@ -165,7 +165,7 @@ void test_capture_nested_calls()
     {
         using namespace lug::language;
         rule call;
-        call = lexeme[capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx]] > ~('('_cx > call > ')'_cx) < add_to_sequence;
+        call = lexeme[capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx]] > ~('(' > call > ')') < add_to_sequence;
         return start(call > eoi);
     }();
 
@@ -208,7 +208,7 @@ void test_capture_arithmetic_expressions()
         using namespace lug::language;
         rule expression;
         rule number = capture(add_number)[lexeme[+"[0-9]"_rx]];
-        rule operation = capture(add_operation)['+'_cx | '-'_cx | '*'_cx | '/'_cx];
+        rule operation = capture(add_operation)['+'_cx | '-' | '*' | '/'];
         expression = number >> operation;
         return start(expression > eoi);
     }();

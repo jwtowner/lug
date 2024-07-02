@@ -18,7 +18,7 @@ void test_addition_with_attributes()
 	{
 		using namespace lug::language;
 		rule Number = lexeme[+"[0-9]"_rx] < [](std::string const& text) -> int { return std::stoi(text); };
-		rule Addition = (lhs % Number) > chr('+') > (rhs % Number) < [&]{ result = lhs + rhs; };
+		rule Addition = (lhs % Number) > '+' > (rhs % Number) < [&]{ result = lhs + rhs; };
 		return start(Addition > eoi);
 	}();
 
@@ -47,11 +47,11 @@ void test_nested_arithmetic_with_attributes()
 		using namespace lug::language;
 		rule Expression;
 		auto Number = lexeme[+"[0-9]"_rx] <[](std::string const& text) -> int { return std::stoi(text); };
-		auto Factor = (Number | '('_cx > Expression > ')'_cx);
-		rule Term = (lhs%Factor) > *(('*'_cx > (rhs%Factor) <[&]{ lhs *= rhs; })
-								 | ('/'_cx > (rhs%Factor) <[&]{ lhs /= rhs; }))     <[&]{ return lhs; };
-		Expression = (lhs%Term) > *(('+'_cx > (rhs%Term) <[&]{ lhs += rhs; })
-								| ('-'_cx > (rhs%Term) <[&]{ lhs -= rhs; }))        <[&]{ return lhs; };
+		auto Factor = (Number | '(' > Expression > ')');
+		rule Term = (lhs%Factor) > *(('*' > (rhs%Factor) <[&]{ lhs *= rhs; })
+								 | ('/' > (rhs%Factor) <[&]{ lhs /= rhs; }))     <[&]{ return lhs; };
+		Expression = (lhs%Term) > *(('+' > (rhs%Term) <[&]{ lhs += rhs; })
+								| ('-' > (rhs%Term) <[&]{ lhs -= rhs; }))        <[&]{ return lhs; };
 		return start(result%Expression > eoi);
 	}();
 
