@@ -17,7 +17,7 @@ Features
 - Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard.
 - Automatic tracking of line and column numbers, with customizable tab width and alignment.
 - Header-only library utilizing C++17 language and library features.
-- Relatively small codebase, with the goal of keeping the parser core under 2000 lines of terse code.
+- Relatively small with the goal of keeping total line count across all header files under 5000 lines of terse code.
 
 It is based on research introduced in the following papers:
 

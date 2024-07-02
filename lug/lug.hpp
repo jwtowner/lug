@@ -53,13 +53,14 @@ template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<st
 
 enum class opcode : unsigned char
 {
-	match,          match_casefold, match_any,      match_any_of,   match_all_of,
+	match,          match_cf,       match_any,      match_any_of,   match_all_of,
 	match_none_of,  match_set,      match_eol,      choice,         commit,
 	commit_back,    commit_partial, jump,           call,           ret,
 	fail,           accept,         accept_final,   action,         predicate,
 	capture_start,  capture_end,    condition_test, condition_push, condition_pop,
-	symbol_start,   symbol_end,     symbol_exists,  symbol_all,     symbol_any,
-	symbol_head,    symbol_tail,    symbol_push,    symbol_pop
+	symbol_exists,  symbol_all,     symbol_all_cf,  symbol_any,     symbol_any_cf,
+	symbol_head,    symbol_head_cf, symbol_tail,    symbol_tail_cf, symbol_start,
+	symbol_end,     symbol_push,    symbol_pop
 };
 
 enum class immediate : unsigned short {};
@@ -482,7 +483,7 @@ public:
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
 		if ((mode() & directives::caseless) != directives::none)
-			return do_match(opcode::match_casefold, utf8::tocasefold(subject));
+			return do_match(opcode::match_cf, utf8::tocasefold(subject));
 		else
 			return do_match(opcode::match, subject);
 	}
@@ -868,20 +869,20 @@ struct symbol_exists_combinator
 	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name}; }
 };
 
-template <opcode Op>
+template <opcode Op, opcode OpCf>
 struct symbol_match_combinator
 {
 	struct symbol_match_expression : terminal_encoder_expression_interface
 	{
 		std::string_view name;
 		constexpr symbol_match_expression(std::string_view n) noexcept : name{n} {}
-		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(Op, name); return m; }
+		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name); return m; }
 	};
 
 	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{name}; }
 };
 
-template <opcode Op>
+template <opcode Op, opcode OpCf>
 struct symbol_match_offset_combinator
 {
 	struct symbol_match_offset_expression : terminal_encoder_expression_interface
@@ -889,7 +890,7 @@ struct symbol_match_offset_combinator
 		std::string_view name;
 		std::size_t offset;
 		constexpr symbol_match_offset_expression(std::string_view n, std::size_t o) noexcept : name{n}, offset{o} {}
-		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(Op, name, immediate{static_cast<unsigned short>(offset)}); return m; }
+		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name, immediate{static_cast<unsigned short>(offset)}); return m; }
 	};
 
 	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
@@ -1117,9 +1118,11 @@ inline constexpr ctype_expression<ctype::graph> graph{}; inline constexpr ctype_
 inline constexpr condition_test_combinator<true> when{}; inline constexpr condition_test_combinator<false> unless{};
 inline constexpr condition_block_combinator<true> on{}; inline constexpr condition_block_combinator<false> off{};
 inline constexpr symbol_exists_combinator<true> exists{}; inline constexpr symbol_exists_combinator<false> missing{};
-inline constexpr symbol_match_offset_combinator<opcode::symbol_head> match_front{}; inline constexpr symbol_match_offset_combinator<opcode::symbol_tail> match_back{};
-inline constexpr symbol_match_combinator<opcode::symbol_all> match_all{}; inline constexpr symbol_match_combinator<opcode::symbol_any> match_any{};
-inline constexpr symbol_match_combinator<opcode::symbol_tail> match{};
+inline constexpr symbol_match_offset_combinator<opcode::symbol_head, opcode::symbol_head_cf> match_front{};
+inline constexpr symbol_match_offset_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match_back{};
+inline constexpr symbol_match_combinator<opcode::symbol_all, opcode::symbol_all_cf> match_all{};
+inline constexpr symbol_match_combinator<opcode::symbol_any, opcode::symbol_any_cf> match_any{};
+inline constexpr symbol_match_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match{};
 
 inline constexpr struct
 {
@@ -1142,6 +1145,8 @@ inline constexpr struct
 	[[nodiscard]] constexpr string_expression operator()(char const* s, std::size_t n) const noexcept { return string_expression{std::string_view{s, n}}; }
 }
 str{};
+
+inline namespace operators {
 
 [[nodiscard]] constexpr auto operator ""_cx(char c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
@@ -1190,6 +1195,8 @@ template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 	else
 		static_assert(detail::always_false_v<A>, "invalid action type");
 }
+
+} // namespace operators
 
 inline constexpr struct
 {
@@ -1296,29 +1303,31 @@ inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar
 	return grammar{std::move(grprogram)};
 }
 
+enum class source_options : unsigned int { none = 0, interactive = 0x01, is_bitfield_enum };
+
 namespace detail {
 
 template <typename T, typename = void> struct input_source_enqueue_drains : std::false_type {};
 template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::enqueue_drains::value>> : std::true_type {};
-template <typename T, typename = void> struct input_source_has_interactive : std::false_type {};
-template <typename T> struct input_source_has_interactive<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T const&>().interactive())>>> : std::true_type {};
+template <typename T, typename = void> struct input_source_has_options : std::false_type {};
+template <typename T> struct input_source_has_options<T, std::enable_if_t<std::is_same_v<source_options, decltype(std::declval<T const&>().options())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
 template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T>().fill_buffer())>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
-template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>(), std::declval<bool>()))>> : std::true_type {};
+template <typename T, class InputFunc> struct input_source_has_push_source<T, InputFunc, std::void_t<decltype(std::declval<T>().push_source(std::declval<InputFunc>(), std::declval<source_options>()))>> : std::true_type {};
 
 } // namespace detail
 
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::string&)>, bool>> sources_;
+	std::vector<std::pair<std::function<bool(std::string&)>, source_options>> sources_;
 	bool reading_{false};
 
 public:
-	[[nodiscard]] bool interactive() const noexcept { return !sources_.empty() && sources_.back().second; }
+	[[nodiscard]] source_options options() const noexcept { return !sources_.empty() ? sources_.back().second : source_options::none; }
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
@@ -1345,11 +1354,11 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
-	void push_source(InputFunc&& func, bool interactive = false)
+	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
 			throw reenterant_read_error{};
-		sources_.emplace_back(std::forward<InputFunc>(func), interactive);
+		sources_.emplace_back(std::forward<InputFunc>(func), opt);
 	}
 };
 
@@ -1423,18 +1432,23 @@ class basic_parser
 		}
 	}
 
-	[[nodiscard]] int casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
+	[[nodiscard]] bool compare(std::size_t sr, std::size_t sn, std::string_view str)
+	{
+		return input_source_.buffer().compare(sr, sn, str) == 0;
+	}
+
+	[[nodiscard]] bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
 	{
 		auto& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
 			subject = utf8::tocasefold(input_source_.buffer().substr(sr, sn));
-		return subject.compare(0, sn, str);
+		return subject.compare(0, sn, str) == 0;
 	}
 
 	template <class Compare>
 	[[nodiscard]] bool match_sequence(std::size_t& sr, std::string_view str, Compare&& comp)
 	{
-		if (auto sn = str.size(); !sn || (available(sr, sn) && comp(sr, sn, str))) {
+		if (auto sn = str.size(); !sn || (available(sr, sn) && comp(*this, sr, sn, str))) {
 			sr += sn;
 			return true;
 		}
@@ -1464,6 +1478,38 @@ class basic_parser
 		if (matched)
 			sr += static_cast<std::size_t>(std::distance(curr, next));
 		return matched;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] bool match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_.get_symbols(symbol_name);
+		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(tsr, mod(symbol), comp); })) {
+			sr = tsr;
+			return true;
+		}
+		return false;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] bool match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_.get_symbols(symbol_name);
+		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(sr, mod(symbol), comp); });
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] bool match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_.get_symbols(symbol_name);
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : false;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] bool match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_.get_symbols(symbol_name);
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : false;
 	}
 
 	template <opcode Opcode>
@@ -1581,9 +1627,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	basic_parser& push_source(InputFunc&& func, bool interactive = false)
+	basic_parser& push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
-		input_source_.push_source(std::forward<InputFunc>(func), interactive);
+		input_source_.push_source(std::forward<InputFunc>(func), opt);
 		return *this;
 	}
 
@@ -1594,9 +1640,9 @@ public:
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
-	bool parse(InputFunc&& func, bool interactive = false)
+	bool parse(InputFunc&& func, source_options opt = source_options::none)
 	{
-		return push_source(std::forward<InputFunc>(func), interactive).parse();
+		return push_source(std::forward<InputFunc>(func), opt).parse();
 	}
 
 	bool parse()
@@ -1612,16 +1658,16 @@ public:
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
 			switch (op) {
 				case opcode::match: {
-					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
+					if (!match_sequence(sr, str, std::mem_fn(&basic_parser::compare)))
 						goto failure;
 				} break;
-				case opcode::match_casefold: {
-					if (!match_sequence(sr, str, [this](auto i, auto n, auto s) { return casefold_compare(i, n, s) == 0; }))
+				case opcode::match_cf: {
+					if (!match_sequence(sr, str, std::mem_fn(&basic_parser::casefold_compare)))
 						goto failure;
 				} break;
 				case opcode::match_any: {
-					if constexpr (detail::input_source_has_interactive<InputSource>::value) {
-						if (((imm & 0x8000) != 0) && input_source_.interactive())
+					if constexpr (detail::input_source_has_options<InputSource>::value) {
+						if (((imm & 0x8000) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
 							goto failure;
 					}
 					if (!match_single(sr, []{ return true; }))
@@ -1806,6 +1852,42 @@ public:
 					environment_.set_condition(cond_name, cond_value);
 					pop_stack_frame(condition_stack_);
 				} break;
+				case opcode::symbol_exists: {
+					if (environment_.has_symbol(str) != (imm != 0))
+						goto failure;
+				} break;
+				case opcode::symbol_all: {
+					if (!match_symbol_all(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_all_cf: {
+					if (!match_symbol_all(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_any: {
+					if (!match_symbol_any(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_any_cf: {
+					if (!match_symbol_any(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_head: {
+					if (!match_symbol_head(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_head_cf: {
+					if (!match_symbol_head(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_tail: {
+					if (!match_symbol_tail(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare)))
+						goto failure;
+				} break;
+				case opcode::symbol_tail_cf: {
+					if (!match_symbol_tail(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
+						goto failure;
+				} break;
 				case opcode::symbol_start: {
 					stack_frames_.push_back(stack_frame_type::symbol_definition);
 					symbol_definition_stack_.emplace_back(str, static_cast<subject_location>(sr));
@@ -1819,48 +1901,6 @@ public:
 					if (sr0 > sr1)
 						goto failure;
 					environment_.add_symbol(symbol_name, std::string{match().substr(sr0, sr1 - sr0)});
-				} break;
-				case opcode::symbol_exists: {
-					if (environment_.has_symbol(str) != (imm != 0))
-						goto failure;
-				} break;
-				case opcode::symbol_all: {
-					auto const& symbols = environment_.get_symbols(str);
-					if (symbols.empty())
-						goto failure;
-					std::size_t tsr = sr;
-					for (const auto& symbol : symbols)
-						if (!match_sequence(tsr, symbol, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
-							goto failure;
-					sr = tsr;
-				} break;
-				case opcode::symbol_any: {
-					auto const& symbols = environment_.get_symbols(str);
-					if (symbols.empty())
-						goto failure;
-					bool matched = false;
-					for (const auto& symbol : symbols) {
-						if (match_sequence(sr, symbol, [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; })) {
-							matched = true;
-							break;
-						}
-					}
-					if (!matched)
-						goto failure;
-				} break;
-				case opcode::symbol_head: {
-					auto const& symbols = environment_.get_symbols(str);
-					if (imm >= symbols.size())
-						goto failure;
-					if (!match_sequence(sr, symbols[imm], [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
-						goto failure;
-				} break;
-				case opcode::symbol_tail: {
-					auto const& symbols = environment_.get_symbols(str);
-					if (imm >= symbols.size())
-						goto failure;
-					if (!match_sequence(sr, symbols[symbols.size() - imm - 1], [this](auto i, auto n, auto s) { return input_source_.buffer().compare(i, n, s) == 0; }))
-						goto failure;
 				} break;
 				case opcode::symbol_push: {
 					stack_frames_.push_back(stack_frame_type::symbol_table);
@@ -1899,7 +1939,7 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 	return parse(first, last, grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr, bool interactive = false)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
 {
 	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
 		if (std::getline(input, line)) {
@@ -1907,13 +1947,13 @@ inline bool parse(std::istream& input, grammar const& grmr, environment& envr, b
 			return true;
 		}
 		return false;
-	}, interactive).parse();
+	}, opt).parse();
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, bool interactive = false)
+inline bool parse(std::istream& input, grammar const& grmr, source_options opt = source_options::none)
 {
 	environment envr;
-	return parse(input, grmr, envr, interactive);
+	return parse(input, grmr, envr, opt);
 }
 
 inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
@@ -1928,12 +1968,12 @@ inline bool parse(std::string_view sv, grammar const& grmr)
 
 inline bool parse(grammar const& grmr, environment& envr)
 {
-	return parse(std::cin, grmr, envr, is_stdin_tty());
+	return parse(std::cin, grmr, envr, stdin_isatty() ? source_options::interactive : source_options::none);
 }
 
 inline bool parse(grammar const& grmr)
 {
-	return parse(std::cin, grmr, is_stdin_tty());
+	return parse(std::cin, grmr, stdin_isatty() ? source_options::interactive : source_options::none);
 }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE

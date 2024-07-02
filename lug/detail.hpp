@@ -17,11 +17,15 @@
 
 #ifndef LUG_NO_ISATTY
 #ifdef _MSC_VER
+#ifndef LUG_HAS_ISATTY_MSVC
 #define LUG_HAS_ISATTY_MSVC
+#endif
 #else
+#ifndef LUG_HAS_ISATTY_POSIX
 #ifdef __has_include
 #if __has_include(<unistd.h>)
 #define LUG_HAS_ISATTY_POSIX
+#endif
 #endif
 #endif
 #endif
@@ -67,7 +71,7 @@ _Pragma("GCC diagnostic pop")
 
 namespace lug {
 
-[[nodiscard]] inline bool is_stdin_tty() noexcept
+[[nodiscard]] inline bool stdin_isatty() noexcept
 {
 #if defined LUG_HAS_ISATTY_MSVC
 	return _isatty(_fileno(stdin)) != 0;
