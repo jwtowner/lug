@@ -162,7 +162,7 @@ template <class It, class T = void>
 using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
 
 template <class... Args>
-constexpr void ignore(Args&&...) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward,hicpp-named-parameter,readability-named-parameter)
+constexpr void ignore([[maybe_unused]] Args&&... args) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward)
 
 struct identity
 {

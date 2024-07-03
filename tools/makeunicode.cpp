@@ -1149,9 +1149,9 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #include <utility>
 #include <vector>
 
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index,hicpp-signed-bitwise)
-
 namespace lug::unicode {
+
+// NOLINTBEGIN(hicpp-signed-bitwise)
 )c++"
 << "\n"
 << enum_printer(enum_type::bitfield, "ctype", "std::uint_least16_t", "POSIX compatibility properties", [](std::ostream& out) {
@@ -1191,7 +1191,7 @@ namespace lug::unicode {
 		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << ",\n";
 	}
 })
-<< "\n"
+<< "\n// NOLINTEND(hicpp-signed-bitwise)\n\n"
 << enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Scripts", [](std::ostream& out) {
 	auto const pad = align_padding(max_element_size(script_names.cbegin(), script_names.cend()));
 	for (std::size_t i = 0, n = script_names.size(); i < n; ++i)
@@ -1273,10 +1273,10 @@ public:
 	[[nodiscard]] ptype properties() const noexcept { return static_cast<ptype>(raw_->pflags); }
 	[[nodiscard]] gctype general_category() const noexcept { return static_cast<gctype>(UINT32_C(1) << raw_->gcindex); }
 	[[nodiscard]] sctype script() const noexcept { return static_cast<sctype>(raw_->scindex); }
-	[[nodiscard]] blktype block() const noexcept { return static_cast<blktype>(raw_->abfields & 0x3ff); }
-	[[nodiscard]] agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10); }
-	[[nodiscard]] eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0f); }
-	[[nodiscard]] int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4) - 1; }
+	[[nodiscard]] blktype block() const noexcept { return static_cast<blktype>(raw_->abfields & 0x03ffU); }
+	[[nodiscard]] agetype age() const noexcept { return static_cast<agetype>(raw_->abfields >> 10U); }
+	[[nodiscard]] eawtype eawidth() const noexcept { return static_cast<eawtype>(raw_->wfields & 0x0fU); }
+	[[nodiscard]] int cwidth() const noexcept { return static_cast<int>(raw_->wfields >> 4U) - 1; }
 	[[nodiscard]] std::int_least32_t casefold_mapping() const noexcept { return case_mapping(raw_->cfindex); }
 	[[nodiscard]] std::int_least32_t lowercase_mapping() const noexcept { return case_mapping(raw_->clindex); }
 	[[nodiscard]] std::int_least32_t uppercase_mapping() const noexcept { return case_mapping(raw_->cuindex); }
@@ -1297,8 +1297,8 @@ public:
 	static auto const table = record::decompress_table();
 	std::size_t index = )c++" << std::dec << invalidrecordindex << R"c++(;
 	if (r < 0x)c++" << std::hex << ptable.size() << R"c++() {
-		index = table->stage1[r >> )c++" << std::dec << block_shift << R"c++(];
-		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++() | (r & 0x)c++" << std::hex << block_mask << R"c++()];
+		index = table->stage1[r >> )c++" << std::dec << block_shift << R"c++(U];
+		index = table->stage2[(index << )c++" << std::dec << block_shift << R"c++(U) | (r & 0x)c++" << std::hex << block_mask << R"c++(U)];
 	}
 	return record{&table->records[index]};
 }
@@ -1538,7 +1538,7 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 {
 	using value_type = typename std::iterator_traits<InputIt>::value_type;
 	constexpr auto ilseqcode = (std::numeric_limits<value_type>::max)();
-	constexpr auto seqmask = static_cast<value_type>(0x03ULL << (std::numeric_limits<value_type>::digits - 2));
+	constexpr auto seqmask = static_cast<value_type>(0x03ULL << static_cast<unsigned int>(std::numeric_limits<value_type>::digits - 2));
 	while (first != last) {
 		if (auto const lead = *first++; lead == ilseqcode) {
 			auto const count = static_cast<std::size_t>(*first++);
@@ -1546,14 +1546,14 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 			auto const tail = *first++;
 			for (std::size_t i = 0; i < count; ++i) {
 				if ((head & seqmask) == seqmask) {
-					dest = std::fill_n(dest, static_cast<std::size_t>(head & ~seqmask) + 1, tail);
+					dest = std::fill_n(dest, static_cast<std::size_t>(head & ~static_cast<std::size_t>(seqmask)) + 1, tail);
 				} else {
 					*dest++ = head;
 					*dest++ = tail;
 				}
 			}
 		} else if ((lead & seqmask) == seqmask) {
-			dest = std::fill_n(dest, static_cast<std::size_t>(lead & ~seqmask) + 1, *first++);
+			dest = std::fill_n(dest, static_cast<std::size_t>(lead & ~static_cast<std::size_t>(seqmask)) + 1, *first++);
 		} else {
 			*dest++ = lead;
 		}
@@ -1616,8 +1616,6 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 }
 
 } // namespace lug::unicode
-
-// NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index,hicpp-signed-bitwise)
 
 #endif
 )c++";
