@@ -1,5 +1,5 @@
 # Unicode Character Database files
-tools/ucd/*.txt
+tools/ucd/
 
 # User-specific files
 *.suo
