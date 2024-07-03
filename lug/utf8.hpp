@@ -68,11 +68,11 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 [[nodiscard]] constexpr unsigned int non_ascii_rune_length(char32_t rune) noexcept
 {
-	if (rune >= 0x00010000U)
-		return 4;
-	if (rune >= 0x00000800U)
+	if (rune < 0x00000800U)
+		return 2;
+	if (rune < 0x00010000U)
 		return 3;
-	return 2;
+	return 4;
 }
 
 } // namespace detail
