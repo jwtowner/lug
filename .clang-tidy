@@ -9,6 +9,9 @@ Checks:
   - concurrency-*
   - cppcoreguidelines-*
   - -cppcoreguidelines-avoid-magic-numbers
+  - -cppcoreguidelines-avoid-do-while
+  - -cppcoreguidelines-avoid-goto
+  - -cppcoreguidelines-pro-bounds-*
   - darwin-*
   - hicpp-*
   - -hicpp-braces-around-statements
@@ -23,6 +26,7 @@ Checks:
   - -readability-braces-around-statements
   - -readability-identifier-length
   - -readability-magic-numbers
+  - -readability-qualified-auto
 WarningsAsErrors: ''
 HeaderFileExtensions:
   - ''
