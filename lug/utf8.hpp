@@ -16,8 +16,7 @@ namespace lug::utf8 {
 
 namespace detail {
 
-inline constexpr unsigned int decode_accept = 0;
-inline constexpr unsigned int decode_reject = 12;
+enum class decode_state : unsigned char { accept = 0, reject = 12 };
 
 inline constexpr std::array<unsigned char, 256> dfa_class_table
 {
@@ -50,30 +49,48 @@ inline constexpr std::array<unsigned char, 108> dfa_transition_table
 	12,36,12,12,12,12,12,12,12,12,12,12
 };
 
+inline constexpr std::array<char, 3> utf8_replacement_sequence
+{
+	static_cast<char>(0xefU),
+	static_cast<char>(0xbfU),
+	static_cast<char>(0xbdU)
+};
+
+inline constexpr char32_t utf32_replacement = U'\U0000fffd';
+
+[[nodiscard]] constexpr decode_state decode_rune_octet(char32_t& rune, char octet, decode_state state) noexcept
+{
+	auto const symbol = static_cast<unsigned int>(static_cast<unsigned char>(octet));
+	auto const dfa_class = static_cast<unsigned int>(dfa_class_table[symbol]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+	rune = (state == decode_state::accept) ? (symbol & (0xffU >> dfa_class)) : ((symbol & 0x3fU) | (rune << 6U));
+	return static_cast<decode_state>(dfa_transition_table[static_cast<std::size_t>(state) + dfa_class]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+}
+
+[[nodiscard]] constexpr unsigned int non_ascii_rune_length(char32_t rune) noexcept
+{
+	if (rune < 0x00000800U)
+		return 2;
+	if (rune < 0x00010000U)
+		return 3;
+	return 4;
+}
+
 } // namespace detail
 
 [[nodiscard]] constexpr bool is_lead(char octet) noexcept
 {
-	return (static_cast<unsigned char>(octet) & 0xc0) != 0x80;
-}
-
-[[nodiscard]] constexpr unsigned int decode_rune_octet(char32_t& rune, char octet, unsigned int state)
-{
-	unsigned int const symbol = static_cast<unsigned int>(static_cast<unsigned char>(octet));
-	unsigned int const dfa_class = static_cast<unsigned int>(detail::dfa_class_table[symbol]);
-	rune = state == detail::decode_accept ? (symbol & (0xffU >> dfa_class)) : ((symbol & 0x3fU) | (rune << 6));
-	return detail::dfa_transition_table[state + dfa_class];
+	return (static_cast<unsigned char>(octet) & 0xc0U) != 0x80U;
 }
 
 template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
 {
 	char32_t rune = U'\0';
-	unsigned int state = detail::decode_accept;
-	while (first != last && state != detail::decode_reject)
-		if (state = lug::utf8::decode_rune_octet(rune, *first++, state); state == detail::decode_accept)
+	detail::decode_state state = detail::decode_state::accept;
+	while ((first != last) && (state != detail::decode_state::reject))
+		if (state = utf8::detail::decode_rune_octet(rune, *first++, state); state == detail::decode_state::accept)
 			return std::make_pair(first, rune);
-	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), U'\U0000fffd');
+	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), detail::utf32_replacement);
 }
 
 template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
@@ -97,11 +114,11 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	if (rune < 0x80) {
 		*dst++ = static_cast<char>(rune);
 	} else {
-		if (0x00110000U <= rune || (rune & 0xfffff800U) == 0x0000d800U)
-			return {std::copy_n(reinterpret_cast<char const*>(u8"\U0000fffd"), 3, dst), false};
-		unsigned int const n = rune >= 0x00010000U ? 4 : rune >= 0x00000800U ? 3 : 2;
-		for (unsigned int i = 0, c = (0xf0 << (4 - n)) & 0xf0; i < n; ++i, c = 0x80)
-			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3f) | c);
+		if ((0x00110000U <= rune) || ((rune & 0xfffff800U) == 0x0000d800U))
+			return {std::copy(detail::utf8_replacement_sequence.begin(), detail::utf8_replacement_sequence.end(), dst), false};
+		unsigned int const n = detail::non_ascii_rune_length(rune);
+		for (unsigned int i = 0, c = ((0xf0U << (4 - n)) & 0xf0U); i < n; ++i, c = 0x80U)
+			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3fU) | c);
 	}
 	return {dst, true};
 }
@@ -116,7 +133,7 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 inline constexpr struct
 {
 	template <class InputIt, class OutputIt>
-	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -126,7 +143,7 @@ inline constexpr struct
 		return dst;
 	}
 
-	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	[[nodiscard]] std::string operator()(std::string_view src) const
 	{
 		std::string result;
 		result.reserve(src.size());
@@ -139,7 +156,7 @@ tocasefold{};
 inline constexpr struct
 {
 	template <class InputIt, class OutputIt>
-	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -149,7 +166,7 @@ inline constexpr struct
 		return dst;
 	}
 
-	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	[[nodiscard]] std::string operator()(std::string_view src) const
 	{
 		std::string result;
 		result.reserve(src.size());
@@ -162,7 +179,7 @@ tolower{};
 inline constexpr struct
 {
 	template <class InputIt, class OutputIt>
-	inline OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -172,7 +189,7 @@ inline constexpr struct
 		return dst;
 	}
 
-	[[nodiscard]] inline std::string operator()(std::string_view src) const
+	[[nodiscard]] std::string operator()(std::string_view src) const
 	{
 		std::string result;
 		result.reserve(src.size());

@@ -37,12 +37,12 @@ public:
 
 		rule NL     = lexeme["\n"_sx | "\r\n" | "\r"];
 		rule Delim  = lexeme[","_sx | ";"];
-		rule LineNo = lexeme[capture(stx_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{stx_}); };
-		rule Real   = lexeme[capture(stx_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
-		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]       <[this]{ return std::stod(std::string{stx_}); };
-		rule String = lexeme["\"" > capture(stx_)[*"[^\"]"_rx] > "\""]   <[this]{ return stx_.capture(); };
-		rule Var    = lexeme[capture(stx_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(stx_); };
-		rule Fn     = lexeme["FN"_isx > capture(stx_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(stx_); };
+		rule LineNo = lexeme[capture(tok_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{tok_}); };
+		rule Real   = lexeme[capture(tok_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
+		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]       <[this]{ return std::stod(std::string{tok_}); };
+		rule String = lexeme["\"" > capture(tok_)[*"[^\"]"_rx] > "\""]   <[this]{ return tok_.str(); };
+		rule Var    = lexeme[capture(tok_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(tok_); };
+		rule Fn     = lexeme["FN"_isx > capture(tok_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(tok_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 		            | ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -110,7 +110,7 @@ public:
 		            | "GOTO"_isx > no_%LineNo                   <[this]{ goto_line(no_); }
 		            | "DEF"_isx > fn_%Fn
 		                > "(" > id_%Var > ")"
-		                > "=" > capture(stx_)[*(!NL > any)]     <[this]{ fn_param_body_[fn_] = { id_, std::string{stx_} }; }
+		                > "=" > capture(tok_)[*(!NL > any)]     <[this]{ fn_param_body_[fn_] = { id_, std::string{tok_} }; }
 		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ *ref_ = r1_; }
 		            | "DIM"_isx > DimEl > *(Delim > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
@@ -137,7 +137,7 @@ public:
 		rule Line   = Stmnt > ~Rem > NL
 		            | Cmnd > ~Rem > NL
 		            | no_%LineNo
-		                > capture(stx_)[*(!NL > any) > NL]      <[this]{ update_line(no_, stx_); }
+		                > capture(tok_)[*(!NL > any) > NL]      <[this]{ update_line(no_, tok_); }
 		            | Rem > NL
 		            | NL
 		            | ( *(!NL > any) > NL )                     <[this]{ print_error("ILLEGAL FORMULA"); };
@@ -423,7 +423,7 @@ private:
 	lug::environment environment_;
 	std::string fn_;
 	std::string id_;
-	lug::syntax stx_;
+	lug::syntax tok_;
 	std::string_view txt_;
 	double r1_{0.0};
 	double r2_{0.0};

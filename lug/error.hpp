@@ -18,7 +18,7 @@ class reenterant_read_error : public lug_error { public: reenterant_read_error()
 class parse_context_error : public lug_error { public: parse_context_error() : lug_error{"operation valid only inside calling context of parser::parse" } {} };
 class accept_context_error : public lug_error{ public: accept_context_error() : lug_error{"operation valid only inside calling context of parser::accept"} {} };
 class attribute_stack_error : public lug_error{ public: attribute_stack_error() : lug_error{"incompatible or invalid stack frame"} {} };
-class bad_string_expression : public lug_error { public: bad_string_expression(const std::string& s = "invalid string or bracket expression") : lug_error{s} {} };
+class bad_string_expression : public lug_error { public: explicit bad_string_expression(std::string const& s = "invalid string or bracket expression") : lug_error{s} {} };
 class bad_character_class : public bad_string_expression { public: bad_character_class() : bad_string_expression{"invalid character class"} {} };
 class bad_character_range : public bad_string_expression { public: bad_character_range() : bad_string_expression{"character range is reversed"} {} };
 class bad_grammar : public lug_error { public: bad_grammar() : lug_error{"invalid or empty grammar"} {} };

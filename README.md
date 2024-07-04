@@ -8,15 +8,14 @@ A C++ embedded domain specific language for expressing parsers as extended [pars
 
 Features
 ---
-- Natural syntax resembling external parser generator languages.
+- Natural syntax resembling external parser generator languages, with support for attributes and semantic actions.
+- Ability to handle context-sensitive grammars with symbol tables, conditions and syntactic predicates.
 - Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine.
 - Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping.
 - Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion.
-- Extended PEG syntax to include attribute grammars and semantic actions.
-- Ability to handle context-sensitive grammars with symbol tables, conditions, and syntactic predicates.
 - Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard.
 - Automatic tracking of line and column numbers, with customizable tab width and alignment.
-- Header-only library utilizing C++17 language and library features.
+- Header-only library utilizing C++17 language and library features. Forward compatible with C++20 and C++23.
 - Relatively small with the goal of keeping total line count across all header files under 5000 lines of terse code.
 
 It is based on research introduced in the following papers:
@@ -69,7 +68,7 @@ Syntax Reference
 | One-or-More | `+e` | Repetition matching of expression *e* one or more times. |
 | Optional | `~e` | Matches expression *e* zero or one times. |
 | Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input. |
-| Negative Lookahead | `~e` | Matches without consuming input if expression *e* fails to match the input. |
+| Negative Lookahead | `!e` | Matches without consuming input if expression *e* fails to match the input. |
 | Cut Before | `--e` | Issues a cut instruction before the expression *e*. |
 | Cut After | `e--` | Issues a cut instruction after the expression *e*. |
 | Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input. |

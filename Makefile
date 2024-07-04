@@ -2,7 +2,7 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.3.0-pre
+VERSION = 0.3.0
 
 # paths
 PREFIX = /usr/local
@@ -10,7 +10,7 @@ PREFIX = /usr/local
 # toolchain
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses \
-			-Os -ffunction-sections -fdata-sections -I. $$(if [ "$(CI_BUILD)" = "1" ]; then echo "-Werror"; fi)
+			-Os -ffunction-sections -fdata-sections -I.
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 
@@ -32,8 +32,8 @@ TOOLS = makeunicode
 TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
-# dependencies
-DEPS = lug/lug.hpp lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp
+# header dependencies
+HEADERS = lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp lug/lug.hpp
 
 # distribution files
 DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ lug/ samples/ tests/ tools/
@@ -42,9 +42,9 @@ all: options samples tests
 
 .cpp.o:
 	@echo CXX $<
-	@$(CXX) -c $(CXXFLAGS) -o $@ $<
+	@$(CXX) -c $(CXXFLAGS) $$(if [ "$(CI_BUILD)" = "1" ]; then echo "-Werror"; fi) -o $@ $<
 
-$(SAMPLES_OBJ): $(DEPS)
+$(SAMPLES_OBJ): $(HEADERS)
 
 $(SAMPLES_BIN): $(SAMPLES_OBJ)
 	@echo LD $@
@@ -52,7 +52,7 @@ $(SAMPLES_BIN): $(SAMPLES_OBJ)
 
 samples: $(SAMPLES_BIN)
 
-$(TESTS_OBJ): $(DEPS)
+$(TESTS_OBJ): $(HEADERS)
 
 $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
@@ -64,9 +64,9 @@ check: tests
 	@sh runtests.sh "tests" $(TESTS_BIN)
 
 lint:
-	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) lug/detail.hpp
+	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
 
-$(TOOLS_OBJ): $(DEPS)
+$(TOOLS_OBJ): $(HEADERS)
 
 $(TOOLS_BIN): $(TOOLS_OBJ)
 	@echo LD $@
