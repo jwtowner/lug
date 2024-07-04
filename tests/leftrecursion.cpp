@@ -34,7 +34,7 @@ void test_indirect_left_recursion()
 	Q = R > chr('a');
 	R = Q | chr('a');
 	S = R > !chr('a');
-	grammar G = start(S);
+	grammar const G = start(S);
 	assert(lug::parse("a", G));
 	assert(lug::parse("aa", G));
 	assert(lug::parse("aab", G));
@@ -55,9 +55,9 @@ void test_association_and_precedence()
 	N = chr('1') | chr('2') | chr('3');
 	E = E[1] > chr('+') > E[2] <[&out]{ out += '+'; }
 	  | E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
-	  | N <[&out](syntax x){ out += x.capture(); };
+	  | N <[&out](syntax x){ out += x.str(); };
 	S = E > eoi;
-	grammar G = start(S);
+	grammar const G = start(S);
 	out.clear();
 	assert(lug::parse("1", G) && out == "1");
 	out.clear();

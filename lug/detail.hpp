@@ -87,43 +87,43 @@ inline namespace bitfield_ops {
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 [[nodiscard]] constexpr T operator~(T x) noexcept
 {
-	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 [[nodiscard]] constexpr T operator&(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 [[nodiscard]] constexpr T operator|(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 [[nodiscard]] constexpr T operator^(T x, T y) noexcept
 {
-	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator&=(T& x, T y) noexcept
 {
-	return (x = x & y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return (x = x & y);
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator|=(T& x, T y) noexcept
 {
-	return (x = x | y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return (x = x | y);
 }
 
 template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
 constexpr T& operator^=(T& x, T y) noexcept
 {
-	return (x = x ^ y); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+	return (x = x ^ y);
 }
 
 } // namespace bitfield_ops
@@ -160,9 +160,6 @@ using enable_if_char_input_iterator_t = std::enable_if_t<
 
 template <class It, class T = void>
 using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
-
-template <class... Args>
-constexpr void ignore([[maybe_unused]] Args&&... args) noexcept {} // NOLINT(cppcoreguidelines-missing-std-forward)
 
 struct identity
 {
@@ -224,21 +221,21 @@ template <class MemberPtrType, MemberPtrType MemberPtr, class ObjectIterator>
 template <class T>
 class dynamic_cast_if_base_of
 {
-	std::remove_reference_t<T>& value_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+	std::reference_wrapper<std::remove_reference_t<T>> value_;
 
 public:
 	constexpr explicit dynamic_cast_if_base_of(std::remove_reference_t<T>& x) noexcept : value_{x} {}
 
 	template <class U, class = std::enable_if_t<std::is_base_of_v<std::decay_t<T>, std::decay_t<U>>>>
-	[[nodiscard]] constexpr operator U&() const // NOLINT(hicpp-explicit-conversions)
+	[[nodiscard]] constexpr operator U&() const noexcept(std::is_same_v<std::decay_t<T>, std::decay_t<U>>) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	{
 #ifndef LUG_NO_RTTI
 		if constexpr (std::is_same_v<std::decay_t<T>, std::decay_t<U>>)
 #endif // LUG_NO_RTTI
-			return static_cast<std::remove_reference_t<U>&>(value_);
+			return static_cast<std::remove_reference_t<U>&>(value_.get());
 #ifndef LUG_NO_RTTI
 		else
-			return dynamic_cast<std::remove_reference_t<U>&>(value_);
+			return dynamic_cast<std::remove_reference_t<U>&>(value_.get());
 #endif // LUG_NO_RTTI
 	}
 };
@@ -246,20 +243,20 @@ public:
 template <class Error>
 class reentrancy_sentinel
 {
-	bool& value; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+	std::reference_wrapper<bool> value_;
 
 public:
 	constexpr explicit reentrancy_sentinel(bool& x)
-		: value{x}
+		: value_{x}
 	{
-		if (value)
+		if (value_.get())
 			throw Error();
-		value = true;
+		value_.get() = true;
 	}
 
 	~reentrancy_sentinel()
 	{
-		value = false;
+		value_.get() = false;
 	}
 
 	reentrancy_sentinel(reentrancy_sentinel const&) = delete;
@@ -341,7 +338,7 @@ inline std::size_t push_back_unique(Sequence& s, T&& x)
 template <class Sequence>
 [[nodiscard]] inline auto pop_back(Sequence& s) -> typename Sequence::value_type
 {
-	typename Sequence::value_type result{std::move(s.back())};
+	typename Sequence::value_type result{std::move(s.back())}; // NOLINT(misc-const-correctness)
 	s.pop_back();
 	return result;
 }
