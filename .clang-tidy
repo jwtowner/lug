@@ -2,32 +2,42 @@
 Checks:
   - clang-diagnostic-*
   - clang-analyzer-*
+  - -clang-analyzer-optin.core.EnumCastOutOfRange # interferes with enum bitfield flags
   - android-*
   - bugprone-*
   - cert-*
-  - -cert-dcl21-cpp
+  - -cert-dcl21-cpp # this check is deprecated, it is no longer part of the CERT standard
   - concurrency-*
   - cppcoreguidelines-*
-  - -cppcoreguidelines-avoid-magic-numbers
-  - -cppcoreguidelines-avoid-do-while
-  - -cppcoreguidelines-avoid-goto
-  - -cppcoreguidelines-pro-bounds-*
+  - -cppcoreguidelines-avoid-magic-numbers # revisit after new instruction scheme, maybe only disable for unicode tables
+  - -cppcoreguidelines-avoid-do-while # if removing do-while does not cause serious performance issues remove this check
+  - -cppcoreguidelines-avoid-goto # if removing goto does not cause serious performance issues remove this check
+  - -cppcoreguidelines-pro-bounds-* # requires gsl::at and std::span to suppress, would prefer Standard Library hardening approach
+  - -cppcoreguidelines-pro-type-union-access # remove after developing new instruction encoding scheme that doesn't use union
   - darwin-*
+  - fuschia-*
+  - google-*
+  - -google-build-using-namespace # would require too many invidual using-declarations to satisfy
+  - -google-readability-braces-around-statements # adversely affects line count
+  - -google-runtime-int # revisit after new instruction scheme
   - hicpp-*
-  - -hicpp-avoid-goto
-  - -hicpp-braces-around-statements
+  - -hicpp-avoid-goto # if removing goto does not cause serious performance issues remove this check
+  - -hicpp-braces-around-statements # adversely affects line count
   - llvm-namespace-comment
   - misc-*
-  - -misc-include-cleaner
+  - -misc-include-cleaner # brings in redundant headers that are already included
   - modernize-*
-  - -modernize-use-trailing-return-type
+  - -modernize-use-constraints # C++20 feature
+  - -modernize-use-trailing-return-type # stylistic preference, revisit later
   - performance-*
   - portability-*
   - readability-*
-  - -readability-braces-around-statements
-  - -readability-identifier-length
-  - -readability-magic-numbers
-  - -readability-qualified-auto
+  - -readability-braces-around-statements # adversely affects line count
+  - -readability-container-contains # C++20 feature
+  - -readability-function-cognitive-complexity # grammar::start() and basic_parser::parse() are complex, revisit or suppress only for these functions
+  - -readability-identifier-length # revisit later
+  - -readability-magic-numbers # revisit after new instruction scheme, maybe only disable for unicode tables
+  - -readability-qualified-auto # stylistic preference that unfortunately warns when marking 'auto*' as 'auto* const' or just 'auto const'
 WarningsAsErrors: ''
 HeaderFileExtensions:
   - ''
@@ -284,7 +294,7 @@ CheckOptions:
   misc-header-include-cycle.IgnoredFilesList: ''
   misc-include-cleaner.DeduplicateFindings: 'true'
   misc-include-cleaner.IgnoreHeaders: ''
-  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: 'false'
+  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: 'true'
   misc-non-private-member-variables-in-classes.IgnorePublicMemberVariables: 'false'
   misc-throw-by-value-catch-by-reference.CheckThrowTemporaries: 'true'
   misc-throw-by-value-catch-by-reference.WarnOnLargeObjects: 'false'

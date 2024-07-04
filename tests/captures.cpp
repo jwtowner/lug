@@ -42,22 +42,22 @@ void test_capture_email_syntax()
 
 	std::string_view const email = "user@example.com";
 	assert(lug::parse(email, G));
-	assert(username.capture() == "user");
-	assert(domain.capture() == "example");
-	assert(tld.capture() == "com");
-	assert(username.capture().data() == email.data());
-	assert(domain.capture().data() == email.substr(5).data());
-	assert(tld.capture().data() == email.substr(13).data());
+	assert(username.str() == "user");
+	assert(domain.str() == "example");
+	assert(tld.str() == "com");
+	assert(username.str().data() == email.data());
+	assert(domain.str().data() == email.substr(5).data());
+	assert(tld.str().data() == email.substr(13).data());
 
 	std::string const email2 = "not.an@email";
 	assert(!lug::parse(email2, G));
 	// failure to parse the above should not change captures, as no semantic actions should be executed
-	assert(username.capture() == "user");
-	assert(domain.capture() == "example");
-	assert(tld.capture() == "com");
-	assert(username.capture().data() == email.data());
-	assert(domain.capture().data() == email.substr(5).data());
-	assert(tld.capture().data() == email.substr(13).data());
+	assert(username.str() == "user");
+	assert(domain.str() == "example");
+	assert(tld.str() == "com");
+	assert(username.str().data() == email.data());
+	assert(domain.str().data() == email.substr(5).data());
+	assert(tld.str().data() == email.substr(13).data());
 }
 
 void test_capture_url_syntax()
@@ -78,29 +78,29 @@ void test_capture_url_syntax()
 	assert(lug::parse(url1, G));
 	assert(protocol == "https");
 	assert(domain == "www.example.com");
-	assert(path.capture() == "/path/to/resource");
+	assert(path.str() == "/path/to/resource");
 	assert(protocol.data() == url1.data());
 	assert(domain.data() != url1.data()); // std::string makes a copy
-	assert(path.capture().data() == url1.substr(23).data());
+	assert(path.str().data() == url1.substr(23).data());
 
 	std::string const url2 = "http://api.example2.com/path/to/other/resource.html";
 	assert(lug::parse(url2, G));
 	assert(protocol == "http");
 	assert(domain == "api.example2.com");
-	assert(path.capture() == "/path/to/other/resource.html");
+	assert(path.str() == "/path/to/other/resource.html");
 	assert(protocol.data() == url2.c_str());
 	assert(domain.data() != url2.data()); // std::string makes a copy
-	assert(path.capture().data() == &url2[23]);
+	assert(path.str().data() == &url2[23]);
 
 	std::string const url3 = "https://www.example3.com$path/to/resource";
 	assert(!lug::parse(url3, G));
 	// failure to parse the above should not change captures, as no semantic actions should be executed
 	assert(protocol == "http");
 	assert(domain == "api.example2.com");
-	assert(path.capture() == "/path/to/other/resource.html");
+	assert(path.str() == "/path/to/other/resource.html");
 	assert(protocol.data() == url2.c_str());
 	assert(domain.data() != url2.data()); // std::string makes a copy
-	assert(path.capture().data() == &url2[23]);
+	assert(path.str().data() == &url2[23]);
 }
 
 void test_capture_comma_delimited_list()
@@ -121,7 +121,7 @@ void test_capture_comma_delimited_list()
 	assert(items[0] == "apple");
 	assert(items[1] == "banana");
 	assert(items[2] == "cherry");
-	assert(item.capture() == "cherry"); // item should capture the last item parsed
+	assert(item.str() == "cherry"); // item should capture the last item parsed
 
 	items.clear();
 	std::string const list2 = "123 , 456 ,789,987";
@@ -131,14 +131,14 @@ void test_capture_comma_delimited_list()
 	assert(items[1] == "456");
 	assert(items[2] == "789");
 	assert(items[3] == "987");
-	assert(item.capture() == "987"); // item should capture the last item parsed
+	assert(item.str() == "987"); // item should capture the last item parsed
 
 	items.clear();
 	std::string_view const list3 = "one_single-item";
 	assert(lug::parse(list3, G));
 	assert(items.size() == 1);
 	assert(items[0] == "one_single-item");
-	assert(item.capture() == "one_single-item"); // item should capture the last item parsed
+	assert(item.str() == "one_single-item"); // item should capture the last item parsed
 
 	// Test with an invalid list (no items)
 	std::string const list4 = "";
@@ -146,7 +146,7 @@ void test_capture_comma_delimited_list()
 	// After failing to parse, items should remain unchanged from the last successful parse
 	assert(items.size() == 1);
 	assert(items[0] == "one_single-item");
-	assert(item.capture() == "one_single-item");
+	assert(item.str() == "one_single-item");
 }
 
 void test_capture_nested_calls()

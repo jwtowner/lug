@@ -30,9 +30,8 @@ class string_view_input_source;
 template <class> class basic_parser;
 using parser = basic_parser<multi_input_source>;
 struct program;
-struct syntax_position { std::size_t column, line; };
-struct syntax_range { std::size_t index, size; };
-struct semantic_response { unsigned short call_depth, action_index; syntax_range range; };
+struct syntax_position { std::size_t column; std::size_t line; };
+struct syntax_range { std::size_t index; std::size_t size; };
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
@@ -65,14 +64,14 @@ enum class operands : unsigned char { none = 0, off = 0x40, str = 0x80, is_bitfi
 
 union instruction
 {
-	static inline constexpr std::size_t maxstrlen = 256;
+	static constexpr std::size_t maxstrlen = 256;
 	struct prefix { opcode op; operands aux; unsigned short val; } pf;
 	int off;
 	std::array<char, 4> str;
 
 	instruction(opcode op, operands aux, immediate imm) noexcept : pf{op, aux, static_cast<unsigned short>(imm)} {}
 	explicit instruction(std::ptrdiff_t o) : off{static_cast<int>(o)} { if (off != o) throw program_limit_error{}; }
-	explicit instruction(std::string_view s) { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
+	explicit instruction(std::string_view s) : str{} { std::fill(std::copy_n(s.begin(), (std::min)(s.size(), std::size_t{4}), str.begin()), str.end(), char{0}); }
 
 	[[nodiscard]] static auto decode(std::vector<instruction> const& code, std::ptrdiff_t& pc)
 	{
@@ -81,9 +80,10 @@ union instruction
 		unsigned short imm = pf.val;
 		std::string_view str;
 		if ((pf.aux & operands::str) != operands::none) {
-			str = std::string_view{code[static_cast<std::size_t>(pc)].str.data(), static_cast<unsigned int>((imm & 0xff) + 1)};
-			pc += ((imm & 0xff) + 4) >> 2;
-			imm = static_cast<unsigned short>(imm >> 8);
+			auto const strsize = (static_cast<std::size_t>(imm) & 0xffU) + 1U;
+			str = std::string_view{code[static_cast<std::size_t>(pc)].str.data(), strsize};
+			pc += static_cast<std::ptrdiff_t>((strsize + 3U) >> 2U);
+			imm = static_cast<unsigned short>(static_cast<unsigned int>(imm) >> 8U);
 		}
 		return std::make_tuple(pf.op, imm, off, str);
 	}
@@ -92,7 +92,7 @@ union instruction
 	{
 		std::ptrdiff_t len = 1;
 		len += ((pf.aux & operands::off) != operands::none) ? 1 : 0;
-		len += ((pf.aux & operands::str) != operands::none) ? static_cast<std::ptrdiff_t>(((pf.val & 0xff) >> 2) + 1) : 0;
+		len += ((pf.aux & operands::str) != operands::none) ? static_cast<std::ptrdiff_t>(((static_cast<std::size_t>(pf.val) & 0xffU) >> 2U) + 1U) : 0;
 		return len;
 	}
 };
@@ -102,7 +102,7 @@ static_assert(sizeof(unicode::sctype) <= sizeof(immediate), "immediate must be l
 static_assert(sizeof(instruction) == sizeof(int), "expected instruction to be same size as int");
 static_assert(sizeof(int) <= sizeof(std::ptrdiff_t), "expected int to be no larger than ptrdiff_t");
 
-enum class directives : unsigned int { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
+enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct program
@@ -119,7 +119,7 @@ struct program
 		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
 		for (auto i = src.instructions.begin(), j = i, e = src.instructions.end(); i != e; i = j) {
 			instruction instr = *i;
-			std::size_t val;
+			std::size_t val = 0;
 			switch (instr.pf.op) {
 				case opcode::match_set: val = detail::push_back_unique(runesets, src.runesets[instr.pf.val]); break;
 				case opcode::action: val = actions.size(); actions.push_back(src.actions[instr.pf.val]); break;
@@ -128,7 +128,7 @@ struct program
 				default: val = (std::numeric_limits<std::size_t>::max)(); break;
 			}
 			if (val != (std::numeric_limits<std::size_t>::max)()) {
-				detail::assure_in_range<resource_limit_error>(val, 0u, (std::numeric_limits<unsigned short>::max)());
+				detail::assure_in_range<resource_limit_error>(val, 0U, (std::numeric_limits<unsigned short>::max)());
 				instr.pf.val = static_cast<unsigned short>(val);
 			}
 			j = std::next(i, instruction::length(instr.pf));
@@ -153,57 +153,58 @@ class rule
 {
 	friend class encoder;
 	friend class rule_encoder;
-	friend grammar start(rule const&);
+	friend grammar start(rule const& start_rule);
 	program program_;
 	program_callees callees_;
 	bool currently_encoding_{false};
 public:
-	rule() = default;
-	template <class E, class = std::enable_if_t<is_expression_v<E>>> rule(E const& e);
+	rule() noexcept = default;
+	template <class E, class = std::enable_if_t<is_expression_v<E> && !std::is_same_v<E, rule>>> rule(E const& e); // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	rule(rule const& r);
-	rule(rule&& r) = default;
+	rule(rule&& r) noexcept = default;
 	rule& operator=(rule const& r) { rule{r}.swap(*this); return *this; }
-	rule& operator=(rule&& r) = default;
+	rule& operator=(rule&& r) noexcept = default;
+	~rule() = default;
 	void swap(rule& r) noexcept { program_.swap(r.program_); callees_.swap(r.callees_); }
 	[[nodiscard]] auto operator[](unsigned short precedence) const noexcept;
 };
 
 class grammar
 {
-	friend grammar start(rule const&);
+	friend grammar start(rule const& start_rule);
 	lug::program program_;
-	grammar(lug::program p) : program_{std::move(p)} {}
+	explicit grammar(lug::program&& p) noexcept : program_{std::move(p)} {}
 public:
-	grammar() = default;
+	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	static thread_local std::shared_ptr<std::function<void(encoder&)>> const implicit_space;
+	[[nodiscard]] static std::shared_ptr<std::function<void(encoder&)>> const& implicit_space();
 };
 
 class syntax
 {
-	std::string_view capture_;
+	std::string_view str_;
 	std::size_t index_{0};
 public:
 	constexpr syntax() noexcept = default;
-	constexpr syntax(std::string_view c, std::size_t i) noexcept : capture_{c}, index_{i} {}
-	[[nodiscard]] constexpr std::string_view capture() const noexcept { return capture_; }
-	[[nodiscard]] constexpr syntax_range range() const noexcept { return syntax_range{index_, capture_.size()}; }
-	[[nodiscard]] operator std::string() const noexcept { return std::string{capture_}; }
-	[[nodiscard]] constexpr operator std::string_view() const noexcept { return capture_; }
-	[[nodiscard]] constexpr operator syntax_range() const noexcept { return range(); }
-	[[nodiscard]] constexpr bool empty() const noexcept { return capture_.empty(); }
-	[[nodiscard]] constexpr std::size_t size() const noexcept { return capture_.size(); }
-	[[nodiscard]] constexpr bool operator==(syntax const& other) const noexcept { return capture_ == other.capture_ && index_ == other.index_; }
-	[[nodiscard]] constexpr bool operator!=(syntax const& other) const noexcept { return capture_ != other.capture_ || index_ != other.index_; }
+	constexpr syntax(std::string_view c, std::size_t i) noexcept : str_{c}, index_{i} {}
+	[[nodiscard]] constexpr std::string_view str() const noexcept { return str_; }
+	[[nodiscard]] constexpr syntax_range range() const noexcept { return syntax_range{index_, str_.size()}; }
+	[[nodiscard]] operator std::string() const { return std::string{str_}; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	[[nodiscard]] constexpr operator std::string_view() const noexcept { return str_; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	[[nodiscard]] constexpr operator syntax_range() const noexcept { return range(); } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	[[nodiscard]] constexpr bool empty() const noexcept { return str_.empty(); }
+	[[nodiscard]] constexpr std::size_t size() const noexcept { return str_.size(); }
+	[[nodiscard]] constexpr bool operator==(syntax const& other) const noexcept { return str_ == other.str_ && index_ == other.index_; }
+	[[nodiscard]] constexpr bool operator!=(syntax const& other) const noexcept { return str_ != other.str_ || index_ != other.index_; }
 };
 
 class environment
 {
 	template <class> friend class basic_parser;
 
-	static inline constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
-	static inline const std::vector<std::string> empty_symbols_{};
+	static constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	static inline std::vector<std::string> const empty_symbols_{};
 	std::vector<std::any> attribute_frame_stack_;
 	std::vector<std::any> attribute_result_stack_;
 	std::unordered_set<std::string_view> conditions_;
@@ -250,13 +251,18 @@ class environment
 	}
 
 public:
+	environment() = default;
+	environment(environment const&) = delete;
+	environment(environment&&) noexcept = default;
+	environment& operator=(environment const&) = delete;
+	environment& operator=(environment&&) noexcept = default;
 	virtual ~environment() = default;
 	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
 	void tab_width(unsigned int w) { tab_width_ = w; }
 	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
 	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
-	bool set_condition(std::string_view name, bool value) { if (value) { return !conditions_.emplace(name).second; } else { return (conditions_.erase(name) > 0); } }
+	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
 	[[nodiscard]] bool has_symbol(std::string_view name) const noexcept { return (symbols_.count(name) > 0); }
 	[[nodiscard]] std::vector<std::string> const& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
@@ -285,7 +291,8 @@ public:
 		}
 		auto first = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(startindex));
 		auto const last = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(index));
-		char32_t rune, prevrune = U'\0';
+		char32_t rune = U'\0';
+		char32_t prevrune = U'\0';
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);
 			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
@@ -345,7 +352,7 @@ struct encoder_metadata
 	template <class Frame = attribute_frame_type, class = std::enable_if_t<std::is_default_constructible_v<Frame>>>
 	constexpr encoder_metadata() noexcept : attribute_frame{} {}
 	template <class Frame, class = std::enable_if_t<std::is_constructible_v<attribute_frame_type, Frame&&>>>
-	constexpr encoder_metadata(Frame&& frame) noexcept : attribute_frame{std::forward<Frame>(frame)} {}
+	constexpr explicit encoder_metadata(Frame&& frame) noexcept : attribute_frame{std::forward<Frame>(frame)} {}
 };
 
 encoder_metadata() -> encoder_metadata<>;
@@ -353,17 +360,17 @@ template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_
 
 class encoder
 {
-	directives mandate_;
+	directives mandate_{directives::none};
 	std::vector<directives> mode_;
-	virtual void do_append(instruction) = 0;
+	virtual void do_append(instruction instr) = 0;
 	virtual void do_append(program const&) = 0;
-	virtual immediate do_add_rune_set(unicode::rune_set) { return immediate{0}; }
-	virtual immediate do_add_semantic_action(semantic_action) { return immediate{0}; }
-	virtual immediate do_add_semantic_capture_action(semantic_capture_action) { return immediate{0}; }
-	virtual immediate do_add_syntactic_predicate(syntactic_predicate) { return immediate{0}; }
-	virtual void do_add_callee(rule const*, program const*, std::ptrdiff_t, directives) {}
-	virtual bool do_should_evaluate_length() const noexcept { return true; }
-	virtual std::ptrdiff_t do_length() const noexcept = 0;
+	[[nodiscard]] virtual immediate do_add_rune_set(unicode::rune_set&& /*r*/) { return immediate{0}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+	[[nodiscard]] virtual immediate do_add_semantic_action(semantic_action&& /*a*/) { return immediate{0}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+	[[nodiscard]] virtual immediate do_add_semantic_capture_action(semantic_capture_action&& /*a*/) { return immediate{0}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+	[[nodiscard]] virtual immediate do_add_syntactic_predicate(syntactic_predicate&& /*p*/) { return immediate{0}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+	virtual void do_add_callee(rule const* /*r*/, program const* /*p*/, std::ptrdiff_t /*n*/, directives /*d*/) {}
+	[[nodiscard]] virtual bool do_should_evaluate_length() const noexcept { return true; }
+	[[nodiscard]] virtual std::ptrdiff_t do_length() const noexcept = 0;
 
 protected:
 	encoder& do_call(rule const* r, program const* p, std::ptrdiff_t off, unsigned short prec)
@@ -380,7 +387,7 @@ protected:
 			std::string_view subsequence = sequence.substr(0, instruction::maxstrlen);
 			while (!subsequence.empty() && !utf8::is_lead(subsequence.back()))
 				subsequence.remove_suffix(1);
-			subsequence.remove_suffix(!subsequence.empty());
+			subsequence.remove_suffix(!subsequence.empty() ? 1 : 0);
 			encode(op, subsequence);
 			sequence.remove_prefix(subsequence.size());
 		}
@@ -397,35 +404,40 @@ protected:
 	void do_skip()
 	{
 		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
-		(*grammar::implicit_space)(*this);
+		(*grammar::implicit_space())(*this);
 	}
 
 public:
-	explicit encoder(directives initial) : mandate_{directives::none}, mode_{initial} {}
+	explicit encoder(directives initial) : mode_{initial} {}
 	virtual ~encoder() = default;
+	encoder(encoder const&) = delete;
+	encoder(encoder&&) = delete;
+	encoder& operator=(encoder const&) = delete;
+	encoder& operator=(encoder&&) = delete;
 	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] decltype(auto) evaluate(E const& e, M const& m);
 	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] std::ptrdiff_t evaluate_length(E const& e, M const& m);
-	encoder& dpsh(directives enable, directives disable) { directives prev = mode_.back(); mode_.push_back((prev & ~disable) | enable); return *this; }
+	encoder& dpsh(directives enable, directives disable) { directives const prev = mode_.back(); mode_.push_back((prev & ~disable) | enable); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(program const& p) { do_append(p); return *this; }
 	encoder& call(program const& p, unsigned short prec) { return do_call(nullptr, &p, 0, prec); }
 	encoder& call(grammar const& g, unsigned short prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	encoder& encode(opcode op, immediate imm = immediate{0}) { return append(instruction{op, operands::none, imm}); }
-	encoder& encode(opcode op, semantic_action a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
-	encoder& encode(opcode op, semantic_capture_action c) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(c))}); }
-	encoder& encode(opcode op, syntactic_predicate p) { return append(instruction{op, operands::none, do_add_syntactic_predicate(std::move(p))}); }
+	encoder& encode(opcode op, semantic_action&& a) { return append(instruction{op, operands::none, do_add_semantic_action(std::move(a))}); }
+	encoder& encode(opcode op, semantic_capture_action&& a) { return append(instruction{op, operands::none, do_add_semantic_capture_action(std::move(a))}); }
+	encoder& encode(opcode op, syntactic_predicate&& p) { return append(instruction{op, operands::none, do_add_syntactic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
 	[[nodiscard]] directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
-	encoder& match(unicode::rune_set runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
+	encoder& match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
 	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 	encoder& match_any() { return skip().encode(opcode::match_any); }
 	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>> encoder& match_class(T properties) { return skip().do_match_class(Op, properties); }
 
 	encoder& dpop(directives relay)
 	{
-		auto prev = detail::pop_back(mode_), next = (mode_.back() & ~relay) | (prev & relay);
+		auto const prev = detail::pop_back(mode_);
+		auto const next = (mode_.back() & ~relay) | (prev & relay);
 		if ((next & directives::postskip) == directives::none && (prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip)
 			do_skip();
 		mode_.back() = next;
@@ -434,7 +446,7 @@ public:
 
 	encoder& skip(directives callee_mandate = directives::eps, directives callee_skip = directives::lexeme)
 	{
-		auto mode = mode_.back();
+		auto const mode = mode_.back();
 		if (mandate_ == directives::none)
 			mandate_ = (mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
 		if ((((mode | callee_mandate)) & (callee_skip | directives::preskip)) == directives::preskip)
@@ -446,7 +458,7 @@ public:
 	encoder& call(rule const& r, unsigned short prec, bool allow_inlining = true)
 	{
 		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
-					p.instructions.size() <= 8 && p.actions.size() <= 1 && p.captures.size() <= 1 && p.predicates.size() <= 1)
+										(p.instructions.size() <= 8) && (p.actions.size() <= 1) && (p.captures.size() <= 1) && (p.predicates.size() <= 1))
 			return skip(p.mandate, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
@@ -465,9 +477,9 @@ public:
 	encoder& encode(opcode op, std::string_view subsequence, immediate imm = immediate{0})
 	{
 		if (!subsequence.empty()) {
-			detail::assure_in_range<resource_limit_error>(static_cast<unsigned short>(imm), 0u, instruction::maxstrlen - 1);
-			detail::assure_in_range<resource_limit_error>(subsequence.size(), 1u, instruction::maxstrlen);
-			do_append(instruction{op, operands::str, static_cast<immediate>((static_cast<unsigned short>(imm) << 8) | static_cast<unsigned short>(subsequence.size() - 1))});
+			detail::assure_in_range<resource_limit_error>(static_cast<unsigned short>(imm), 0U, instruction::maxstrlen - 1);
+			detail::assure_in_range<resource_limit_error>(subsequence.size(), 1U, instruction::maxstrlen);
+			do_append(instruction{op, operands::str, static_cast<immediate>(static_cast<unsigned short>((static_cast<unsigned int>(imm) << 8U) | static_cast<unsigned int>(subsequence.size() - 1)))});
 			do {
 				do_append(instruction{subsequence});
 				subsequence.remove_prefix((std::min)(std::size_t{4}, subsequence.size()));
@@ -481,40 +493,43 @@ public:
 		skip(!subject.empty() ? directives::eps : directives::none);
 		if ((mode() & directives::caseless) != directives::none)
 			return do_match(opcode::match_cf, utf8::tocasefold(subject));
-		else
-			return do_match(opcode::match, subject);
+		return do_match(opcode::match, subject);
 	}
 };
 
 class instruction_length_evaluator final : public encoder
 {
-	std::ptrdiff_t length_;
-	void do_append(instruction) final { length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
+	std::ptrdiff_t length_{0};
+	void do_append(instruction instr) final { std::ignore = instr; length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
 	void do_append(program const& p) final { length_ = detail::checked_add<program_limit_error>(length_, static_cast<std::ptrdiff_t>(p.instructions.size())); }
-	bool do_should_evaluate_length() const noexcept final { return false; }
-	std::ptrdiff_t do_length() const noexcept final { return length_; }
+	[[nodiscard]] bool do_should_evaluate_length() const noexcept final { return false; }
+	[[nodiscard]] std::ptrdiff_t do_length() const noexcept final { return length_; }
 public:
-	explicit instruction_length_evaluator(directives initial) : encoder{initial}, length_{0} {}
+	explicit instruction_length_evaluator(directives initial) : encoder{initial} {}
 	~instruction_length_evaluator() final = default;
+	instruction_length_evaluator(instruction_length_evaluator const&) = delete;
+	instruction_length_evaluator(instruction_length_evaluator&&) = delete;
+	instruction_length_evaluator& operator=(instruction_length_evaluator const&) = delete;
+	instruction_length_evaluator& operator=(instruction_length_evaluator&&) = delete;
 };
 
 class program_encoder : public encoder
 {
 	program& program_;
 	program_callees& callees_;
-	std::ptrdiff_t do_length() const noexcept final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
+	[[nodiscard]] std::ptrdiff_t do_length() const noexcept final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
 	void do_append(instruction instr) final { program_.instructions.push_back(instr); }
 	void do_append(program const& p) final { program_.concatenate(p); }
 	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) final { callees_.emplace_back(r, p, n, d); }
-	immediate do_add_rune_set(unicode::rune_set r) final { return add_item(program_.runesets, std::move(r)); }
-	immediate do_add_semantic_action(semantic_action a) final { return add_item(program_.actions, std::move(a)); }
-	immediate do_add_semantic_capture_action(semantic_capture_action a) final { return add_item(program_.captures, std::move(a)); }
-	immediate do_add_syntactic_predicate(syntactic_predicate p) final { return add_item(program_.predicates, std::move(p)); }
+	[[nodiscard]] immediate do_add_rune_set(unicode::rune_set&& r) final { return add_item(program_.runesets, std::move(r)); }
+	[[nodiscard]] immediate do_add_semantic_action(semantic_action&& a) final { return add_item(program_.actions, std::move(a)); }
+	[[nodiscard]] immediate do_add_semantic_capture_action(semantic_capture_action&& a) final { return add_item(program_.captures, std::move(a)); }
+	[[nodiscard]] immediate do_add_syntactic_predicate(syntactic_predicate&& p) final { return add_item(program_.predicates, std::move(p)); }
 
 	template <class Item>
-	immediate add_item(std::vector<Item>& items, Item&& item)
+	[[nodiscard]] immediate add_item(std::vector<Item>& items, Item&& item)
 	{
-		detail::assure_in_range<resource_limit_error>(items.size(), 0u, (std::numeric_limits<unsigned short>::max)() - 1u);
+		detail::assure_in_range<resource_limit_error>(items.size(), 0U, (std::numeric_limits<unsigned short>::max)() - 1U);
 		items.push_back(std::forward<Item>(item));
 		return static_cast<immediate>(items.size() - 1);
 	}
@@ -522,6 +537,10 @@ class program_encoder : public encoder
 public:
 	program_encoder(program& p, program_callees& c, directives initial) : encoder{initial}, program_{p}, callees_{c} {}
 	~program_encoder() override { program_.mandate = mandate(); }
+	program_encoder(program_encoder const&) = delete;
+	program_encoder(program_encoder&&) = delete;
+	program_encoder& operator=(program_encoder const&) = delete;
+	program_encoder& operator=(program_encoder&&) = delete;
 };
 
 class rule_encoder final : public program_encoder
@@ -530,10 +549,14 @@ class rule_encoder final : public program_encoder
 public:
 	explicit rule_encoder(rule& r) : program_encoder{r.program_, r.callees_, directives::eps}, rule_{r} { rule_.currently_encoding_ = true; }
 	~rule_encoder() final { rule_.currently_encoding_ = false; }
+	rule_encoder(rule_encoder const&) = delete;
+	rule_encoder(rule_encoder&&) = delete;
+	rule_encoder& operator=(rule_encoder const&) = delete;
+	rule_encoder& operator=(rule_encoder&&) = delete;
 };
 
 template <class RuneSet>
-inline auto&& add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
+inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
 {
 	if (first > last)
 		throw bad_character_range{};
@@ -541,7 +564,7 @@ inline auto&& add_rune_range(RuneSet&& runes, directives mode, char32_t first, c
 		unicode::push_casefolded_range(runes, first, last);
 	else
 		unicode::push_range(runes, first, last);
-	return std::move(runes);
+	return std::forward<RuneSet>(runes);
 }
 
 struct terminal_encoder_expression_interface
@@ -553,20 +576,22 @@ template <class E1>
 struct unary_encoder_expression_interface
 {
 	using expression_trait = encoder_expression_trait_tag; E1 e1;
-	template <class X1> constexpr explicit unary_encoder_expression_interface(X1&& x1) noexcept : e1(std::forward<X1>(x1)) {}
+	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
+	constexpr explicit unary_encoder_expression_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
 };
 
 template <class E1, class E2>
 struct binary_encoder_expression_interface
 {
 	using expression_trait = encoder_expression_trait_tag; E1 e1; E2 e2;
-	template <class X1, class X2> constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) noexcept : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
+	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
+	constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
 };
 
 class basic_regular_expression : public terminal_encoder_expression_interface
 {
-	std::string const expression_;
-	std::shared_ptr<program> const program_;
+	std::string expression_;
+	std::shared_ptr<program> program_;
 
 	[[nodiscard]] static grammar make_grammar();
 
@@ -654,16 +679,16 @@ struct char32_range_expression : terminal_encoder_expression_interface
 {
 	char32_t start;
 	char32_t end;
-	constexpr char32_range_expression(char32_t s, char32_t e) noexcept : start{s}, end{e} {}
+	constexpr char32_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
 	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end))); return m; }
 };
 
 template <class Target>
 struct callable_expression : terminal_encoder_expression_interface
 {
-	Target& target;
+	std::reference_wrapper<Target> target;
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
-	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target, 0); }
+	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), 0); }
 };
 
 template <class T> struct is_callable_encoder_expression : std::false_type {};
@@ -674,7 +699,7 @@ template <class Pred>
 struct predicate_expression : terminal_encoder_expression_interface
 {
 	Pred pred;
-	template <class P> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
+	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::predicate, syntactic_predicate{pred}); return m; }
 };
 
@@ -695,7 +720,7 @@ template <class E, class = std::enable_if_t<!is_encoder_expression_v<E> && is_ex
 	else if constexpr (std::is_same_v<std::decay_t<E>, char32_t>)
 		return char32_expression{std::forward<E>(e)};
 	else if constexpr (std::is_convertible_v<std::decay_t<E>, std::string_view>)
-		return string_expression{std::forward<E>(e)};
+		return string_expression{std::forward<E>(e)}; // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
 	else if constexpr (std::is_invocable_r_v<bool, std::decay_t<E>, environment&>)
 		return predicate_expression{std::forward<E>(e)};
 	else
@@ -703,9 +728,9 @@ template <class E, class = std::enable_if_t<!is_encoder_expression_v<E> && is_ex
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>>
-[[nodiscard]] constexpr auto make_space_expression(E&& e)
+[[nodiscard]] constexpr auto make_space_expression(E const& e)
 {
-	return [x = make_expression(std::forward<E>(e))](encoder& d) { (void)x(d, encoder_metadata{}); };
+	return [x = make_expression(e)](encoder& d) { (void)x(d, encoder_metadata{}); };
 }
 
 template <class E, class M, class>
@@ -738,10 +763,10 @@ inline rule::rule(rule const& r)
 
 struct rule_precedence_expression : terminal_encoder_expression_interface
 {
-	rule const& target;
+	std::reference_wrapper<rule const> target;
 	unsigned short precedence;
-	constexpr rule_precedence_expression(rule const& t, unsigned short p) noexcept : target{t}, precedence{p} {}
-	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target, precedence); }
+	rule_precedence_expression(rule const& t, unsigned short p) noexcept : target{t}, precedence{p} {}
+	template <class M> [[nodiscard]] auto operator()(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), precedence); }
 };
 
 [[nodiscard]] inline auto rule::operator[](unsigned short precedence) const noexcept
@@ -779,7 +804,7 @@ inline constexpr directive_modifier<directives::none, directives::none, directiv
 inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 
-struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder&, M const& m) const -> M const& { return m; } };
+struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
 struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2).encode(opcode::match_any, immediate{0x8000}).encode(opcode::fail, immediate{1}); return m; } };
 struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
@@ -792,7 +817,7 @@ struct match_class_combinator
 	struct match_class_expression : terminal_encoder_expression_interface
 	{
 		Property property;
-		constexpr match_class_expression(Property p) noexcept : property{p} {}
+		constexpr explicit match_class_expression(Property p) noexcept : property{p} {}
 		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match_class<Op>(property); return m; }
 	};
 
@@ -817,7 +842,7 @@ struct condition_test_combinator
 	struct condition_test_expression : terminal_encoder_expression_interface
 	{
 		std::string_view name;
-		constexpr condition_test_expression(std::string_view n) noexcept : name{n} {}
+		constexpr explicit condition_test_expression(std::string_view n) noexcept : name{n} {}
 		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::condition_test, name, immediate{Value ? 1 : 0}); return m; }
 	};
 
@@ -863,7 +888,7 @@ struct symbol_exists_combinator
 	struct symbol_exists_expression : terminal_encoder_expression_interface
 	{
 		std::string_view name;
-		constexpr symbol_exists_expression(std::string_view n) noexcept : name{n} {}
+		constexpr explicit symbol_exists_expression(std::string_view n) noexcept : name{n} {}
 		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::symbol_exists, name, immediate{Value ? 1 : 0}); return m; }
 	};
 
@@ -876,7 +901,7 @@ struct symbol_match_combinator
 	struct symbol_match_expression : terminal_encoder_expression_interface
 	{
 		std::string_view name;
-		constexpr symbol_match_expression(std::string_view n) noexcept : name{n} {}
+		constexpr explicit symbol_match_expression(std::string_view n) noexcept : name{n} {}
 		template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name); return m; }
 	};
 
@@ -975,7 +1000,7 @@ template <class Derived, class E1, class Operand>
 struct attribute_action_expression : unary_encoder_expression_interface<E1>
 {
 	Operand operand;
-	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) noexcept : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
+	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
 
 	template <class M>
 	[[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const
@@ -990,17 +1015,17 @@ struct attribute_action_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class Derived, class E1, class Target>
-struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, Target&>
+struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, Target*>
 {
-	using attribute_action_expression<Derived, E1, Target&>::attribute_action_expression;
-	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const { return encoder_metadata{std::tuple_cat((attribute_action_expression<Derived, E1, Target&>::operator()(d, m)).attribute_frame, std::forward_as_tuple(this->operand))}; }
+	using attribute_action_expression<Derived, E1, Target*>::attribute_action_expression;
+	template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const { return encoder_metadata{std::tuple_cat((attribute_action_expression<Derived, E1, Target*>::operator()(d, m)).attribute_frame, std::forward_as_tuple(*(this->operand)))}; }
 };
 
 template <class E1, class Action>
 struct action_expression : attribute_action_expression<action_expression<E1, Action>, E1, Action>
 {
 	using attribute_action_expression<action_expression<E1, Action>, E1, Action>::attribute_action_expression;
-	constexpr void do_prologue(encoder&) const {}
+	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 };
@@ -1018,9 +1043,9 @@ template <class E1, class Target>
 struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>
 {
 	using attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
-	constexpr void do_prologue(encoder&) const {}
-	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = &this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = &this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
+	constexpr void do_prologue(encoder& /*d*/) const {}
+	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
 };
 
 template <class E1, class Target>
@@ -1028,8 +1053,8 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 {
 	using attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
-	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = &this->operand](environment&, syntax const& sx) { *t = sx; }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = &this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
+	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
+	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
 };
 
 template <class E1>
@@ -1093,8 +1118,8 @@ template <class X1, class X2> choice_expression(X1&&, X2&&) -> choice_expression
 template <class X1, class X2> sequence_expression(X1&&, X2&&) -> sequence_expression<std::decay_t<X1>, std::decay_t<X2>>;
 template <class X1, class Action> action_expression(X1&&, Action&&) -> action_expression<std::decay_t<X1>, std::decay_t<Action>>;
 template <class X1, class Action> capture_expression(X1&&, Action&&) -> capture_expression<std::decay_t<X1>, std::decay_t<Action>>;
-template <class X1, class Target> assign_to_expression(X1&&, Target&) -> assign_to_expression<std::decay_t<X1>, Target>;
-template <class X1, class Target> capture_to_expression(X1&&, Target&) -> capture_to_expression<std::decay_t<X1>, Target>;
+template <class X1, class Target> assign_to_expression(X1&&, Target*) -> assign_to_expression<std::decay_t<X1>, Target>;
+template <class X1, class Target> capture_to_expression(X1&&, Target*) -> capture_to_expression<std::decay_t<X1>, Target>;
 template <class X1> symbol_assign_expression(X1&&, std::string_view) -> symbol_assign_expression<std::decay_t<X1>>;
 template <class X1> symbol_block_expression(X1&&) -> symbol_block_expression<std::decay_t<X1>>;
 template <class X1> local_block_expression(X1&&) -> local_block_expression<std::decay_t<X1>>;
@@ -1163,12 +1188,12 @@ inline namespace operators {
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{matches_eps[e]}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{matches_eps[e]}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{matches_eps[e]}; } // NOLINT(google-runtime-operator)
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression{matches_eps[skip_after[e]]}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2) { return choice_expression{relays_eps[e1], relays_eps[e2]}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), skip_before[e2]}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
-template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), target}; }
+template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { auto x{make_expression(e)}; return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return e | eps; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e) { return cut > e; }
@@ -1204,7 +1229,7 @@ inline constexpr struct
 	template <class Target>
 	struct capture_to
 	{
-		Target& target;
+		Target* target;
 		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return capture_to_expression{make_expression(e), target}; }
 	};
 	template <class Action>
@@ -1213,7 +1238,7 @@ inline constexpr struct
 		Action action;
 		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return e < action; }
 	};
-	template <class Target, class = std::enable_if_t<is_capture_target_v<Target>>> [[nodiscard]] constexpr capture_to<Target> operator()(Target& t) const noexcept { return capture_to<Target>{t}; }
+	template <class Target, class = std::enable_if_t<is_capture_target_v<Target>>> [[nodiscard]] constexpr capture_to<Target> operator()(Target& t) const noexcept { return capture_to<Target>{std::addressof(t)}; }
 	template <class Action, class = std::enable_if_t<is_capture_action_v<Action>>> [[nodiscard]] constexpr capture_with<std::decay_t<Action>> operator()(Action&& a) const noexcept { return capture_with<std::decay_t<Action>>{std::forward<Action>(a)}; }
 }
 capture{};
@@ -1251,14 +1276,33 @@ class implicit_space_rule
 {
 	std::function<void(encoder&)> prev_rule_;
 	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref_;
+
 public:
-	template <class E, class = std::enable_if_t<is_expression_v<E>>> implicit_space_rule(E const& e) : prev_rule_{std::exchange(*grammar::implicit_space, std::function<void(encoder&)>{make_space_expression(e)})}, implicit_space_ref_{grammar::implicit_space} {}
-	~implicit_space_rule() { if (auto const implicit_space = implicit_space_ref_.lock(); implicit_space) { *implicit_space = std::move(prev_rule_); } }
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	implicit_space_rule(E const& e) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+		: prev_rule_{std::exchange(*grammar::implicit_space(), std::function<void(encoder&)>{make_space_expression(e)})}
+		, implicit_space_ref_{grammar::implicit_space()}
+	{}
+
+	~implicit_space_rule()
+	{
+		if (auto const implicit_space_instance = implicit_space_ref_.lock(); implicit_space_instance)
+			*implicit_space_instance = std::move(prev_rule_);
+	}
+
+	implicit_space_rule(implicit_space_rule const&) = delete;
+	implicit_space_rule(implicit_space_rule&&) = delete;
+	implicit_space_rule& operator=(implicit_space_rule const&) = delete;
+	implicit_space_rule& operator=(implicit_space_rule&&) = delete;
 };
 
 } // namespace language
 
-inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar::implicit_space{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
+[[nodiscard]] inline std::shared_ptr<std::function<void(encoder&)>> const& grammar::implicit_space()
+{
+	static thread_local std::shared_ptr<std::function<void(encoder&)>> const instance{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
+	return instance;
+}
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
@@ -1278,11 +1322,14 @@ inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar
 			grprogram.concatenate(*subprogram);
 			grprogram.instructions.emplace_back(opcode::ret, operands::none, immediate{0});
 			if (auto top_rule = callstack.back().first; top_rule) {
-				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
+				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) { // NOLINT(performance-for-range-copy)
 					calls.emplace_back(callee_program, address + instr_offset);
-					if (callee_rule && (mode & directives::eps) != directives::none && detail::escaping_find_if(
-							callstack.crbegin(), callstack.crend(), [rule = callee_rule](auto& caller) {
-								return caller.first == rule ? 1 : (caller.second ? 0 : -1); }) != callstack.crend()) {
+					if ((callee_rule != nullptr) && ((mode & directives::eps) != directives::none) &&
+							detail::escaping_find_if(callstack.crbegin(), callstack.crend(), [callee = callee_rule](auto const& caller) {
+								if (caller.first == callee)
+									return 1;
+								return (caller.second ? 0 : -1);
+							}) != callstack.crend()) {
 						left_recursive.insert(callee_program);
 					} else {
 						auto callee_callstack = callstack;
@@ -1295,7 +1342,7 @@ inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
 		if (auto& iprefix = grprogram.instructions[static_cast<std::size_t>(instr_addr)]; iprefix.pf.op == opcode::call)
-			iprefix.pf.val = left_recursive.count(subprogram) != 0 ? (iprefix.pf.val != 0 ? iprefix.pf.val : 1) : 0;
+			iprefix.pf.val = (left_recursive.count(subprogram) != 0) ? (std::max)(iprefix.pf.val, static_cast<unsigned short>(1)) : 0;
 		auto& ioffset = grprogram.instructions[static_cast<std::size_t>(instr_addr + 1)];
 		auto const rel_addr = ioffset.off + addresses[subprogram] - (instr_addr + 2);
 		detail::assure_in_range<program_limit_error>(rel_addr, std::numeric_limits<int>::lowest(), (std::numeric_limits<int>::max)());
@@ -1304,7 +1351,7 @@ inline thread_local std::shared_ptr<std::function<void(encoder&)>> const grammar
 	return grammar{std::move(grprogram)};
 }
 
-enum class source_options : unsigned int { none = 0, interactive = 0x01, is_bitfield_enum };
+enum class source_options : std::uint_least8_t { none = 0, interactive = 0x01, is_bitfield_enum };
 
 namespace detail {
 
@@ -1386,7 +1433,7 @@ public:
 
 struct parser_registers
 {
-	std::size_t sr, mr, rc; std::ptrdiff_t pc; std::size_t fc;
+	std::size_t sr{0}; std::size_t mr{0}; std::size_t rc{0}; std::ptrdiff_t pc{0}; std::size_t fc{0};
 	[[nodiscard]] auto as_tuple() noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
 	[[nodiscard]] auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
 };
@@ -1396,11 +1443,12 @@ class basic_parser
 {
 	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall, symbol_definition, symbol_table };
 	enum class subject_location : std::size_t {};
-	struct lrmemo { std::size_t srr, sra, prec; std::ptrdiff_t pcr, pca; std::size_t rcr; std::vector<semantic_response> responses; };
-	static inline constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-	static inline constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
-	lug::grammar const& grammar_;
-	lug::environment& environment_;
+	struct response { unsigned short call_depth; unsigned short action_index; syntax_range range; };
+	struct lrmemo { std::size_t srr{0}; std::size_t sra{0}; std::size_t prec{0}; std::ptrdiff_t pcr{0}; std::ptrdiff_t pca{0}; std::size_t rcr{0}; std::vector<response> responses; };
+	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
+	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
+	lug::grammar const* grammar_;
+	lug::environment* environment_;
 	InputSource input_source_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
 	parser_registers registers_{0, 0, 0, 0, 0};
@@ -1414,7 +1462,7 @@ class basic_parser
 	std::vector<std::pair<std::string_view, subject_location>> symbol_definition_stack_; // name, sr
 	std::vector<std::unordered_map<std::string_view, std::vector<std::string>>> symbol_table_stack_;
 	std::vector<lrmemo> lrmemo_stack_;
-	std::vector<semantic_response> responses_;
+	std::vector<response> responses_;
 
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
@@ -1440,16 +1488,16 @@ class basic_parser
 
 	[[nodiscard]] bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
 	{
-		auto& subject = casefolded_subjects_[sr];
+		std::string& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
 			subject = utf8::tocasefold(input_source_.buffer().substr(sr, sn));
 		return subject.compare(0, sn, str) == 0;
 	}
 
 	template <class Compare>
-	[[nodiscard]] bool match_sequence(std::size_t& sr, std::string_view str, Compare&& comp)
+	[[nodiscard]] bool match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
 	{
-		if (auto sn = str.size(); !sn || (available(sr, sn) && comp(*this, sr, sn, str))) {
+		if (std::size_t const sn = str.size(); !sn || (available(sr, sn) && comp(*this, sr, sn, str))) {
 			sr += sn;
 			return true;
 		}
@@ -1457,7 +1505,7 @@ class basic_parser
 	}
 
 	template <class Match>
-	[[nodiscard]] bool match_single(std::size_t& sr, Match&& match)
+	[[nodiscard]] bool match_single(std::size_t& sr, Match const& match)
 	{
 		if (!available(sr, 1))
 			return false;
@@ -1465,7 +1513,7 @@ class basic_parser
 		auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(sr);
 		auto const last = buffer.cend();
 		auto [next, rune] = utf8::decode_rune(curr, last);
-		bool matched;
+		bool matched = false;
 		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
 			matched = match(curr, last, next, rune);
 		} else if constexpr(std::is_invocable_v<Match, unicode::record const&>) {
@@ -1474,7 +1522,7 @@ class basic_parser
 			matched = match(rune);
 		} else {
 			matched = match();
-			detail::ignore(rune);
+			std::ignore = rune;
 		}
 		if (matched)
 			sr += static_cast<std::size_t>(std::distance(curr, next));
@@ -1482,9 +1530,9 @@ class basic_parser
 	}
 
 	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify&& mod, Compare&& comp)
+	[[nodiscard]] bool match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
-		auto const& symbols = environment_.get_symbols(symbol_name);
+		auto const& symbols = environment_->get_symbols(symbol_name);
 		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(tsr, mod(symbol), comp); })) {
 			sr = tsr;
 			return true;
@@ -1493,23 +1541,23 @@ class basic_parser
 	}
 
 	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify&& mod, Compare&& comp)
+	[[nodiscard]] bool match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
-		auto const& symbols = environment_.get_symbols(symbol_name);
+		auto const& symbols = environment_->get_symbols(symbol_name);
 		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(sr, mod(symbol), comp); });
 	}
 
 	template <class Modify, class Compare>
 	[[nodiscard]] bool match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
 	{
-		auto const& symbols = environment_.get_symbols(symbol_name);
+		auto const& symbols = environment_->get_symbols(symbol_name);
 		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : false;
 	}
 
 	template <class Modify, class Compare>
 	[[nodiscard]] bool match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
 	{
-		auto const& symbols = environment_.get_symbols(symbol_name);
+		auto const& symbols = environment_->get_symbols(symbol_name);
 		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : false;
 	}
 
@@ -1521,7 +1569,7 @@ class basic_parser
 		if constexpr (Opcode == opcode::commit_partial) {
 			detail::make_tuple_view<0, 1>(backtrack_stack_.back()) = {sr, rc};
 		} else {
-			detail::ignore(sr, rc);
+			std::ignore = std::tie(sr, rc);
 			if constexpr (Opcode == opcode::commit_back)
 				sr = std::get<0>(backtrack_stack_.back());
 			pop_stack_frame(backtrack_stack_);
@@ -1534,24 +1582,24 @@ class basic_parser
 	{
 		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
 		auto const full_match = match();
-		auto const prior_call_depth = environment_.start_accept(full_match, subject());
-		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_.end_accept(prior_call_depth); }};
-		auto const& actions = grammar_.program().actions;
-		auto const& captures = grammar_.program().captures;
-		for (auto& response : responses_) {
-			if (environment_.prune_depth() <= response.call_depth)
+		auto const prior_call_depth = environment_->start_accept(full_match, subject());
+		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_->end_accept(prior_call_depth); }};
+		auto const& actions = grammar_->program().actions;
+		auto const& captures = grammar_->program().captures;
+		for (auto& resp : responses_) {
+			if (environment_->prune_depth() <= resp.call_depth)
 				continue;
-			environment_.reset_call_depth(response.call_depth);
-			if (response.range.index < max_size)
-				captures[response.action_index](environment_, syntax{full_match.substr(response.range.index, response.range.size), response.range.index});
+			environment_->reset_call_depth(resp.call_depth);
+			if (resp.range.index < max_size)
+				captures[resp.action_index](*environment_, syntax{full_match.substr(resp.range.index, resp.range.size), resp.range.index});
 			else
-				actions[response.action_index](environment_);
+				actions[resp.action_index](*environment_);
 		}
 	}
 
 	[[nodiscard]] auto drain()
 	{
-		environment_.reset_origin();
+		environment_->reset_origin();
 		input_source_.drain_buffer(registers_.sr);
 		casefolded_subjects_.clear();
 		responses_.clear();
@@ -1569,7 +1617,7 @@ class basic_parser
 
 	[[nodiscard]] auto drop_responses_after(std::size_t n)
 	{
-		std::vector<semantic_response> dropped;
+		std::vector<response> dropped;
 		if (n < responses_.size()) {
 			dropped.assign(responses_.begin() + static_cast<std::ptrdiff_t>(n), responses_.end());
 			responses_.resize(n);
@@ -1577,7 +1625,7 @@ class basic_parser
 		return dropped;
 	}
 
-	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<semantic_response> const& restore)
+	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<response> const& restore)
 	{
 		pop_responses_after(n);
 		responses_.insert(responses_.end(), restore.begin(), restore.end());
@@ -1601,18 +1649,18 @@ class basic_parser
 	}
 
 public:
-	basic_parser(lug::grammar const& g, lug::environment& e) : grammar_{g}, environment_{e} {}
-	[[nodiscard]] lug::grammar const& grammar() const noexcept { return grammar_; }
-	[[nodiscard]] lug::environment& environment() const noexcept { return environment_; }
+	basic_parser(lug::grammar const& g, lug::environment& e) : grammar_{&g}, environment_{&e} {}
+	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
+	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
 	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
 	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
 	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
 	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
-	[[nodiscard]] syntax_position subject_position() { return environment_.position_at(registers_.sr); }
-	[[nodiscard]] syntax_position max_subject_position() { return environment_.position_at(registers_.mr); }
-	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_.position_at(index); }
-	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_.position_at(range.index); }
-	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_.position_at(range.index + range.size); }
+	[[nodiscard]] syntax_position subject_position() { return environment_->position_at(registers_.sr); }
+	[[nodiscard]] syntax_position max_subject_position() { return environment_->position_at(registers_.mr); }
+	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_->position_at(index); }
+	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_->position_at(range.index); }
+	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_->position_at(range.index + range.size); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
 	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
@@ -1649,12 +1697,14 @@ public:
 	bool parse()
 	{
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
-		program const& prog = grammar_.program();
+		program const& prog = grammar_->program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
 		auto [sr, mr, rc, pc, fc] = drain();
-		bool result = false, done = false;
-		pc = 0, fc = 0;
+		bool result = false;
+		bool done = false;
+		pc = 0;
+		fc = 0;
 		while (!done) {
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
 			switch (op) {
@@ -1668,7 +1718,7 @@ public:
 				} break;
 				case opcode::match_any: {
 					if constexpr (detail::input_source_has_options<InputSource>::value) {
-						if (((imm & 0x8000) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
+						if (((imm & 0x8000U) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
 							goto failure;
 					}
 					if (!match_single(sr, []{ return true; }))
@@ -1723,16 +1773,19 @@ public:
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						auto const memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(),
-								[srr = sr, pca = pc + off](auto const& m){ return m.srr == srr && m.pca == pca ? 1 : (m.srr < srr ? 0 : -1); });
+						auto const memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(), [srr = sr, pca = pc + off](auto const& m) {
+								if ((m.srr == srr) && (m.pca == pca))
+									return 1;
+								return ((m.srr < srr) ? 0 : -1);
+							});
 						if (memo != lrmemo_stack_.crend()) {
-							if (memo->sra == lrfailcode || imm < memo->prec)
+							if ((memo->sra == lrfailcode) || (imm < memo->prec))
 								goto failure;
 							sr = memo->sra, rc = restore_responses_after(rc, memo->responses);
 							continue;
 						}
 						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrmemo_stack_.push_back({sr, lrfailcode, imm, pc, pc + off, rc, std::vector<semantic_response>{}});
+						lrmemo_stack_.push_back({sr, lrfailcode, imm, pc, pc + off, rc, std::vector<response>{}});
 					} else {
 						stack_frames_.push_back(stack_frame_type::call);
 						call_stack_.push_back(pc);
@@ -1749,7 +1802,7 @@ public:
 						} break;
 						case stack_frame_type::lrcall: {
 							auto& memo = lrmemo_stack_.back();
-							if (memo.sra == lrfailcode || sr > memo.sra) {
+							if ((memo.sra == lrfailcode) || (sr > memo.sra)) {
 								memo.sra = sr, memo.responses = drop_responses_after(memo.rcr);
 								sr = memo.srr, pc = memo.pca, rc = memo.rcr;
 								continue;
@@ -1781,7 +1834,7 @@ public:
 							} break;
 							case stack_frame_type::condition: {
 								auto const& [cond_name, cond_value] = condition_stack_.back();
-								environment_.set_condition(cond_name, cond_value);
+								environment_->set_condition(cond_name, cond_value);
 								pop_stack_frame(condition_stack_), ++fc;
 							} break;
 							case stack_frame_type::lrcall: {
@@ -1795,7 +1848,7 @@ public:
 								pop_stack_frame(symbol_definition_stack_), ++fc;
 							} break;
 							case stack_frame_type::symbol_table: {
-								environment_.symbols_.swap(symbol_table_stack_.back());
+								environment_->symbols_.swap(symbol_table_stack_.back());
 								pop_stack_frame(symbol_table_stack_), ++fc;
 							} break;
 							default: break;
@@ -1804,7 +1857,7 @@ public:
 					pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
-					if (cut_deferred_ = !capture_stack_.empty() || !lrmemo_stack_.empty(); !cut_deferred_) {
+					if (cut_deferred_ = (!capture_stack_.empty() || !lrmemo_stack_.empty()); !cut_deferred_) {
 						accept(sr, mr, rc, pc);
 						std::tie(sr, mr, rc, pc, std::ignore) = drain();
 					}
@@ -1818,8 +1871,8 @@ public:
 				} break;
 				case opcode::predicate: {
 					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-					environment_.reset_match_and_subject(match(), subject());
-					bool const accepted = prog.predicates[imm](environment_);
+					environment_->reset_match_and_subject(match(), subject());
+					bool const accepted = prog.predicates[imm](*environment_);
 					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
 					pop_responses_after(rc);
 					if (!accepted)
@@ -1832,29 +1885,30 @@ public:
 				case opcode::capture_end: {
 					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::capture))
 						goto failure;
-					auto const sr0 = static_cast<std::size_t>(capture_stack_.back()), sr1 = sr;
+					auto const sr0 = static_cast<std::size_t>(capture_stack_.back());
+					auto const sr1 = sr;
 					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
 					if (sr0 > sr1)
 						goto failure;
 					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
 				} break;
 				case opcode::condition_test: {
-					if (environment_.has_condition(str) != (imm != 0))
+					if (environment_->has_condition(str) != (imm != 0))
 						goto failure;
 				} break;
 				case opcode::condition_push: {
 					stack_frames_.push_back(stack_frame_type::condition);
-					condition_stack_.emplace_back(str, environment_.set_condition(str, imm != 0));
+					condition_stack_.emplace_back(str, environment_->set_condition(str, imm != 0));
 				} break;
 				case opcode::condition_pop: {
 					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::condition))
 						goto failure;
 					auto const& [cond_name, cond_value] = condition_stack_.back();
-					environment_.set_condition(cond_name, cond_value);
+					environment_->set_condition(cond_name, cond_value);
 					pop_stack_frame(condition_stack_);
 				} break;
 				case opcode::symbol_exists: {
-					if (environment_.has_symbol(str) != (imm != 0))
+					if (environment_->has_symbol(str) != (imm != 0))
 						goto failure;
 				} break;
 				case opcode::symbol_all: {
@@ -1897,24 +1951,25 @@ public:
 					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_definition))
 						goto failure;
 					auto const [symbol_name, symbol_sr] = symbol_definition_stack_.back();
-					auto const sr0 = static_cast<std::size_t>(symbol_sr), sr1 = sr;
+					auto const sr0 = static_cast<std::size_t>(symbol_sr);
+					auto const sr1 = sr;
 					pop_stack_frame(symbol_definition_stack_);
 					if (sr0 > sr1)
 						goto failure;
-					environment_.add_symbol(symbol_name, std::string{match().substr(sr0, sr1 - sr0)});
+					environment_->add_symbol(symbol_name, std::string{match().substr(sr0, sr1 - sr0)});
 				} break;
 				case opcode::symbol_push: {
 					stack_frames_.push_back(stack_frame_type::symbol_table);
-					symbol_table_stack_.emplace_back(environment_.symbols_);
+					symbol_table_stack_.emplace_back(environment_->symbols_);
 					if (imm == 1)
-						environment_.symbols_.erase(str);
+						environment_->symbols_.erase(str);
 					else if (imm == 2)
-						environment_.symbols_.clear();
+						environment_->symbols_.clear();
 				} break;
 				case opcode::symbol_pop: {
 					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_table))
 						goto failure;
-					environment_.symbols_.swap(symbol_table_stack_.back());
+					environment_->symbols_.swap(symbol_table_stack_.back());
 					pop_stack_frame(symbol_table_stack_);
 				} break;
 				default: registers_ = {sr, (std::max)(mr, sr), rc, pc, 0}; throw bad_opcode{};
@@ -1982,15 +2037,17 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 [[nodiscard]] inline grammar basic_regular_expression::make_grammar()
 {
 	using namespace language;
-	implicit_space_rule default_space = nop;
-	rule Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
-	rule Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
-	rule Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.capture()); }
-	    | str("[:") > +(!chr(':') > any) > str(":]")    <[](generator& g, syntax const& x) { g.bracket_class(x.capture().substr(2, x.range().size - 4)); }
-	    | any                                           <[](generator& g, syntax const& x) { g.bracket_range(x.capture(), x.capture()); };
-	rule Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
-	    > Element > *(!chr(']') > Element) > chr(']')   <[](generator& g) { g.bracket_commit(); };
-	rule Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.capture()); };
+	implicit_space_rule const default_space = nop;
+	// NOLINTBEGIN(bugprone-chained-comparison)
+	rule const Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
+	rule const Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
+	rule const Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.str()); }
+	           | str("[:") > +(!chr(':') > any) > str(":]")   <[](generator& g, syntax const& x) { g.bracket_class(x.str().substr(2, x.range().size - 4)); }
+	           | any                                          <[](generator& g, syntax const& x) { g.bracket_range(x.str(), x.str()); };
+	rule const Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
+	           > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
+	rule const Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.str()); };
+	// NOLINTEND(bugprone-chained-comparison)
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
 }
 
