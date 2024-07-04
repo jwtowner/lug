@@ -1,6 +1,6 @@
 # Changelog
 
-## Release v0.3.0 (Under Development)
+## Release v0.3.0 (July 4, 2024)
 
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
 * Added support for parsing characters and character literals where applicable without explicitly needing to wrap them with `chr()` or `_cx`.
