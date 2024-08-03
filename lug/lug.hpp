@@ -112,7 +112,7 @@ struct program
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture_action> captures;
 	std::vector<syntactic_predicate> predicates;
-	directives mandate{directives::eps};
+	directives entry_mode{directives::eps};
 
 	void concatenate(program const& src)
 	{
@@ -135,7 +135,7 @@ struct program
 			instructions.push_back(instr);
 			instructions.insert(instructions.end(), i + 1, j);
 		}
-		mandate = (mandate & ~directives::eps) | (mandate & src.mandate & directives::eps);
+		entry_mode = (entry_mode & ~directives::eps) | (entry_mode & src.entry_mode & directives::eps);
 	}
 
 	void swap(program& p) noexcept
@@ -145,7 +145,7 @@ struct program
 		actions.swap(p.actions);
 		captures.swap(p.captures);
 		predicates.swap(p.predicates);
-		std::swap(mandate, p.mandate);
+		std::swap(entry_mode, p.entry_mode);
 	}
 };
 
@@ -360,8 +360,8 @@ template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_
 
 class encoder
 {
-	directives mandate_{directives::none};
 	std::vector<directives> mode_;
+	directives entry_mode_{directives::none};
 	virtual void do_append(instruction instr) = 0;
 	virtual void do_append(program const&) = 0;
 	[[nodiscard]] virtual immediate do_add_rune_set(unicode::rune_set&& /*r*/) { return immediate{0}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
@@ -376,7 +376,7 @@ protected:
 	encoder& do_call(rule const* r, program const* p, std::ptrdiff_t off, unsigned short prec)
 	{
 		auto callee_mode = mode_.back();
-		skip(p->mandate ^ directives::eps, directives::noskip);
+		skip(p->entry_mode ^ directives::eps, directives::noskip);
 		do_add_callee(r, p, length(), callee_mode);
 		return encode(opcode::call, off, immediate{prec});
 	}
@@ -401,9 +401,10 @@ protected:
 		return encode(op, detail::string_pack(value), penum);
 	}
 
-	void do_skip()
+	void do_skip(directives& last_mode)
 	{
-		mode_.back() = (mode_.back() & ~(directives::preskip | directives::postskip)) | directives::lexeme | directives::noskip;
+		last_mode &= ~(directives::preskip | directives::postskip);
+		last_mode |= (directives::lexeme | directives::noskip);
 		(*grammar::implicit_space())(*this);
 	}
 
@@ -416,7 +417,6 @@ public:
 	encoder& operator=(encoder&&) = delete;
 	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] decltype(auto) evaluate(E const& e, M const& m);
 	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] std::ptrdiff_t evaluate_length(E const& e, M const& m);
-	encoder& dpsh(directives enable, directives disable) { directives const prev = mode_.back(); mode_.push_back((prev & ~disable) | enable); return *this; }
 	encoder& append(instruction instr) { do_append(instr); return *this; }
 	encoder& append(program const& p) { do_append(p); return *this; }
 	encoder& call(program const& p, unsigned short prec) { return do_call(nullptr, &p, 0, prec); }
@@ -427,31 +427,41 @@ public:
 	encoder& encode(opcode op, syntactic_predicate&& p) { return append(instruction{op, operands::none, do_add_syntactic_predicate(std::move(p))}); }
 	encoder& encode(opcode op, std::ptrdiff_t off, immediate imm = immediate{0}) { return append(instruction{op, operands::off, imm}).append(instruction{off}); }
 	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
-	[[nodiscard]] directives mandate() const noexcept { return (mandate_ & ~directives::eps) | mode_.back(); }
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
+	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
 	encoder& match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes))); }
 	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match); }
 	encoder& match_any() { return skip().encode(opcode::match_any); }
 	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>> encoder& match_class(T properties) { return skip().do_match_class(Op, properties); }
 
+	encoder& dpsh(directives enable, directives disable)
+	{
+		directives const prev = mode_.back();
+		mode_.push_back((prev & ~disable) | enable);
+		return *this;
+	}
+
 	encoder& dpop(directives relay)
 	{
-		auto const prev = detail::pop_back(mode_);
-		auto const next = (mode_.back() & ~relay) | (prev & relay);
-		if ((next & directives::postskip) == directives::none && (prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip)
-			do_skip();
+		directives const prev = detail::pop_back(mode_);
+		directives& last_mode = mode_.back();
+		directives const next = (last_mode & ~relay) | (prev & relay);
+		if (((next & directives::postskip) == directives::none) && ((prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
+			do_skip(last_mode);
 		mode_.back() = next;
 		return *this;
 	}
 
-	encoder& skip(directives callee_mandate = directives::eps, directives callee_skip = directives::lexeme)
+	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
 	{
-		auto const mode = mode_.back();
-		if (mandate_ == directives::none)
-			mandate_ = (mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		if ((((mode | callee_mandate)) & (callee_skip | directives::preskip)) == directives::preskip)
-			do_skip();
-		mode_.back() = mode & ~(callee_mandate & directives::eps);
+		directives& last_mode = mode_.back();
+		directives const prev = last_mode;
+		directives const next = last_mode & ~(callee_mode & directives::eps);
+		if (entry_mode_ == directives::none)
+			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
+		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
+			do_skip(last_mode);
+		mode_.back() = next;
 		return *this;
 	}
 
@@ -459,7 +469,7 @@ public:
 	{
 		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
 										(p.instructions.size() <= 8) && (p.actions.size() <= 1) && (p.captures.size() <= 1) && (p.predicates.size() <= 1))
-			return skip(p.mandate, directives::noskip).append(p);
+			return skip(p.entry_mode, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
 
@@ -536,7 +546,7 @@ class program_encoder : public encoder
 
 public:
 	program_encoder(program& p, program_callees& c, directives initial) : encoder{initial}, program_{p}, callees_{c} {}
-	~program_encoder() override { program_.mandate = mandate(); }
+	~program_encoder() override { program_.entry_mode = entry_mode(); }
 	program_encoder(program_encoder const&) = delete;
 	program_encoder(program_encoder&&) = delete;
 	program_encoder& operator=(program_encoder const&) = delete;
@@ -774,28 +784,40 @@ struct rule_precedence_expression : terminal_encoder_expression_interface
 	return rule_precedence_expression{*this, precedence};
 }
 
+template <class E1>
+struct directive_expression : unary_encoder_expression_interface<E1>
+{
+	directives enable_mask{directives::none};
+	directives disable_mask{directives::none};
+	directives relay_mask{directives::none};
+
+	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
+	constexpr directive_expression(X1&& x1, directives enable, directives disable, directives relay)
+		: unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, enable_mask{enable}, disable_mask{disable}, relay_mask{relay} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
+	{
+		d.dpsh(enable_mask, disable_mask);
+		auto m2 = d.evaluate(this->e1, m);
+		d.dpop(relay_mask);
+		return m2;
+	}
+};
+
 template <directives EnableMask, directives DisableMask, directives RelayMask>
 struct directive_modifier
 {
-	template <class E1>
-	struct directive_expression : unary_encoder_expression_interface<E1>
-	{
-		using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
-
-		template <class M>
-		[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
-		{
-			d.dpsh(EnableMask, DisableMask);
-			auto m2 = d.evaluate(this->e1, m);
-			d.dpop(RelayMask);
-			return m2;
-		}
-	};
-
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
-		return directive_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e)};
+		return directive_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e), EnableMask, DisableMask, RelayMask};
+	}
+
+	template <class E>
+	[[nodiscard]] constexpr auto operator[](directive_expression<E> const& e) const noexcept
+	{
+		return directive_expression<E>{e.e1, ((e.enable_mask & ~DisableMask) | EnableMask), (e.disable_mask | DisableMask), (e.relay_mask & RelayMask) | RelayMask};
 	}
 };
 
@@ -2062,7 +2084,7 @@ inline auto basic_regular_expression::operator()(encoder& d, M const& m) const -
 		if (!parse(expression_, grmr, genr))
 			throw bad_string_expression{};
 	}
-	d.skip((program_->mandate & directives::eps) ^ directives::eps).append(*program_);
+	d.skip((program_->entry_mode & directives::eps) ^ directives::eps).append(*program_);
 	return m;
 }
 
