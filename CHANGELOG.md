@@ -4,7 +4,8 @@
 
 * Extracted common base class of `lug::basic_parser` into `lug::parser_base` to reduce template bloat.
 * Reduced template bloat for parser directives (improving compiler error messages) and optimized nested directives.
-* Merged parser stack frames together into a single stack using std::variant.
+* Merged parser stack frames together into a single stack using `std::variant`.
+* Removed use of `goto` in parser machine main loop.
 
 ## Release v0.3.0 (July 4, 2024)
 

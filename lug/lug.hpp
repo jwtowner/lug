@@ -664,7 +664,7 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 				if (classes != unicode::ctype::none)
 					encoder.match_class<opcode::match_any_of>(classes);
 				if (circumflex)
-					encoder.encode(opcode::commit, 0).encode(opcode::fail).match_any();
+					encoder.encode(opcode::commit, 0).encode(opcode::fail, immediate{1}).match_any();
 			}
 			runes.clear(), classes = unicode::ctype::none, circumflex = false;
 		}
@@ -839,7 +839,7 @@ inline constexpr directive_modifier<directives::preskip, directives::postskip, d
 
 struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2).encode(opcode::match_any, immediate{0x8000}).encode(opcode::fail, immediate{1}); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2).encode(opcode::match_any, immediate{0x8000}).encode(opcode::fail, immediate{2}); return m; } };
 struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
 struct cut_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept); return m; } };
 
@@ -969,7 +969,7 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<E1>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
 		auto m2 = d.encode(opcode::choice, 1 + d.evaluate_length(this->e1, m)).evaluate(this->e1, m);
-		d.encode(opcode::fail, immediate{1});
+		d.encode(opcode::fail, immediate{2});
 		return m2;
 	}
 };
@@ -983,7 +983,7 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<E1>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
 		auto m2 = d.encode(opcode::choice, 2 + d.evaluate_length(this->e1, m)).evaluate(this->e1, m);
-		d.encode(opcode::commit_back, 1).encode(opcode::fail);
+		d.encode(opcode::commit_back, 1).encode(opcode::fail, immediate{1});
 		return m2;
 	}
 };
@@ -1476,6 +1476,7 @@ class parser_base
 protected:
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
+
 	struct response { std::size_t call_depth{0}; std::size_t action_index{0}; syntax_range range{0, 0}; constexpr response() noexcept = default; constexpr response(std::size_t c, std::size_t a, syntax_range const& r) noexcept : call_depth{c}, action_index{a}, range{r} {} };
 	struct backtrack_frame { std::size_t sr; std::size_t rc; std::ptrdiff_t pc; constexpr backtrack_frame(std::size_t s, std::size_t r, std::ptrdiff_t p) noexcept : sr{s}, rc{r}, pc{p} {} };
 	struct call_frame { std::ptrdiff_t pc; constexpr explicit call_frame(std::ptrdiff_t p) noexcept : pc{p} {} };
@@ -1485,6 +1486,7 @@ protected:
 	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };
 	using symbol_table_frame = std::unordered_map<std::string_view, std::vector<std::string>>;
 	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, symbol_frame, symbol_table_frame>;
+
 	lug::grammar const* grammar_;
 	lug::environment* environment_;
 	std::vector<response> responses_;
@@ -1663,20 +1665,20 @@ class basic_parser : public parser_base
 	}
 
 	template <class Compare>
-	[[nodiscard]] bool match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	[[nodiscard]] std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
 	{
 		if (std::size_t const sn = str.size(); !sn || (available(sr, sn) && comp(*this, sr, sn, str))) {
 			sr += sn;
-			return true;
+			return 0;
 		}
-		return false;
+		return 1;
 	}
 
 	template <class Match>
-	[[nodiscard]] bool match_single(std::size_t& sr, Match const& match)
+	[[nodiscard]] std::ptrdiff_t match_single(std::size_t& sr, Match const& match)
 	{
 		if (!available(sr, 1))
-			return false;
+			return 1;
 		auto const buffer = input_source_.buffer();
 		auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(sr);
 		auto const last = buffer.cend();
@@ -1692,41 +1694,43 @@ class basic_parser : public parser_base
 			matched = match();
 			std::ignore = rune;
 		}
-		if (matched)
+		if (matched) {
 			sr += static_cast<std::size_t>(std::distance(curr, next));
-		return matched;
-	}
-
-	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
-	{
-		auto const& symbols = environment_->get_symbols(symbol_name);
-		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(tsr, mod(symbol), comp); })) {
-			sr = tsr;
-			return true;
+			return 0;
 		}
-		return false;
+		return 1;
 	}
 
 	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
+	[[nodiscard]] std::ptrdiff_t match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return this->match_sequence(sr, mod(symbol), comp); });
+		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(tsr, mod(symbol), comp) == 0); })) {
+			sr = tsr;
+			return 0;
+		}
+		return 1;
 	}
 
 	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	[[nodiscard]] std::ptrdiff_t match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : false;
+		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(sr, mod(symbol), comp) == 0); }) ? 0 : 1;
 	}
 
 	template <class Modify, class Compare>
-	[[nodiscard]] bool match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	[[nodiscard]] std::ptrdiff_t match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : false;
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : 1;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] std::ptrdiff_t match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_->get_symbols(symbol_name);
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
 	}
 
 	void accept(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
@@ -1800,48 +1804,42 @@ public:
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
 			switch (op) {
 				case opcode::match: {
-					if (!match_sequence(sr, str, std::mem_fn(&basic_parser::compare)))
-						goto failure;
+					fc = match_sequence(sr, str, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::match_cf: {
-					if (!match_sequence(sr, str, std::mem_fn(&basic_parser::casefold_compare)))
-						goto failure;
+					fc = match_sequence(sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: {
 					if constexpr (detail::input_source_has_options<InputSource>::value) {
-						if (((imm & 0x8000U) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
-							goto failure;
+						if (((imm & 0x8000U) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
+							fc = 1;
+							break;
+						}
 					}
-					if (!match_single(sr, []{ return true; }))
-						goto failure;
+					fc = match_single(sr, []{ return true; });
 				} break;
 				case opcode::match_any_of: {
-					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::any_of(r, pe, s); }))
-						goto failure;
+					fc = match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
 				} break;
 				case opcode::match_all_of: {
-					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::all_of(r, pe, s); }))
-						goto failure;
+					fc = match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
 				} break;
 				case opcode::match_none_of: {
-					if (!match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::none_of(r, pe, s); }))
-						goto failure;
+					fc = match_single(sr, [pe = static_cast<unicode::property_enum>(imm), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
 				} break;
 				case opcode::match_set: {
-					if (!match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
+					fc = match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
 							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
-							return interval != runes.end() && interval->first <= rune && rune <= interval->second; }))
-						goto failure;
+							return interval != runes.end() && interval->first <= rune && rune <= interval->second; });
 				} break;
 				case opcode::match_eol: {
-					if (!match_single(sr, [](auto curr, auto last, auto& next, char32_t rune) {
+					fc = match_single(sr, [](auto curr, auto last, auto& next, char32_t rune) {
 							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
 								return false;
 							if (U'\r' == rune)
 								if (auto const [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
 									next = next2;
-							return true; }))
-						goto failure;
+							return true; });
 				} break;
 				case opcode::choice: {
 					stack_frames_.emplace_back(std::in_place_type<backtrack_frame>, sr - imm, rc, pc + off);
@@ -1871,8 +1869,10 @@ public:
 							});
 						if (frame_it != stack_frames_.crend()) {
 							auto const& memo = std::get<lrmemo_frame>(*frame_it);
-							if ((memo.sra == parser_base::lrfailcode) || (imm < memo.prec))
-								goto failure;
+							if ((memo.sra == parser_base::lrfailcode) || (imm < memo.prec)) {
+								fc = 1;
+								break;
+							}
 							sr = memo.sra;
 							rc = restore_responses_after(rc, memo.responses);
 							continue;
@@ -1911,18 +1911,6 @@ public:
 				} break;
 				case opcode::fail: {
 					fc = static_cast<std::ptrdiff_t>(imm);
-				failure:
-					for (mr = (std::max)(mr, sr), ++fc; fc > 0; --fc) {
-						if (done = (cut_frame_ >= stack_frames_.size()); done) {
-							registers_ = {sr, mr, rc, pc};
-							break;
-						}
-						auto const fail_result = fail_one(sr, rc, pc);
-						fc += fail_result.first;
-						if (fail_result.second)
-							accept_if_deferred(sr, mr, rc, pc);
-					}
-					pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
 					if (cut_deferred_ = (cut_inhibited_ > 0); !cut_deferred_) {
@@ -1943,8 +1931,7 @@ public:
 					bool const accepted = prog.predicates[imm](*environment_);
 					std::tie(sr, mr, rc, pc) = registers_.as_tuple();
 					pop_responses_after(rc);
-					if (!accepted)
-						goto failure;
+					fc = accepted ? 0 : 1;
 				} break;
 				case opcode::capture_start: {
 					stack_frames_.emplace_back(std::in_place_type<capture_frame>, sr);
@@ -1957,13 +1944,14 @@ public:
 					auto const sr1 = sr;
 					stack_frames_.pop_back();
 					accept_if_deferred(sr, mr, rc, pc);
-					if (sr0 > sr1)
-						goto failure;
+					if (sr0 > sr1) {
+						fc = 1;
+						break;
+					}
 					rc = push_response(call_depth_, imm, syntax_range{sr0, sr1 - sr0});
 				} break;
 				case opcode::condition_test: {
-					if (environment_->has_condition(str) != (imm != 0))
-						goto failure;
+					fc = (environment_->has_condition(str) == (imm != 0)) ? 0 : 1;
 				} break;
 				case opcode::condition_push: {
 					stack_frames_.emplace_back(std::in_place_type<condition_frame>, str, environment_->set_condition(str, imm != 0));
@@ -1976,40 +1964,31 @@ public:
 					stack_frames_.pop_back();
 				} break;
 				case opcode::symbol_exists: {
-					if (environment_->has_symbol(str) != (imm != 0))
-						goto failure;
+					fc = (environment_->has_symbol(str) == (imm != 0)) ? 0 : 1;
 				} break;
 				case opcode::symbol_all: {
-					if (!match_symbol_all(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare)))
-						goto failure;
+					fc = match_symbol_all(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_all_cf: {
-					if (!match_symbol_all(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
-						goto failure;
+					fc = match_symbol_all(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_any: {
-					if (!match_symbol_any(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare)))
-						goto failure;
+					fc = match_symbol_any(sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_any_cf: {
-					if (!match_symbol_any(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
-						goto failure;
+					fc = match_symbol_any(sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_head: {
-					if (!match_symbol_head(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare)))
-						goto failure;
+					fc = match_symbol_head(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_head_cf: {
-					if (!match_symbol_head(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
-						goto failure;
+					fc = match_symbol_head(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_tail: {
-					if (!match_symbol_tail(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare)))
-						goto failure;
+					fc = match_symbol_tail(sr, str, imm, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_tail_cf: {
-					if (!match_symbol_tail(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare)))
-						goto failure;
+					fc = match_symbol_tail(sr, str, imm, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_start: {
 					stack_frames_.emplace_back(std::in_place_type<symbol_frame>, str, sr);
@@ -2021,8 +2000,10 @@ public:
 					auto const sr0 = static_cast<std::size_t>(symbol.sr);
 					auto const sr1 = sr;
 					stack_frames_.pop_back();
-					if (sr0 > sr1)
-						goto failure;
+					if (sr0 > sr1) {
+						fc = 1;
+						break;
+					}
 					environment_->add_symbol(symbol.name, std::string{input_source_.buffer().substr(sr0, sr1 - sr0)});
 				} break;
 				case opcode::symbol_push: {
@@ -2039,6 +2020,22 @@ public:
 					stack_frames_.pop_back();
 				} break;
 				default: registers_ = {sr, (std::max)(mr, sr), rc, pc}; throw bad_opcode{};
+			}
+			if (fc > 0) {
+				mr = (std::max)(mr, sr);
+				do {
+					if (done = (cut_frame_ >= stack_frames_.size()); done) {
+						registers_ = {sr, mr, rc, pc};
+						fc = 0;
+						break;
+					}
+					auto const fail_result = fail_one(sr, rc, pc);
+					fc += fail_result.first;
+					if (fail_result.second)
+						accept_if_deferred(sr, mr, rc, pc);
+					--fc;
+				} while (fc > 0);
+				pop_responses_after(rc);
 			}
 		}
 		return result;
