@@ -1545,6 +1545,68 @@ protected:
 		return responses_.size();
 	}
 
+	[[nodiscard]] std::ptrdiff_t call_into(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc, unsigned short imm, int off)
+	{
+		if (imm == 0) {
+			stack_frames_.emplace_back(std::in_place_type<call_frame>, pc);
+			++call_depth_;
+			pc += off;
+			return 0;
+		}
+		auto const frame_it = detail::escaping_find_if(stack_frames_.crbegin(), stack_frames_.crend(), [srr = sr, pca = pc + off](auto const& frame) {
+				if (auto const* const memo_ptr = std::get_if<lrmemo_frame>(&frame); memo_ptr != nullptr) {
+					if ((memo_ptr->srr == srr) && (memo_ptr->pca == pca))
+						return 1;
+					if (memo_ptr->srr >= srr)
+						return -1;
+				}
+				return 0;
+			});
+		if (frame_it != stack_frames_.crend()) {
+			auto const& memo = std::get<lrmemo_frame>(*frame_it);
+			if ((memo.sra == parser_base::lrfailcode) || (imm < memo.prec))
+				return 1;
+			sr = memo.sra;
+			rc = restore_responses_after(rc, memo.responses);
+			return 0;
+		}
+		stack_frames_.emplace_back(std::in_place_type<lrmemo_frame>, sr, parser_base::lrfailcode, imm, pc, pc + off, rc);
+		++cut_inhibited_;
+		++call_depth_;
+		pc += off;
+		return 0;
+	}
+
+	[[nodiscard]] bool return_from(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc)
+	{
+		if (stack_frames_.empty())
+			throw bad_stack{};
+		auto& frame = stack_frames_.back();
+		if (auto* const call = std::get_if<call_frame>(&frame); call != nullptr) {
+			--call_depth_;
+			pc = call->pc;
+			stack_frames_.pop_back();
+			return false;
+		}
+		if (auto* const memo = std::get_if<lrmemo_frame>(&frame); memo != nullptr) {
+			if ((memo->sra == parser_base::lrfailcode) || (sr > memo->sra)) {
+				memo->sra = sr;
+				memo->responses = drop_responses_after(memo->rcr);
+				sr = memo->srr;
+				pc = memo->pca;
+				rc = memo->rcr;
+				return false;
+			}
+			--call_depth_;
+			sr = memo->sra;
+			pc = memo->pcr;
+			rc = restore_responses_after(memo->rcr, memo->responses);
+			stack_frames_.pop_back();
+			return true;
+		}
+		throw bad_stack{};
+	}
+
 	[[nodiscard]] std::pair<std::ptrdiff_t, bool> fail_one(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc)
 	{
 		auto const fail_result = std::visit([this, &sr, &rc, &pc](auto& frame) -> std::pair<std::ptrdiff_t, bool> {
@@ -1830,14 +1892,14 @@ public:
 				case opcode::match_set: {
 					fc = match_single(sr, [&runes = prog.runesets[imm]](char32_t rune) {
 							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
-							return interval != runes.end() && interval->first <= rune && rune <= interval->second; });
+							return (interval != runes.end()) && (interval->first <= rune) && (rune <= interval->second); });
 				} break;
 				case opcode::match_eol: {
 					fc = match_single(sr, [](auto curr, auto last, auto& next, char32_t rune) {
-							if (curr == next || (unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None)
+							if ((curr == next) || ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None))
 								return false;
 							if (U'\r' == rune)
-								if (auto const [next2, rune2] = utf8::decode_rune(next, last); next2 != next && rune2 == U'\n')
+								if (auto const [next2, rune2] = utf8::decode_rune(next, last); (next2 != next) && (rune2 == U'\n'))
 									next = next2;
 							return true; });
 				} break;
@@ -1857,57 +1919,11 @@ public:
 					pc += off;
 				} break;
 				case opcode::call: {
-					if (imm != 0) {
-						auto const frame_it = detail::escaping_find_if(stack_frames_.crbegin(), stack_frames_.crend(), [srr = sr, pca = pc + off](auto const& frame) {
-								if (auto const* const memo_ptr = std::get_if<lrmemo_frame>(&frame); memo_ptr != nullptr) {
-									if ((memo_ptr->srr == srr) && (memo_ptr->pca == pca))
-										return 1;
-									if (memo_ptr->srr >= srr)
-										return -1;
-								}
-								return 0;
-							});
-						if (frame_it != stack_frames_.crend()) {
-							auto const& memo = std::get<lrmemo_frame>(*frame_it);
-							if ((memo.sra == parser_base::lrfailcode) || (imm < memo.prec)) {
-								fc = 1;
-								break;
-							}
-							sr = memo.sra;
-							rc = restore_responses_after(rc, memo.responses);
-							continue;
-						}
-						stack_frames_.emplace_back(std::in_place_type<lrmemo_frame>, sr, parser_base::lrfailcode, imm, pc, pc + off, rc);
-						++cut_inhibited_;
-					} else {
-						stack_frames_.emplace_back(std::in_place_type<call_frame>, pc);
-					}
-					++call_depth_;
-					pc += off;
+					fc = call_into(sr, rc, pc, imm, off);
 				} break;
 				case opcode::ret: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					auto& frame = stack_frames_.back();
-					if (auto* const call = std::get_if<call_frame>(&frame); call != nullptr) {
-						--call_depth_;
-						pc = call->pc;
-						stack_frames_.pop_back();
-					} else if (auto* const memo = std::get_if<lrmemo_frame>(&frame); memo != nullptr) {
-						if ((memo->sra == parser_base::lrfailcode) || (sr > memo->sra)) {
-							memo->sra = sr, memo->responses = drop_responses_after(memo->rcr);
-							sr = memo->srr, pc = memo->pca, rc = memo->rcr;
-							continue;
-						}
-						--call_depth_;
-						sr = memo->sra;
-						pc = memo->pcr;
-						rc = restore_responses_after(memo->rcr, memo->responses);
-						stack_frames_.pop_back();
+					if (return_from(sr, rc, pc))
 						accept_if_deferred(sr, mr, rc, pc);
-					} else {
-						throw bad_stack{};
-					}
 				} break;
 				case opcode::fail: {
 					fc = static_cast<std::ptrdiff_t>(imm);
