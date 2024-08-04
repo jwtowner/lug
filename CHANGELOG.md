@@ -1,5 +1,11 @@
 # Changelog
 
+## Release v0.4.0 (Under Development)
+
+* Extracted common base class of `lug::basic_parser` into `lug::parser_base` to reduce template bloat.
+* Reduced template bloat for parser directives (improving compiler error messages) and optimized nested directives.
+* Merged parser stack frames together into a single stack using std::variant.
+
 ## Release v0.3.0 (July 4, 2024)
 
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
