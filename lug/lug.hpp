@@ -14,6 +14,7 @@
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace lug {
@@ -27,6 +28,7 @@ class environment;
 class multi_input_source;
 class string_input_source;
 class string_view_input_source;
+class parser_base;
 template <class> class basic_parser;
 using parser = basic_parser<multi_input_source>;
 struct program;
@@ -201,40 +203,49 @@ public:
 
 class environment
 {
+	friend class parser_base;
 	template <class> friend class basic_parser;
 
-	static constexpr unsigned short max_call_depth = (std::numeric_limits<unsigned short>::max)();
+	static constexpr std::size_t max_call_depth = (std::numeric_limits<std::size_t>::max)();
 	static inline std::vector<std::string> const empty_symbols_{};
 	std::vector<std::any> attribute_frame_stack_;
 	std::vector<std::any> attribute_result_stack_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
-	std::string_view match_, subject_;
+	std::string_view match_;
+	std::string_view subject_;
+	std::size_t call_depth_{0};
+	std::size_t prune_depth_{max_call_depth};
 	syntax_position origin_{1, 1};
-	unsigned int tab_width_{8}, tab_alignment_{8};
-	unsigned short prune_depth_{max_call_depth}, call_depth_{0};
+	unsigned int tab_width_{8};
+	unsigned int tab_alignment_{8};
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
-	unsigned short start_accept(std::string_view m, std::string_view s)
+	std::size_t start_accept(std::string_view m, std::string_view s)
 	{
 		reset_match_and_subject(m, s);
 		on_accept_started();
 		return call_depth_;
 	}
 
-	void end_accept(unsigned short prior_call_depth)
+	void end_accept(std::size_t prior_call_depth)
 	{
 		on_accept_ended();
-		reset_call_depth(prior_call_depth);
+		call_depth_ = prior_call_depth;
+		prune_depth_ = max_call_depth;
 	}
 
-	void reset_call_depth(unsigned short depth) noexcept
+	[[nodiscard]] bool accept_response(std::size_t response_call_depth) noexcept
 	{
-		prune_depth_ = max_call_depth;
-		call_depth_ = depth;
+		if (prune_depth_ > response_call_depth) {
+			call_depth_ = response_call_depth;
+			prune_depth_ = max_call_depth;
+			return true;
+		}
+		return false;
 	}
 
 	void reset_match_and_subject(std::string_view m, std::string_view s)
@@ -273,8 +284,8 @@ public:
 	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return position_at(range.index); }
 	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return position_at(range.index + range.size); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
-	[[nodiscard]] unsigned short call_depth() const noexcept { return call_depth_; }
-	[[nodiscard]] unsigned short prune_depth() const noexcept { return prune_depth_; }
+	[[nodiscard]] std::size_t call_depth() const noexcept { return call_depth_; }
+	[[nodiscard]] std::size_t prune_depth() const noexcept { return prune_depth_; }
 	void escape() { prune_depth_ = call_depth_; }
 
 	[[nodiscard]] syntax_position position_at(std::size_t index)
@@ -1455,36 +1466,171 @@ public:
 
 struct parser_registers
 {
-	std::size_t sr{0}; std::size_t mr{0}; std::size_t rc{0}; std::ptrdiff_t pc{0}; std::size_t fc{0};
-	[[nodiscard]] auto as_tuple() noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
-	[[nodiscard]] auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc, fc); }
+	std::size_t sr{0}; std::size_t mr{0}; std::size_t rc{0}; std::ptrdiff_t pc{0};
+	[[nodiscard]] auto as_tuple() noexcept { return std::forward_as_tuple(sr, mr, rc, pc); }
+	[[nodiscard]] auto as_tuple() const noexcept { return std::forward_as_tuple(sr, mr, rc, pc); }
+};
+
+class parser_base
+{
+protected:
+	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
+	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
+	struct response { std::size_t call_depth{0}; std::size_t action_index{0}; syntax_range range{0, 0}; constexpr response() noexcept = default; constexpr response(std::size_t c, std::size_t a, syntax_range const& r) noexcept : call_depth{c}, action_index{a}, range{r} {} };
+	struct backtrack_frame { std::size_t sr; std::size_t rc; std::ptrdiff_t pc; constexpr backtrack_frame(std::size_t s, std::size_t r, std::ptrdiff_t p) noexcept : sr{s}, rc{r}, pc{p} {} };
+	struct call_frame { std::ptrdiff_t pc; constexpr explicit call_frame(std::ptrdiff_t p) noexcept : pc{p} {} };
+	struct capture_frame { std::size_t sr; constexpr explicit capture_frame(std::size_t s) noexcept : sr{s} {} };
+	struct condition_frame { std::string_view name; bool value; constexpr condition_frame(std::string_view n, bool v) noexcept : name{n}, value{v} {} };
+	struct lrmemo_frame { std::size_t srr; std::size_t sra; std::size_t prec; std::ptrdiff_t pcr; std::ptrdiff_t pca; std::size_t rcr; std::vector<response> responses; lrmemo_frame(std::size_t sr, std::size_t sa, std::size_t p, std::ptrdiff_t pc, std::ptrdiff_t pa, std::size_t rc) noexcept : srr{sr}, sra{sa}, prec{p}, pcr{pc}, pca{pa}, rcr{rc} {} };
+	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };
+	using symbol_table_frame = std::unordered_map<std::string_view, std::vector<std::string>>;
+	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, symbol_frame, symbol_table_frame>;
+	lug::grammar const* grammar_;
+	lug::environment* environment_;
+	std::vector<response> responses_;
+	std::vector<stack_frame> stack_frames_;	
+	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
+	parser_registers registers_{0, 0, 0, 0};
+	std::size_t call_depth_{0};
+	std::size_t cut_frame_{0};
+	std::ptrdiff_t cut_inhibited_{0};
+	bool cut_deferred_{false};
+	bool parsing_{false};
+
+	template <opcode Opcode>
+	void commit([[maybe_unused]] std::size_t& sr, [[maybe_unused]] std::size_t& rc, std::ptrdiff_t& pc, int off)
+	{
+		if (stack_frames_.empty())
+			throw bad_stack{};
+		auto& backtrack = std::get<backtrack_frame>(stack_frames_.back());
+		if constexpr (Opcode == opcode::commit_partial) {
+			backtrack.sr = sr;
+			backtrack.rc = rc;
+		} else {
+			if constexpr (Opcode == opcode::commit_back)
+				sr = backtrack.sr;
+			stack_frames_.pop_back();
+		}
+		pc += off;
+	}
+
+	void pop_responses_after(std::size_t n)
+	{
+		if (n < responses_.size())
+			responses_.resize(n);
+	}
+
+	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<response> const& restore)
+	{
+		pop_responses_after(n);
+		responses_.insert(responses_.end(), restore.begin(), restore.end());
+		return responses_.size();
+	}
+
+	[[nodiscard]] auto drop_responses_after(std::size_t n)
+	{
+		std::vector<response> dropped;
+		if (n < responses_.size()) {
+			dropped.assign(responses_.begin() + static_cast<std::ptrdiff_t>(n), responses_.end());
+			responses_.resize(n);
+		}
+		return dropped;
+	}
+
+	[[nodiscard]] auto push_response(std::size_t call_depth, std::size_t action_index, syntax_range const& range = {parser_base::max_size, 0})
+	{
+		responses_.emplace_back(call_depth, action_index, range);
+		return responses_.size();
+	}
+
+	[[nodiscard]] std::pair<std::ptrdiff_t, bool> fail_one(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc)
+	{
+		auto const fail_result = std::visit([this, &sr, &rc, &pc](auto& frame) -> std::pair<std::ptrdiff_t, bool> {
+			using frame_type = std::decay_t<decltype(frame)>;
+			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
+				sr = frame.sr;
+				rc = frame.rc;
+				pc = frame.pc;
+				return {0, false};
+			} else if constexpr (std::is_same_v<frame_type, call_frame>) {
+				--call_depth_;
+				return {1, false};
+			} else if constexpr (std::is_same_v<frame_type, capture_frame>) {
+				return {1, true};
+			} else if constexpr (std::is_same_v<frame_type, condition_frame>) {
+				environment_->set_condition(frame.name, frame.value);
+				return {1, false};
+			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
+				--call_depth_;
+				if (frame.sra != parser_base::lrfailcode) {
+					sr = frame.sra;
+					rc = restore_responses_after(frame.rcr, frame.responses);
+					pc = frame.pcr;
+					return {0, true};
+				}
+				return {1, true};
+			} else if constexpr (std::is_same_v<frame_type, symbol_frame>) {
+				return {1, false};
+			} else if constexpr (std::is_same_v<frame_type, symbol_table_frame>) {
+				environment_->symbols_.swap(frame);
+				return {1, false};
+			} else {
+				static_assert(detail::always_false_v<frame_type>, "non-exhaustive visitor!");
+			}
+		}, stack_frames_.back());
+		stack_frames_.pop_back();
+		return fail_result;
+	}
+
+	void do_accept(std::string_view match, std::string_view subject)
+	{
+		auto const prior_call_depth = environment_->start_accept(match, subject);
+		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_->end_accept(prior_call_depth); }};
+		auto const& actions = grammar_->program().actions;
+		auto const& captures = grammar_->program().captures;
+		for (auto& resp : responses_) {
+			if (environment_->accept_response(resp.call_depth)) {
+				if (resp.range.index < parser_base::max_size)
+					captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
+				else
+					actions[resp.action_index](*environment_);
+			}
+		}
+	}
+
+	[[nodiscard]] auto do_drain()
+	{
+		environment_->reset_origin();
+		casefolded_subjects_.clear();
+		responses_.clear();
+		registers_.mr -= registers_.sr;
+		registers_.sr = 0;
+		registers_.rc = 0;
+		cut_frame_ = stack_frames_.size();
+		cut_deferred_ = false;
+		return registers_.as_tuple();
+	}
+
+public:
+	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, environment_{&e} {}
+	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
+	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
+	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
+	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
+	[[nodiscard]] syntax_position subject_position() { return environment_->position_at(registers_.sr); }
+	[[nodiscard]] syntax_position max_subject_position() { return environment_->position_at(registers_.mr); }
+	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_->position_at(index); }
+	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_->position_at(range.index); }
+	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_->position_at(range.index + range.size); }
+	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
+	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
+	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
 };
 
 template <class InputSource>
-class basic_parser
+class basic_parser : public parser_base
 {
-	enum class stack_frame_type : unsigned char { backtrack, call, capture, condition, lrcall, symbol_definition, symbol_table };
-	enum class subject_location : std::size_t {};
-	struct response { unsigned short call_depth; unsigned short action_index; syntax_range range; };
-	struct lrmemo { std::size_t srr{0}; std::size_t sra{0}; std::size_t prec{0}; std::ptrdiff_t pcr{0}; std::ptrdiff_t pca{0}; std::size_t rcr{0}; std::vector<response> responses; };
-	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
-	lug::grammar const* grammar_;
-	lug::environment* environment_;
 	InputSource input_source_;
-	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
-	parser_registers registers_{0, 0, 0, 0, 0};
-	bool parsing_{false}, cut_deferred_{false};
-	std::size_t cut_frame_{0};
-	std::vector<stack_frame_type> stack_frames_;
-	std::vector<std::tuple<std::size_t, std::size_t, std::ptrdiff_t>> backtrack_stack_; // sr, rc, pc
-	std::vector<std::ptrdiff_t> call_stack_; // pc
-	std::vector<subject_location> capture_stack_; // sr
-	std::vector<std::pair<std::string_view, bool>> condition_stack_; // name, value
-	std::vector<std::pair<std::string_view, subject_location>> symbol_definition_stack_; // name, sr
-	std::vector<std::unordered_map<std::string_view, std::vector<std::string>>> symbol_table_stack_;
-	std::vector<lrmemo> lrmemo_stack_;
-	std::vector<response> responses_;
 
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
@@ -1583,109 +1729,31 @@ class basic_parser
 		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : false;
 	}
 
-	template <opcode Opcode>
-	[[nodiscard]] bool commit(std::size_t& sr, std::size_t& rc, std::ptrdiff_t& pc, int off)
-	{
-		if (stack_frames_.empty() || stack_frames_.back() != stack_frame_type::backtrack)
-			return false;
-		if constexpr (Opcode == opcode::commit_partial) {
-			detail::make_tuple_view<0, 1>(backtrack_stack_.back()) = {sr, rc};
-		} else {
-			std::ignore = std::tie(sr, rc);
-			if constexpr (Opcode == opcode::commit_back)
-				sr = std::get<0>(backtrack_stack_.back());
-			pop_stack_frame(backtrack_stack_);
-		}
-		pc += off;
-		return true;
-	}
-
 	void accept(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
 	{
-		registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
-		auto const full_match = match();
-		auto const prior_call_depth = environment_->start_accept(full_match, subject());
-		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_->end_accept(prior_call_depth); }};
-		auto const& actions = grammar_->program().actions;
-		auto const& captures = grammar_->program().captures;
-		for (auto& resp : responses_) {
-			if (environment_->prune_depth() <= resp.call_depth)
-				continue;
-			environment_->reset_call_depth(resp.call_depth);
-			if (resp.range.index < max_size)
-				captures[resp.action_index](*environment_, syntax{full_match.substr(resp.range.index, resp.range.size), resp.range.index});
-			else
-				actions[resp.action_index](*environment_);
+		registers_ = {sr, (std::max)(mr, sr), rc, pc};
+		do_accept(match(), subject());
+	}
+
+	void accept_if_deferred(std::size_t sr, std::size_t mr, std::size_t rc, std::ptrdiff_t pc)
+	{
+		--cut_inhibited_;
+		if (cut_deferred_ && (cut_inhibited_ > 0)) {
+			accept(sr, mr, rc, pc);
+			cut_deferred_ = false;
 		}
 	}
 
 	[[nodiscard]] auto drain()
 	{
-		environment_->reset_origin();
 		input_source_.drain_buffer(registers_.sr);
-		casefolded_subjects_.clear();
-		responses_.clear();
-		registers_.mr -= registers_.sr;
-		registers_.sr = 0, registers_.rc = 0;
-		cut_deferred_ = false, cut_frame_ = stack_frames_.size();
-		return registers_.as_tuple();
-	}
-
-	void pop_responses_after(std::size_t n)
-	{
-		if (n < responses_.size())
-			responses_.resize(n);
-	}
-
-	[[nodiscard]] auto drop_responses_after(std::size_t n)
-	{
-		std::vector<response> dropped;
-		if (n < responses_.size()) {
-			dropped.assign(responses_.begin() + static_cast<std::ptrdiff_t>(n), responses_.end());
-			responses_.resize(n);
-		}
-		return dropped;
-	}
-
-	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<response> const& restore)
-	{
-		pop_responses_after(n);
-		responses_.insert(responses_.end(), restore.begin(), restore.end());
-		return responses_.size();
-	}
-
-	[[nodiscard]] auto push_response(std::size_t depth, std::size_t action_index, syntax_range range = {max_size, 0})
-	{
-		responses_.push_back({static_cast<unsigned short>(depth), static_cast<unsigned short>(action_index), range});
-		return responses_.size();
-	}
-
-	template <class Stack, class... Args>
-	void pop_stack_frame(Stack& stack, Args&... args)
-	{
-		stack.pop_back(), stack_frames_.pop_back();
-		cut_frame_ = (std::min)(cut_frame_, stack_frames_.size());
-		if constexpr (std::is_same_v<typename Stack::value_type, subject_location> || std::is_same_v<typename Stack::value_type, lrmemo>)
-			if (cut_deferred_ && capture_stack_.empty() && lrmemo_stack_.empty())
-				accept(args...);
+		return do_drain();
 	}
 
 public:
-	basic_parser(lug::grammar const& g, lug::environment& e) : grammar_{&g}, environment_{&e} {}
-	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
-	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
+	basic_parser(lug::grammar const& g, lug::environment& e) : parser_base{g, e} {}
 	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
 	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
-	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
-	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
-	[[nodiscard]] syntax_position subject_position() { return environment_->position_at(registers_.sr); }
-	[[nodiscard]] syntax_position max_subject_position() { return environment_->position_at(registers_.mr); }
-	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_->position_at(index); }
-	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_->position_at(range.index); }
-	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_->position_at(range.index + range.size); }
-	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
-	[[nodiscard]] parser_registers& registers() noexcept { return registers_; }
-	[[nodiscard]] parser_registers const& registers() const noexcept { return registers_; }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
 	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
@@ -1722,11 +1790,12 @@ public:
 		program const& prog = grammar_->program();
 		if (prog.instructions.empty())
 			throw bad_grammar{};
-		auto [sr, mr, rc, pc, fc] = drain();
-		bool result = false;
-		bool done = false;
-		pc = 0;
-		fc = 0;
+		call_depth_ = 0;
+		cut_inhibited_ = 0;
+		std::size_t sr = 0, mr = 0, rc = 0;
+		std::ptrdiff_t pc = 0, fc = 0;
+		bool result = false, done = false;
+		std::tie(sr, mr, rc, std::ignore) = drain();
 		while (!done) {
 			auto [op, imm, off, str] = instruction::decode(prog.instructions, pc);
 			switch (op) {
@@ -1775,113 +1844,90 @@ public:
 						goto failure;
 				} break;
 				case opcode::choice: {
-					stack_frames_.push_back(stack_frame_type::backtrack);
-					backtrack_stack_.emplace_back(sr - imm, rc, pc + off);
+					stack_frames_.emplace_back(std::in_place_type<backtrack_frame>, sr - imm, rc, pc + off);
 				} break;
 				case opcode::commit: {
-					if (!commit<opcode::commit>(sr, rc, pc, off))
-						goto failure;
+					commit<opcode::commit>(sr, rc, pc, off);
 				} break;
 				case opcode::commit_back: {
-					if (!commit<opcode::commit_back>(sr, rc, pc, off))
-						goto failure;
+					commit<opcode::commit_back>(sr, rc, pc, off);
 				} break;
 				case opcode::commit_partial: {
-					if (!commit<opcode::commit_partial>(sr, rc, pc, off))
-						goto failure;
+					commit<opcode::commit_partial>(sr, rc, pc, off);
 				} break;
 				case opcode::jump: {
 					pc += off;
 				} break;
 				case opcode::call: {
 					if (imm != 0) {
-						auto const memo = detail::escaping_find_if(lrmemo_stack_.crbegin(), lrmemo_stack_.crend(), [srr = sr, pca = pc + off](auto const& m) {
-								if ((m.srr == srr) && (m.pca == pca))
-									return 1;
-								return ((m.srr < srr) ? 0 : -1);
+						auto const frame_it = detail::escaping_find_if(stack_frames_.crbegin(), stack_frames_.crend(), [srr = sr, pca = pc + off](auto const& frame) {
+								if (auto const* const memo_ptr = std::get_if<lrmemo_frame>(&frame); memo_ptr != nullptr) {
+									if ((memo_ptr->srr == srr) && (memo_ptr->pca == pca))
+										return 1;
+									if (memo_ptr->srr >= srr)
+										return -1;
+								}
+								return 0;
 							});
-						if (memo != lrmemo_stack_.crend()) {
-							if ((memo->sra == lrfailcode) || (imm < memo->prec))
+						if (frame_it != stack_frames_.crend()) {
+							auto const& memo = std::get<lrmemo_frame>(*frame_it);
+							if ((memo.sra == parser_base::lrfailcode) || (imm < memo.prec))
 								goto failure;
-							sr = memo->sra, rc = restore_responses_after(rc, memo->responses);
+							sr = memo.sra;
+							rc = restore_responses_after(rc, memo.responses);
 							continue;
 						}
-						stack_frames_.push_back(stack_frame_type::lrcall);
-						lrmemo_stack_.push_back({sr, lrfailcode, imm, pc, pc + off, rc, std::vector<response>{}});
+						stack_frames_.emplace_back(std::in_place_type<lrmemo_frame>, sr, parser_base::lrfailcode, imm, pc, pc + off, rc);
+						++cut_inhibited_;
 					} else {
-						stack_frames_.push_back(stack_frame_type::call);
-						call_stack_.push_back(pc);
+						stack_frames_.emplace_back(std::in_place_type<call_frame>, pc);
 					}
+					++call_depth_;
 					pc += off;
 				} break;
 				case opcode::ret: {
 					if (stack_frames_.empty())
-						goto failure;
-					switch (stack_frames_.back()) {
-						case stack_frame_type::call: {
-							pc = call_stack_.back();
-							pop_stack_frame(call_stack_);
-						} break;
-						case stack_frame_type::lrcall: {
-							auto& memo = lrmemo_stack_.back();
-							if ((memo.sra == lrfailcode) || (sr > memo.sra)) {
-								memo.sra = sr, memo.responses = drop_responses_after(memo.rcr);
-								sr = memo.srr, pc = memo.pca, rc = memo.rcr;
-								continue;
-							}
-							sr = memo.sra, pc = memo.pcr, rc = restore_responses_after(memo.rcr, memo.responses);
-							pop_stack_frame(lrmemo_stack_, sr, mr, rc, pc);
-						} break;
-						default: goto failure;
+						throw bad_stack{};
+					auto& frame = stack_frames_.back();
+					if (auto* const call = std::get_if<call_frame>(&frame); call != nullptr) {
+						--call_depth_;
+						pc = call->pc;
+						stack_frames_.pop_back();
+					} else if (auto* const memo = std::get_if<lrmemo_frame>(&frame); memo != nullptr) {
+						if ((memo->sra == parser_base::lrfailcode) || (sr > memo->sra)) {
+							memo->sra = sr, memo->responses = drop_responses_after(memo->rcr);
+							sr = memo->srr, pc = memo->pca, rc = memo->rcr;
+							continue;
+						}
+						--call_depth_;
+						sr = memo->sra;
+						pc = memo->pcr;
+						rc = restore_responses_after(memo->rcr, memo->responses);
+						stack_frames_.pop_back();
+						accept_if_deferred(sr, mr, rc, pc);
+					} else {
+						throw bad_stack{};
 					}
 				} break;
 				case opcode::fail: {
-					fc = imm;
+					fc = static_cast<std::ptrdiff_t>(imm);
 				failure:
 					for (mr = (std::max)(mr, sr), ++fc; fc > 0; --fc) {
 						if (done = (cut_frame_ >= stack_frames_.size()); done) {
-							registers_ = {sr, mr, rc, pc, 0};
+							registers_ = {sr, mr, rc, pc};
 							break;
 						}
-						switch (stack_frames_.back()) {
-							case stack_frame_type::backtrack: {
-								std::tie(sr, rc, pc) = backtrack_stack_.back();
-								pop_stack_frame(backtrack_stack_);
-							} break;
-							case stack_frame_type::call: {
-								pop_stack_frame(call_stack_), ++fc;
-							} break;
-							case stack_frame_type::capture: {
-								pop_stack_frame(capture_stack_, sr, mr, rc, pc), ++fc;
-							} break;
-							case stack_frame_type::condition: {
-								auto const& [cond_name, cond_value] = condition_stack_.back();
-								environment_->set_condition(cond_name, cond_value);
-								pop_stack_frame(condition_stack_), ++fc;
-							} break;
-							case stack_frame_type::lrcall: {
-								if (auto const& memo = lrmemo_stack_.back(); memo.sra != lrfailcode)
-									sr = memo.sra, pc = memo.pcr, rc = restore_responses_after(memo.rcr, memo.responses);
-								else
-									++fc;
-								pop_stack_frame(lrmemo_stack_, sr, mr, rc, pc);
-							} break;
-							case stack_frame_type::symbol_definition: {
-								pop_stack_frame(symbol_definition_stack_), ++fc;
-							} break;
-							case stack_frame_type::symbol_table: {
-								environment_->symbols_.swap(symbol_table_stack_.back());
-								pop_stack_frame(symbol_table_stack_), ++fc;
-							} break;
-							default: break;
-						}
+						auto const fail_result = fail_one(sr, rc, pc);
+						fc += fail_result.first;
+						if (fail_result.second)
+							accept_if_deferred(sr, mr, rc, pc);
 					}
 					pop_responses_after(rc);
 				} break;
 				case opcode::accept: {
-					if (cut_deferred_ = (!capture_stack_.empty() || !lrmemo_stack_.empty()); !cut_deferred_) {
+					if (cut_deferred_ = (cut_inhibited_ > 0); !cut_deferred_) {
 						accept(sr, mr, rc, pc);
-						std::tie(sr, mr, rc, pc, std::ignore) = drain();
+						std::tie(sr, mr, rc, pc) = drain();
 					}
 				} break;
 				case opcode::accept_final: {
@@ -1889,45 +1935,45 @@ public:
 					result = done = true;
 				} break;
 				case opcode::action: {
-					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm);
+					rc = push_response(call_depth_, imm);
 				} break;
 				case opcode::predicate: {
-					registers_ = {sr, (std::max)(mr, sr), rc, pc, 0};
+					registers_ = {sr, (std::max)(mr, sr), rc, pc};
 					environment_->reset_match_and_subject(match(), subject());
 					bool const accepted = prog.predicates[imm](*environment_);
-					std::tie(sr, mr, rc, pc, fc) = registers_.as_tuple();
+					std::tie(sr, mr, rc, pc) = registers_.as_tuple();
 					pop_responses_after(rc);
 					if (!accepted)
 						goto failure;
 				} break;
 				case opcode::capture_start: {
-					stack_frames_.push_back(stack_frame_type::capture);
-					capture_stack_.push_back(static_cast<subject_location>(sr));
+					stack_frames_.emplace_back(std::in_place_type<capture_frame>, sr);
+					++cut_inhibited_;
 				} break;
 				case opcode::capture_end: {
-					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::capture))
-						goto failure;
-					auto const sr0 = static_cast<std::size_t>(capture_stack_.back());
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					auto const sr0 = std::get<capture_frame>(stack_frames_.back()).sr;
 					auto const sr1 = sr;
-					pop_stack_frame(capture_stack_, sr, mr, rc, pc);
+					stack_frames_.pop_back();
+					accept_if_deferred(sr, mr, rc, pc);
 					if (sr0 > sr1)
 						goto failure;
-					rc = push_response(call_stack_.size() + lrmemo_stack_.size(), imm, {sr0, sr1 - sr0});
+					rc = push_response(call_depth_, imm, syntax_range{sr0, sr1 - sr0});
 				} break;
 				case opcode::condition_test: {
 					if (environment_->has_condition(str) != (imm != 0))
 						goto failure;
 				} break;
 				case opcode::condition_push: {
-					stack_frames_.push_back(stack_frame_type::condition);
-					condition_stack_.emplace_back(str, environment_->set_condition(str, imm != 0));
+					stack_frames_.emplace_back(std::in_place_type<condition_frame>, str, environment_->set_condition(str, imm != 0));
 				} break;
 				case opcode::condition_pop: {
-					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::condition))
-						goto failure;
-					auto const& [cond_name, cond_value] = condition_stack_.back();
-					environment_->set_condition(cond_name, cond_value);
-					pop_stack_frame(condition_stack_);
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					auto& condition = std::get<condition_frame>(stack_frames_.back());
+					environment_->set_condition(condition.name, condition.value);
+					stack_frames_.pop_back();
 				} break;
 				case opcode::symbol_exists: {
 					if (environment_->has_symbol(str) != (imm != 0))
@@ -1966,35 +2012,33 @@ public:
 						goto failure;
 				} break;
 				case opcode::symbol_start: {
-					stack_frames_.push_back(stack_frame_type::symbol_definition);
-					symbol_definition_stack_.emplace_back(str, static_cast<subject_location>(sr));
+					stack_frames_.emplace_back(std::in_place_type<symbol_frame>, str, sr);
 				} break;
 				case opcode::symbol_end: {
-					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_definition))
-						goto failure;
-					auto const [symbol_name, symbol_sr] = symbol_definition_stack_.back();
-					auto const sr0 = static_cast<std::size_t>(symbol_sr);
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					auto const symbol = std::get<symbol_frame>(stack_frames_.back());
+					auto const sr0 = static_cast<std::size_t>(symbol.sr);
 					auto const sr1 = sr;
-					pop_stack_frame(symbol_definition_stack_);
+					stack_frames_.pop_back();
 					if (sr0 > sr1)
 						goto failure;
-					environment_->add_symbol(symbol_name, std::string{match().substr(sr0, sr1 - sr0)});
+					environment_->add_symbol(symbol.name, std::string{input_source_.buffer().substr(sr0, sr1 - sr0)});
 				} break;
 				case opcode::symbol_push: {
-					stack_frames_.push_back(stack_frame_type::symbol_table);
-					symbol_table_stack_.emplace_back(environment_->symbols_);
+					stack_frames_.emplace_back(std::in_place_type<symbol_table_frame>, environment_->symbols_);
 					if (imm == 1)
 						environment_->symbols_.erase(str);
 					else if (imm == 2)
 						environment_->symbols_.clear();
 				} break;
 				case opcode::symbol_pop: {
-					if (stack_frames_.empty() || (stack_frames_.back() != stack_frame_type::symbol_table))
-						goto failure;
-					environment_->symbols_.swap(symbol_table_stack_.back());
-					pop_stack_frame(symbol_table_stack_);
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					environment_->symbols_.swap(std::get<symbol_table_frame>(stack_frames_.back()));
+					stack_frames_.pop_back();
 				} break;
-				default: registers_ = {sr, (std::max)(mr, sr), rc, pc, 0}; throw bad_opcode{};
+				default: registers_ = {sr, (std::max)(mr, sr), rc, pc}; throw bad_opcode{};
 			}
 		}
 		return result;

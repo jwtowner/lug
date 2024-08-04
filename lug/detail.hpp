@@ -307,12 +307,6 @@ template <class Error, class T, class U>
 	return x + y;
 }
 
-template <std::size_t... Indices, class Tuple>
-[[nodiscard]] constexpr auto make_tuple_view(Tuple&& t) noexcept
-{
-	return std::forward_as_tuple(std::get<Indices>(std::forward<Tuple>(t))...);
-}
-
 template<class InputIt, class UnaryPredicate>
 [[nodiscard]] inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
 {
