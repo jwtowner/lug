@@ -817,7 +817,7 @@ struct directive_modifier
 	template <class E>
 	[[nodiscard]] constexpr auto operator[](directive_expression<E> const& e) const noexcept
 	{
-		return directive_expression<E>{e.e1, ((e.enable_mask & ~DisableMask) | EnableMask), (e.disable_mask | DisableMask), (e.relay_mask & RelayMask) | RelayMask};
+		return directive_expression<E>{e.e1, ((EnableMask & ~e.disable_mask) | e.enable_mask), (DisableMask | e.disable_mask), RelayMask};
 	}
 };
 
