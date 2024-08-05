@@ -293,14 +293,14 @@ template <class Fn, class = std::enable_if_t<std::is_invocable_v<Fn>>>
 scope_exit(Fn) -> scope_exit<std::decay_t<Fn>>;
 
 template <class Error, class T, class U, class V>
-inline void assure_in_range(T x, U minval, V maxval)
+constexpr void assure_in_range(T x, U minval, V maxval)
 {
 	if (!((minval <= x) && (x <= maxval)))
 		throw Error();
 }
 
 template <class Error, class T, class U>
-[[nodiscard]] inline auto checked_add(T x, U y)
+[[nodiscard]] constexpr auto checked_add(T x, U y)
 {
 	if (((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
 		throw Error();
@@ -308,7 +308,7 @@ template <class Error, class T, class U>
 }
 
 template<class InputIt, class UnaryPredicate>
-[[nodiscard]] inline InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
+[[nodiscard]] constexpr InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
 {
 	for ( ; first != last; ++first) {
 		const int status = pred(*first);
@@ -320,17 +320,8 @@ template<class InputIt, class UnaryPredicate>
 	return last;
 }
 
-template <class Sequence, class T>
-inline std::size_t push_back_unique(Sequence& s, T&& x)
-{
-	if (auto i = std::find(std::cbegin(s), std::cend(s), x); i != std::cend(s))
-		return static_cast<std::size_t>(std::distance(std::cbegin(s), i));
-	s.push_back(std::forward<T>(x));
-	return s.size() - 1;
-}
-
 template <class Sequence>
-[[nodiscard]] inline auto pop_back(Sequence& s) -> typename Sequence::value_type
+[[nodiscard]] constexpr auto pop_back(Sequence& s) -> typename Sequence::value_type
 {
 	typename Sequence::value_type result{std::move(s.back())}; // NOLINT(misc-const-correctness)
 	s.pop_back();
