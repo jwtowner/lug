@@ -414,8 +414,8 @@ public:
 	void jump_to_target(instruction_address addr, instruction_address target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(static_cast<std::ptrdiff_t>(target) - static_cast<std::ptrdiff_t>(addr) - 1); }
 	void jump_to_here(instruction_address addr) { jump_to_target(addr, here()); }
 	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] decltype(auto) evaluate(E const& e, M const& m);
-	instruction_address append(instruction instr) { instruction_address const result{program_->instructions.size()}; program_->instructions.push_back(instr); return result; }
-	instruction_address append(program const& p) { instruction_address const result{program_->instructions.size()}; program_->concatenate(p); return result; }
+	instruction_address append(instruction instr) { instruction_address const addr{here()}; program_->instructions.push_back(instr); return addr; }
+	instruction_address append(program const& p) { instruction_address const addr{here()}; program_->concatenate(p); return addr; }
 	instruction_address encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
 	instruction_address encode(opcode op, std::ptrdiff_t off, std::uint_least16_t imm16, std::uint_least8_t imm8) { return append(instruction{op, imm8, imm16, detail::checked_cast<std::int_least32_t, program_limit_error>(off)}); }
 	instruction_address encode(opcode op, std::uint_least16_t imm16, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, 0}); }
@@ -1260,23 +1260,20 @@ public:
 {
 	program grprogram;
 	program_callees grcallees;
-	std::unordered_map<program const*, std::ptrdiff_t> addresses;
-	std::vector<std::pair<program const*, std::ptrdiff_t>> calls;
+	encoder grencoder{grprogram, grcallees, directives::eps | directives::preskip};
+	grencoder.call(start_rule, std::uint_least16_t{1}, false);
+	grencoder.encode(opcode::halt);
 	std::unordered_set<program const*> left_recursive;
-	std::vector<std::pair<std::vector<std::pair<rule const*, bool>>, program const*>> unprocessed;
-	encoder grammar_encoder{grprogram, grcallees, directives::eps | directives::preskip}; // TODO: optimize away
-	grammar_encoder.call(start_rule, std::uint_least16_t{1}, false);
-	grammar_encoder.encode(opcode::halt);
-	calls.emplace_back(&start_rule.program_, std::get<2>(grcallees.back()));
-	unprocessed.emplace_back(std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_);
+	std::unordered_map<program const*, std::ptrdiff_t> addresses;
+	std::vector<std::pair<program const*, std::ptrdiff_t>> calls{{&start_rule.program_, std::get<2>(grcallees.back())}};
+	std::vector<std::pair<std::vector<std::pair<rule const*, bool>>, program const*>> unprocessed{{std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_}};
 	do {
-		auto [callstack, subprogram] = detail::pop_back(unprocessed);
-		auto const address = static_cast<std::ptrdiff_t>(grprogram.instructions.size());
-		if (addresses.emplace(subprogram, address).second) {
-			grprogram.concatenate(*subprogram);
-			grprogram.instructions.emplace_back(opcode::ret, std::uint_least8_t{0}, std::uint_least16_t{0}, std::int_least32_t{0});
-			if (auto top_rule = callstack.back().first; top_rule) {
-				for (auto [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) { // NOLINT(performance-for-range-copy)
+		auto const&& [callstack, subprogram] = detail::pop_back(unprocessed);
+		if (auto const address = static_cast<std::ptrdiff_t>(grencoder.here()); addresses.emplace(subprogram, address).second) {
+			grencoder.append(*subprogram);
+			grencoder.encode(opcode::ret);
+			if (auto const top_rule = callstack.back().first; top_rule) {
+				for (auto&& [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
 					if ((callee_rule != nullptr) && ((mode & directives::eps) != directives::none) &&
 							detail::escaping_find_if(callstack.crbegin(), callstack.crend(), [callee = callee_rule](auto const& caller) {
