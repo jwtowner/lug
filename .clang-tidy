@@ -5,13 +5,13 @@ Checks:
   - -clang-analyzer-optin.core.EnumCastOutOfRange # interferes with enum bitfield flags
   - android-*
   - bugprone-*
+  - -bugprone-easily-swappable-parameters # many functions have easily swappable parameters
   - cert-*
   - -cert-dcl21-cpp # this check is deprecated, it is no longer part of the CERT standard
   - concurrency-*
   - cppcoreguidelines-*
   - -cppcoreguidelines-avoid-magic-numbers # revisit after new instruction scheme, maybe only disable for unicode tables
   - -cppcoreguidelines-avoid-do-while # if removing do-while does not cause serious performance issues remove this check
-  - -cppcoreguidelines-avoid-goto # if removing goto does not cause serious performance issues remove this check
   - -cppcoreguidelines-pro-bounds-* # requires gsl::at and std::span to suppress, would prefer Standard Library hardening approach
   - -cppcoreguidelines-pro-type-union-access # remove after developing new instruction encoding scheme that doesn't use union
   - darwin-*
@@ -21,7 +21,6 @@ Checks:
   - -google-readability-braces-around-statements # adversely affects line count
   - -google-runtime-int # revisit after new instruction scheme
   - hicpp-*
-  - -hicpp-avoid-goto # if removing goto does not cause serious performance issues remove this check
   - -hicpp-braces-around-statements # adversely affects line count
   - llvm-namespace-comment
   - misc-*

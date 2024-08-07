@@ -1,5 +1,16 @@
 # Changelog
 
+## Release v0.4.0 (Under Development)
+
+* Implemented new 64-bit instruction encoding scheme that is simpler and more efficient. String data is no longer embedded in the instruction stream, ensuring constant instruction length of 8 bytes.
+* Merged `lug::program_encoder` and `lug::rule_encoder` into the `lug::encoder` base class after overhauling how choice/jump offsets are calculated, significantly reducing binary size bloat.
+* Extracted common base class of `lug::basic_parser` into `lug::parser_base` to reduce template bloat.
+* Reduced template bloat for parser directives (improving compiler error messages) and optimized nested directives.
+* Merged parser stack frames together into a single stack using `std::variant`.
+* Removed use of `goto` in parsing machine main loop.
+* Changed grammar program generation to force inline the start rule.
+* Implemented tail call optimization.
+
 ## Release v0.3.0 (July 4, 2024)
 
 * Added list repetition operator `e1 >> e2` to the DSL that is shorthand for `e1 > *(e2 > e1)`.
