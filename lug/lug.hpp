@@ -1766,7 +1766,7 @@ public:
 	{
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
 		program const& prog = grammar_->program();
-		if (prog.instructions.empty())
+		if (prog.instructions.empty() || prog.data.empty())
 			throw bad_grammar{};
 		drain();
 		registers_.pc = 0;
