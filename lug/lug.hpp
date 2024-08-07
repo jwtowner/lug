@@ -23,7 +23,6 @@ namespace lug {
 class rule;
 class grammar;
 class encoder;
-class rule_encoder;
 class syntax;
 class environment;
 class multi_input_source;
@@ -68,7 +67,7 @@ enum class opcode : std::uint_least8_t
 	call,           ret,            fail,           cut,            halt,
 	predicate,      action,         capture_start,  capture_end,    condition_pop,
 	symbol_end,     symbol_pop,     match_any,      match_set,      match_eol,
-	match = 32,     match_cf,       match_any_of,   match_all_of,   match_none_of,
+	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
 	condition_test, condition_push, symbol_exists,  symbol_all,     symbol_all_cf,
 	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
 	symbol_tail_cf, symbol_start,   symbol_push
@@ -86,6 +85,7 @@ struct alignas(std::uint_least64_t) instruction
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as 32-bit integer");
 static_assert(alignof(instruction) == alignof(std::uint_least64_t), "expected instruction alignment to be same size as 32-bit integer");
 
+enum class instruction_address : std::size_t {};
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
@@ -118,14 +118,11 @@ struct program
 					case opcode::capture_end: object = instr.immediate16 + captures_offset; break;
 					default: break;
 				}
-				if (object.has_value()) {
-					detail::assure_in_range<resource_limit_error>(*object, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
-					new_instr.immediate16 = static_cast<std::uint_least16_t>(*object);
-				}
+				if (object.has_value())
+					new_instr.immediate16 = detail::checked_cast<std::uint_least16_t, resource_limit_error>(*object, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
 			} else {
 				std::size_t const offset32 = static_cast<std::uint_least32_t>(new_instr.offset32) + data_offset;
-				detail::assure_in_range<resource_limit_error>(offset32, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)()));
-				new_instr.offset32 = static_cast<std::int_least32_t>(offset32);
+				new_instr.offset32 = detail::checked_cast<std::int_least32_t, resource_limit_error>(offset32, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)()));
 			}
 			instructions.push_back(new_instr);
 		}
@@ -152,7 +149,6 @@ struct program
 class rule
 {
 	friend class encoder;
-	friend class rule_encoder;
 	friend grammar start(rule const& start_rule);
 	program program_;
 	program_callees callees_;
@@ -369,25 +365,34 @@ template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_
 
 class encoder
 {
+	rule* rule_{nullptr};
+	program* program_{nullptr};
+	program_callees* callees_{nullptr};
 	std::vector<directives> mode_;
 	directives entry_mode_{directives::none};
-	virtual void do_append(instruction instr) = 0;
-	virtual void do_append(program const&) = 0;
-	[[nodiscard]] virtual std::pair<std::int_least32_t, std::uint_least16_t> do_add_string(std::string_view /*s*/) { return {}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
-	[[nodiscard]] virtual std::uint_least16_t do_add_rune_set(unicode::rune_set&& /*r*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
-	[[nodiscard]] virtual std::uint_least16_t do_add_semantic_action(semantic_action&& /*a*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
-	[[nodiscard]] virtual std::uint_least16_t do_add_semantic_capture_action(semantic_capture_action&& /*a*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
-	[[nodiscard]] virtual std::uint_least16_t do_add_syntactic_predicate(syntactic_predicate&& /*p*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
-	virtual void do_add_callee(rule const* /*r*/, program const* /*p*/, std::ptrdiff_t /*n*/, directives /*d*/) {}
-	[[nodiscard]] virtual bool do_should_evaluate_length() const noexcept { return true; }
-	[[nodiscard]] virtual std::ptrdiff_t do_length() const noexcept = 0;
 
-protected:
-	encoder& do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
+	template <class Item>
+	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, Item&& item)
+	{
+		items.push_back(std::forward<Item>(item));
+		return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
+	}	
+
+	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> add_string(std::string_view str)
+	{
+		std::size_t const index = program_->data.size();
+		program_->data.insert(program_->data.end(), str.begin(), str.end());
+		return {
+			detail::checked_cast<std::int_least32_t, resource_limit_error>(index, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)())),
+			detail::checked_cast<std::uint_least16_t, resource_limit_error>(str.size(), 0U, (std::numeric_limits<std::uint_least16_t>::max)())
+		};
+	}
+
+	instruction_address do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
 	{
 		auto callee_mode = mode_.back();
 		skip(p->entry_mode ^ directives::eps, directives::noskip);
-		do_add_callee(r, p, length(), callee_mode);
+		callees_->emplace_back(r, p, static_cast<std::ptrdiff_t>(program_->instructions.size()), callee_mode);
 		return encode(opcode::call, off, prec, 0);
 	}
 
@@ -399,69 +404,32 @@ protected:
 	}
 
 public:
-	explicit encoder(directives initial) : mode_{initial} {}
-	virtual ~encoder() = default;
-	encoder(encoder const&) = delete;
-	encoder(encoder&&) = delete;
-	encoder& operator=(encoder const&) = delete;
-	encoder& operator=(encoder&&) = delete;
-	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] decltype(auto) evaluate(E const& e, M const& m);
-	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] std::ptrdiff_t evaluate_length(E const& e, M const& m);
-	encoder& append(instruction instr) { do_append(instr); return *this; }
-	encoder& append(program const& p) { do_append(p); return *this; }
-	encoder& call(program const& p, std::uint_least16_t prec) { return do_call(nullptr, &p, 0, prec); }
-	encoder& call(grammar const& g, std::uint_least16_t prec) { return do_call(nullptr, &g.program(), 3, prec); }
-	encoder& encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
-	encoder& encode(opcode op, std::uint_least16_t imm16, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, 0}); }
-	encoder& encode(opcode op, std::string_view str, std::uint_least8_t imm8 = 0) { auto const range = do_add_string(str); return append(instruction{op, imm8, range.second, range.first}); }
-	encoder& encode(opcode op, semantic_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, do_add_semantic_action(std::move(a)), 0}); }
-	encoder& encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, do_add_semantic_capture_action(std::move(a)), 0}); }
-	encoder& encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, do_add_syntactic_predicate(std::move(p)), 0}); }
-	[[nodiscard]] std::ptrdiff_t length() const noexcept { return do_length(); }
+	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, mode_{initial} {}
+	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
+	~encoder() { if (rule_) { rule_->currently_encoding_ = false; } if (program_) { program_->entry_mode = entry_mode(); } }
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
 	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
-	encoder& match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, do_add_rune_set(std::move(runes)), 0); }
-	encoder& match_eps() { return skip(directives::lexeme).encode(opcode::match, std::string_view{}); }
-	encoder& match_any() { return skip().encode(opcode::match_any); }
+	[[nodiscard]] instruction_address here() const noexcept { return static_cast<instruction_address>(program_->instructions.size()); }
+	instruction& instruction_at(instruction_address addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
+	void jump_to_target(instruction_address addr, instruction_address target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(static_cast<std::ptrdiff_t>(target) - static_cast<std::ptrdiff_t>(addr) - 1); }
+	void jump_to_here(instruction_address addr) { jump_to_target(addr, here()); }
+	template <class E, class M, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] decltype(auto) evaluate(E const& e, M const& m);
+	instruction_address append(instruction instr) { instruction_address const result{program_->instructions.size()}; program_->instructions.push_back(instr); return result; }
+	instruction_address append(program const& p) { instruction_address const result{program_->instructions.size()}; program_->concatenate(p); return result; }
+	instruction_address encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
+	instruction_address encode(opcode op, std::ptrdiff_t off, std::uint_least16_t imm16, std::uint_least8_t imm8) { return append(instruction{op, imm8, imm16, detail::checked_cast<std::int_least32_t, program_limit_error>(off)}); }
+	instruction_address encode(opcode op, std::uint_least16_t imm16, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, 0}); }
+	instruction_address encode(opcode op, std::string_view str, std::uint_least8_t imm8 = 0) { auto const rng = add_string(str); return append(instruction{op, imm8, rng.second, rng.first}); }
+	instruction_address encode(opcode op, semantic_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->actions, std::move(a)), 0}); }
+	instruction_address encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
+	instruction_address encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
+	instruction_address call(program const& p, std::uint_least16_t prec) { return do_call(nullptr, &p, 0, prec); }
+	instruction_address call(grammar const& g, std::uint_least16_t prec) { return do_call(nullptr, &g.program(), 3, prec); }
+	instruction_address match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, add_item(program_->runesets, std::move(runes)), 0); }
+	instruction_address match_any() { return skip().encode(opcode::match_any); }
+	instruction_address match_eps() { return skip(directives::lexeme).encode(opcode::match, std::string_view{}); }
 
-	encoder& encode(opcode op, std::ptrdiff_t off, std::uint_least16_t imm16, std::uint_least8_t imm8)
-	{
-		detail::assure_in_range<resource_limit_error>(off, (std::numeric_limits<std::int_least32_t>::min)(), (std::numeric_limits<std::int_least32_t>::max)());
-		return append(instruction{op, imm8, imm16, static_cast<std::int_least32_t>(off)});
-	}
-
-	encoder& dpsh(directives enable, directives disable)
-	{
-		directives const prev = mode_.back();
-		mode_.push_back((prev & ~disable) | enable);
-		return *this;
-	}
-
-	encoder& dpop(directives relay)
-	{
-		directives const prev = detail::pop_back(mode_);
-		directives& last_mode = mode_.back();
-		directives const next = (last_mode & ~relay) | (prev & relay);
-		if (((next & directives::postskip) == directives::none) && ((prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
-			do_skip(last_mode);
-		mode_.back() = next;
-		return *this;
-	}
-
-	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
-	{
-		directives& last_mode = mode_.back();
-		directives const prev = last_mode;
-		directives const next = last_mode & ~(callee_mode & directives::eps);
-		if (entry_mode_ == directives::none)
-			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
-			do_skip(last_mode);
-		mode_.back() = next;
-		return *this;
-	}
-
-	encoder& call(rule const& r, std::uint_least16_t prec, bool allow_inlining = true)
+	instruction_address call(rule const& r, std::uint_least16_t prec, bool allow_inlining = true)
 	{
 		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
 										(p.instructions.size() <= 8) && (p.actions.size() <= 1) && (p.captures.size() <= 1) && (p.predicates.size() <= 1))
@@ -480,7 +448,7 @@ public:
 		return m;
 	}
 
-	encoder& match(std::string_view subject)
+	instruction_address match(std::string_view subject)
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
 		if ((mode() & directives::caseless) != directives::none)
@@ -489,78 +457,39 @@ public:
 	}
 
 	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	encoder& match_class(T properties)
+	instruction_address match_class(T properties)
 	{
 		return skip().encode(Op, detail::string_pack(properties), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
 	}
-};
 
-class instruction_length_evaluator final : public encoder
-{
-	std::ptrdiff_t length_{0};
-	void do_append(instruction instr) final { std::ignore = instr; length_ = detail::checked_add<program_limit_error>(length_, std::ptrdiff_t{1}); }
-	void do_append(program const& p) final { length_ = detail::checked_add<program_limit_error>(length_, static_cast<std::ptrdiff_t>(p.instructions.size())); }
-	[[nodiscard]] bool do_should_evaluate_length() const noexcept final { return false; }
-	[[nodiscard]] std::ptrdiff_t do_length() const noexcept final { return length_; }
-public:
-	explicit instruction_length_evaluator(directives initial) : encoder{initial} {}
-	~instruction_length_evaluator() final = default;
-	instruction_length_evaluator(instruction_length_evaluator const&) = delete;
-	instruction_length_evaluator(instruction_length_evaluator&&) = delete;
-	instruction_length_evaluator& operator=(instruction_length_evaluator const&) = delete;
-	instruction_length_evaluator& operator=(instruction_length_evaluator&&) = delete;
-};
-
-class program_encoder : public encoder
-{
-	program& program_;
-	program_callees& callees_;
-	[[nodiscard]] std::ptrdiff_t do_length() const noexcept final { return static_cast<std::ptrdiff_t>(program_.instructions.size()); }
-	void do_append(instruction instr) final { program_.instructions.push_back(instr); }
-	void do_append(program const& p) final { program_.concatenate(p); }
-	void do_add_callee(rule const* r, program const* p, std::ptrdiff_t n, directives d) final { callees_.emplace_back(r, p, n, d); }
-	[[nodiscard]] std::uint_least16_t do_add_rune_set(unicode::rune_set&& r) final { return add_item(program_.runesets, std::move(r)); }
-	[[nodiscard]] std::uint_least16_t do_add_semantic_action(semantic_action&& a) final { return add_item(program_.actions, std::move(a)); }
-	[[nodiscard]] std::uint_least16_t do_add_semantic_capture_action(semantic_capture_action&& a) final { return add_item(program_.captures, std::move(a)); }
-	[[nodiscard]] std::uint_least16_t do_add_syntactic_predicate(syntactic_predicate&& p) final { return add_item(program_.predicates, std::move(p)); }
-
-	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> do_add_string(std::string_view s) final
+	void dpsh(directives enable, directives disable)
 	{
-		std::size_t const index = program_.data.size();
-		std::size_t const size = s.size();
-		detail::assure_in_range<resource_limit_error>(index, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)()));
-		detail::assure_in_range<resource_limit_error>(size, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
-		program_.data.insert(program_.data.end(), s.begin(), s.end());
-		return {static_cast<std::int_least32_t>(index), static_cast<std::uint_least16_t>(size)};
+		directives const prev = mode_.back();
+		mode_.push_back((prev & ~disable) | enable);
 	}
 
-	template <class Item>
-	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, Item&& item)
+	void dpop(directives relay)
 	{
-		detail::assure_in_range<resource_limit_error>(items.size(), 0U, (std::numeric_limits<std::uint_least16_t>::max)() - 1U);
-		items.push_back(std::forward<Item>(item));
-		return static_cast<std::uint_least16_t>(items.size() - 1);
+		directives const prev = detail::pop_back(mode_);
+		directives& last_mode = mode_.back();
+		directives const next = (last_mode & ~relay) | (prev & relay);
+		if (((next & directives::postskip) == directives::none) && ((prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
+			do_skip(last_mode);
+		mode_.back() = next;
 	}
 
-public:
-	program_encoder(program& p, program_callees& c, directives initial) : encoder{initial}, program_{p}, callees_{c} {}
-	~program_encoder() override { program_.entry_mode = entry_mode(); }
-	program_encoder(program_encoder const&) = delete;
-	program_encoder(program_encoder&&) = delete;
-	program_encoder& operator=(program_encoder const&) = delete;
-	program_encoder& operator=(program_encoder&&) = delete;
-};
-
-class rule_encoder final : public program_encoder
-{
-	rule& rule_;
-public:
-	explicit rule_encoder(rule& r) : program_encoder{r.program_, r.callees_, directives::eps}, rule_{r} { rule_.currently_encoding_ = true; }
-	~rule_encoder() final { rule_.currently_encoding_ = false; }
-	rule_encoder(rule_encoder const&) = delete;
-	rule_encoder(rule_encoder&&) = delete;
-	rule_encoder& operator=(rule_encoder const&) = delete;
-	rule_encoder& operator=(rule_encoder&&) = delete;
+	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	{
+		directives& last_mode = mode_.back();
+		directives const prev = last_mode;
+		directives const next = last_mode & ~(callee_mode & directives::eps);
+		if (entry_mode_ == directives::none)
+			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
+		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
+			do_skip(last_mode);
+		mode_.back() = next;
+		return *this;
+	}	
 };
 
 template <class RuneSet>
@@ -606,8 +535,8 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 	struct generator final : environment
 	{
 		basic_regular_expression const& owner;
-		program_callees callees;
-		program_encoder encoder;
+		lug::program_callees callees;
+		lug::encoder encoder;
 		unicode::rune_set runes;
 		unicode::ctype classes{unicode::ctype::none};
 		bool circumflex{false};
@@ -650,8 +579,11 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 					encoder.match(std::move(runes));
 				if (classes != unicode::ctype::none)
 					encoder.match_class<opcode::match_any_of>(classes);
-				if (circumflex)
-					encoder.encode(opcode::commit, 0, 0, 0).encode(opcode::fail, 0, 1).match_any();
+				if (circumflex) {
+					encoder.encode(opcode::commit);
+					encoder.encode(opcode::fail, 0, 1);
+					encoder.match_any();
+				}
 			}
 			runes.clear(), classes = unicode::ctype::none, circumflex = false;
 		}
@@ -747,26 +679,15 @@ template <class E, class M, class>
 	return make_expression(e)(*this, m);
 }
 
-template <class E, class M, class>
-[[nodiscard]] inline std::ptrdiff_t encoder::evaluate_length(E const& e, M const& m)
-{
-	if (do_should_evaluate_length()) {
-		instruction_length_evaluator evaluator{mode()};
-		(void)evaluator.evaluate(e, m);
-		return evaluator.length();
-	}
-	return 0;
-}
-
 template <class E, class>
 inline rule::rule(E const& e)
 {
-	(void)rule_encoder{*this}.evaluate(make_expression(e), encoder_metadata{});
+	(void)encoder{*this}.evaluate(make_expression(e), encoder_metadata{});
 }
 
 inline rule::rule(rule const& r)
 {
-	rule_encoder{*this}.call(r, 1);
+	encoder{*this}.call(r, 1);
 }
 
 struct rule_precedence_expression : terminal_encoder_expression_interface
@@ -826,7 +747,7 @@ inline constexpr directive_modifier<directives::preskip, directives::postskip, d
 
 struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0).encode(opcode::match_any, 0x8000, 0).encode(opcode::fail, 0, 2); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 0x8000, 0); d.encode(opcode::fail, 0, 2); return m; } };
 struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
 struct cut_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto operator()(encoder& d, M const& m) const -> M const& { d.encode(opcode::cut); return m; } };
 
@@ -941,8 +862,7 @@ struct symbol_match_offset_combinator
 
 	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
 	{
-		detail::assure_in_range<resource_limit_error>(offset, 0U, (std::numeric_limits<std::uint_least8_t>::max)());
-		return symbol_match_offset_expression{name, static_cast<std::uint_least8_t>(offset)};
+		return symbol_match_offset_expression{name, detail::checked_cast<std::uint_least8_t, resource_limit_error>(offset)};
 	}
 };
 
@@ -954,8 +874,10 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<E1>
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
-		auto m2 = d.encode(opcode::choice, 1 + d.evaluate_length(this->e1, m), 0, 0).evaluate(this->e1, m);
+		auto const choice = d.encode(opcode::choice);
+		auto m2 = d.evaluate(this->e1, m);
 		d.encode(opcode::fail, 0, 2);
+		d.jump_to_here(choice);
 		return m2;
 	}
 };
@@ -968,8 +890,11 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<E1>
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
-		auto m2 = d.encode(opcode::choice, 1 + d.evaluate_length(this->e1, m), 0, 0).evaluate(this->e1, m);
-		d.encode(opcode::commit_back, 1, 0, 0).encode(opcode::fail, 0, 1);
+		auto const choice = d.encode(opcode::choice);
+		auto m2 = d.evaluate(this->e1, m);
+		d.encode(opcode::commit_back, 1, 0, 0);
+		d.jump_to_here(choice);
+		d.encode(opcode::fail, 0, 1);
 		return m2;
 	}
 };
@@ -982,9 +907,12 @@ struct repetition_expression : unary_encoder_expression_interface<E1>
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
-		std::ptrdiff_t const n = 1 + d.evaluate_length(this->e1, m);
-		auto m2 = d.encode(opcode::choice, n, 0, 0).evaluate(this->e1, m);
-		d.encode(opcode::commit_partial, -n, 0, 0);
+		auto const choice = d.encode(opcode::choice);
+		auto const expression = d.here();
+		auto m2 = d.evaluate(this->e1, m);
+		auto const commit = d.encode(opcode::commit_partial);
+		d.jump_to_here(choice);
+		d.jump_to_target(commit, expression);
 		return m2;
 	}
 };
@@ -997,8 +925,13 @@ struct choice_expression : binary_encoder_expression_interface<E1, E2>
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) operator()(encoder& d, M const& m) const
 	{
-		auto m2 = d.encode(opcode::choice, 1 + d.evaluate_length(this->e1, m), 0, 0).evaluate(this->e1, m);
-		return d.encode(opcode::commit, d.evaluate_length(this->e2, m2), 0, 0).evaluate(this->e2, m2);
+		auto const choice = d.encode(opcode::choice);
+		auto m2 = d.evaluate(this->e1, m);
+		auto const commit = d.encode(opcode::commit);
+		d.jump_to_here(choice);
+		auto m3 = d.evaluate(this->e2, m2);
+		d.jump_to_here(commit);
+		return m3;
 	}
 };
 
@@ -1331,7 +1264,9 @@ public:
 	std::vector<std::pair<program const*, std::ptrdiff_t>> calls;
 	std::unordered_set<program const*> left_recursive;
 	std::vector<std::pair<std::vector<std::pair<rule const*, bool>>, program const*>> unprocessed;
-	program_encoder{grprogram, grcallees, directives::eps | directives::preskip}.call(start_rule, std::uint_least16_t{1}, false).encode(opcode::halt);
+	encoder grammar_encoder{grprogram, grcallees, directives::eps | directives::preskip}; // TODO: optimize away
+	grammar_encoder.call(start_rule, std::uint_least16_t{1}, false);
+	grammar_encoder.encode(opcode::halt);
 	calls.emplace_back(&start_rule.program_, std::get<2>(grcallees.back()));
 	unprocessed.emplace_back(std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_);
 	do {
@@ -1362,9 +1297,7 @@ public:
 	for (auto [subprogram, instr_addr] : calls) {
 		if (auto& instr = grprogram.instructions[static_cast<std::size_t>(instr_addr)]; instr.op == opcode::call) {
 			instr.immediate16 = ((left_recursive.count(subprogram) != 0) ? (std::max)(instr.immediate16, std::uint_least16_t{1}) : std::uint_least16_t{0});
-			std::ptrdiff_t const call_addr = instr.offset32 + addresses[subprogram] - (instr_addr + 1);
-			detail::assure_in_range<resource_limit_error>(call_addr, std::numeric_limits<std::int_least32_t>::min(), std::numeric_limits<std::int_least32_t>::max());
-			instr.offset32 = static_cast<std::int_least32_t>(call_addr);
+			instr.offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(instr.offset32 + addresses[subprogram] - (instr_addr + 1));
 		}
 	}
 	grprogram.data.emplace_back('\0');

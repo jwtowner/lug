@@ -292,14 +292,27 @@ public:
 template <class Fn, class = std::enable_if_t<std::is_invocable_v<Fn>>>
 scope_exit(Fn) -> scope_exit<std::decay_t<Fn>>;
 
-template <class Error, class T, class U, class V>
+template <class Error, class T, class U, class V, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<U> && std::is_integral_v<V>>>
 constexpr void assure_in_range(T x, U minval, V maxval)
 {
 	if (!((minval <= x) && (x <= maxval)))
 		throw Error();
 }
 
-template <class Error, class T, class U>
+template <class T, class Error, class S, class U, class V, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<S> && std::is_integral_v<U> && std::is_integral_v<V>>>
+[[nodiscard]] constexpr T checked_cast(S x, U minval, V maxval)
+{
+	detail::assure_in_range<Error>(x, minval, maxval);
+	return static_cast<T>(x);
+}
+
+template <class T, class Error, class S, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<S>>>
+[[nodiscard]] constexpr T checked_cast(S x)
+{
+	return detail::checked_cast<T, Error>(x, (std::numeric_limits<std::decay_t<T>>::min)(), (std::numeric_limits<std::decay_t<T>>::max)());
+}
+
+template <class Error, class T, class U, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<U>>>
 [[nodiscard]] constexpr auto checked_add(T x, U y)
 {
 	if (((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
