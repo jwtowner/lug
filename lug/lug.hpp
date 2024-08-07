@@ -373,7 +373,7 @@ class encoder
 	directives entry_mode_{directives::none};
 	virtual void do_append(instruction instr) = 0;
 	virtual void do_append(program const&) = 0;
-	[[nodiscard]] virtual std::pair<std::int_least32_t, std::uint_least16_t> do_add_string(std::string_view /*s*/) { return {std::int_least32_t{0}, std::uint_least16_t{0}}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+	[[nodiscard]] virtual std::pair<std::int_least32_t, std::uint_least16_t> do_add_string(std::string_view /*s*/) { return {}; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 	[[nodiscard]] virtual std::uint_least16_t do_add_rune_set(unicode::rune_set&& /*r*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 	[[nodiscard]] virtual std::uint_least16_t do_add_semantic_action(semantic_action&& /*a*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 	[[nodiscard]] virtual std::uint_least16_t do_add_semantic_capture_action(semantic_capture_action&& /*a*/) { return 0; } // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
@@ -1367,8 +1367,7 @@ public:
 			instr.offset32 = static_cast<std::int_least32_t>(call_addr);
 		}
 	}
-	if (grprogram.data.empty())
-		grprogram.data.emplace_back('\0');
+	grprogram.data.emplace_back('\0');
 	return grammar{std::move(grprogram)};
 }
 
