@@ -79,7 +79,6 @@ struct alignas(std::uint_least64_t) instruction
 	std::uint_least8_t immediate8;
 	std::uint_least16_t immediate16;
 	std::int_least32_t offset32;
-	constexpr instruction(opcode o, std::uint_least8_t i8, std::uint_least16_t i16, std::int_least32_t o32) noexcept : op{o}, immediate8{i8}, immediate16{i16}, offset32{o32} {}
 };
 
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
