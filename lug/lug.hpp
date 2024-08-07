@@ -51,7 +51,7 @@ template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<st
 
 struct registers
 {
-	static constexpr std::size_t cut_deferred_flag = std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
+	static constexpr std::size_t cut_deferred_flag = std::size_t{1} << static_cast<unsigned int>(std::numeric_limits<std::size_t>::digits - 1);
 	std::size_t sr; // subject register
 	std::size_t mr; // match register
 	std::size_t rc; // response counter
@@ -405,12 +405,16 @@ class encoder
 public:
 	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, mode_{initial} {}
 	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
-	~encoder() { if (rule_) { rule_->currently_encoding_ = false; } if (program_) { program_->entry_mode = entry_mode(); } }
+	~encoder() { if (rule_ != nullptr) { rule_->currently_encoding_ = false; } if (program_ != nullptr) { program_->entry_mode = entry_mode(); } }
+	encoder(encoder const&) = delete;
+	encoder(encoder&&) = default;
+	encoder& operator=(encoder const&) = delete;
+	encoder& operator=(encoder&&) = default;
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
 	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
 	[[nodiscard]] std::ptrdiff_t here() const noexcept { return static_cast<std::ptrdiff_t>(program_->instructions.size()); }
 	instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
-	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(static_cast<std::ptrdiff_t>(target) - static_cast<std::ptrdiff_t>(addr) - 1); }
+	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
 	void jump_to_here(std::ptrdiff_t addr) { jump_to_target(addr, here()); }
 	std::ptrdiff_t append(instruction instr) { std::ptrdiff_t const addr{here()}; program_->instructions.push_back(instr); return addr; }
 	std::ptrdiff_t append(program const& p) { std::ptrdiff_t const addr{here()}; program_->concatenate(p); return addr; }
@@ -532,7 +536,6 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 
 	struct generator final : environment
 	{
-		basic_regular_expression const& owner;
 		lug::program_callees callees;
 		lug::encoder encoder;
 		unicode::rune_set runes;
@@ -540,7 +543,7 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 		bool circumflex{false};
 
 		generator(basic_regular_expression const& se, directives mode)
-			: owner{se}, encoder{*se.program_, callees, mode | directives::eps | directives::lexeme}
+			: encoder{*se.program_, callees, mode | directives::eps | directives::lexeme}
 		{}
 
 		void bracket_class(std::string_view s)
@@ -1390,13 +1393,15 @@ protected:
 	using symbol_table_frame = std::unordered_map<std::string_view, std::vector<std::string>>;
 	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, symbol_frame, symbol_table_frame>;
 
+	// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 	lug::grammar const* grammar_;
 	lug::environment* environment_;
 	std::vector<response> responses_;
-	std::vector<stack_frame> stack_frames_;	
+	std::vector<stack_frame> stack_frames_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
 	lug::registers registers_{0, 0, 0, 0, 0, 0, 0};
 	bool parsing_{false};
+	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
 	template <opcode Opcode>
 	void commit(std::ptrdiff_t off)

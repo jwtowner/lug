@@ -5,6 +5,7 @@ Checks:
   - -clang-analyzer-optin.core.EnumCastOutOfRange # interferes with enum bitfield flags
   - android-*
   - bugprone-*
+  - -bugprone-easily-swappable-parameters # many functions have easily swappable parameters
   - cert-*
   - -cert-dcl21-cpp # this check is deprecated, it is no longer part of the CERT standard
   - concurrency-*
