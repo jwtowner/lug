@@ -64,7 +64,7 @@ struct registers
 enum class opcode : std::uint_least8_t
 {
 	choice,         commit,         commit_back,    commit_partial, jump,
-	call,           ret,            fail,           cut,            halt,
+	call,           ret,            fail,           raise,			cut,
 	predicate,      action,         capture_start,  capture_end,    condition_pop,
 	symbol_end,     symbol_pop,     match_any,      match_set,      match_eol,
 	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
@@ -1267,12 +1267,15 @@ public:
 	std::vector<std::pair<program const*, std::ptrdiff_t>> calls;
 	std::unordered_map<program const*, std::ptrdiff_t> addresses;
 	std::unordered_set<program const*> left_recursive;
-	opcode prologue{opcode::halt};
+	std::optional<std::ptrdiff_t> halt_address;
 	do {
 		auto const&& [callstack, subprogram] = detail::pop_back(unprocessed);
 		if (auto const address = grencoder.here(); addresses.emplace(subprogram, address).second) {
 			grencoder.append(*subprogram);
-			grencoder.encode(std::exchange(prologue, opcode::ret));
+			if (!halt_address)
+				halt_address = grencoder.encode(opcode::jump);
+			else
+				grencoder.encode(opcode::ret);
 			if (auto const top_rule = callstack.back().first; top_rule) {
 				for (auto&& [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
@@ -1300,6 +1303,8 @@ public:
 				instr.op = opcode::jump;
 		}
 	}
+	if (halt_address)
+		grencoder.jump_to_here(*halt_address);
 	grprogram.data.emplace_back('\0');
 	return grammar{std::move(grprogram)};
 }
@@ -1766,14 +1771,11 @@ public:
 			throw bad_grammar{};
 		drain();
 		registers_.pc = 0;
-		instruction const* const instructions{prog.instructions.data()};
-		char const* const data{prog.data.data()};
-		std::ptrdiff_t fc{0};
-		bool result{false};
-		bool done{false};
-		while (!done) {
-			instruction const instr{instructions[registers_.pc++]};
-			std::string_view const str{data + instr.offset32, instr.immediate16};
+		std::ptrdiff_t fc = 0;
+		bool result = true;
+		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < prog.instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
+			instruction const instr{prog.instructions[instr_index]};
+			std::string_view const str{prog.data.data() + instr.offset32, instr.immediate16};
 			switch (instr.op) {
 				case opcode::choice: {
 					stack_frames_.emplace_back(std::in_place_type<backtrack_frame>, registers_.sr - instr.immediate8, registers_.rc, registers_.pc + instr.offset32);
@@ -1807,10 +1809,6 @@ public:
 					} else {
 						registers_.ci |= lug::registers::cut_deferred_flag;
 					}
-				} break;
-				case opcode::halt: {
-					accept();
-					result = done = true;
 				} break;
 				case opcode::predicate: {
 					registers_.mr = (std::max)(registers_.mr, registers_.sr);
@@ -1951,7 +1949,9 @@ public:
 			if (fc > 0) {
 				registers_.mr = (std::max)(registers_.mr, registers_.sr);
 				do {
-					if (done = (registers_.cf >= stack_frames_.size()); done) {
+					if (registers_.cf >= stack_frames_.size()) {
+						registers_.pc = static_cast<std::ptrdiff_t>(prog.instructions.size());
+						result = false;
 						fc = 0;
 						break;
 					}
@@ -1964,7 +1964,11 @@ public:
 				pop_responses_after(registers_.rc);
 			}
 		}
-		return result;
+		if (result) {
+			accept();
+			return true;
+		}
+		return false;
 	}
 };
 
