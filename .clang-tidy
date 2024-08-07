@@ -17,7 +17,6 @@ Checks:
   - google-*
   - -google-build-using-namespace # would require too many individual using-declarations to satisfy
   - -google-readability-braces-around-statements # adversely affects line count
-  - -google-runtime-int # revisit after new instruction scheme
   - hicpp-*
   - -hicpp-braces-around-statements # adversely affects line count
   - llvm-namespace-comment
