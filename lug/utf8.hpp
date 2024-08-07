@@ -14,6 +14,8 @@
 
 namespace lug::utf8 {
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+
 namespace detail {
 
 enum class decode_state : unsigned char { accept = 0, reject = 12 };
@@ -122,6 +124,8 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	}
 	return {dst, true};
 }
+
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
 [[nodiscard]] inline std::string encode_rune(char32_t rune)
 {

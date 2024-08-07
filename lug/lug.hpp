@@ -199,7 +199,6 @@ class environment
 	friend class parser_base;
 	template <class> friend class basic_parser;
 
-	static constexpr std::size_t max_call_depth = (std::numeric_limits<std::size_t>::max)();
 	static inline std::vector<std::string> const empty_symbols_{};
 	std::vector<std::any> attribute_frame_stack_;
 	std::vector<std::any> attribute_result_stack_;
@@ -209,10 +208,10 @@ class environment
 	std::string_view match_;
 	std::string_view subject_;
 	std::size_t call_depth_{0};
-	std::size_t prune_depth_{max_call_depth};
+	std::size_t prune_depth_{(std::numeric_limits<std::size_t>::max)()};
 	syntax_position origin_{1, 1};
-	unsigned int tab_width_{8};
-	unsigned int tab_alignment_{8};
+	std::uint_least32_t tab_width_{default_tab_width};
+	std::uint_least32_t tab_alignment_{default_tab_alignment};
 
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
@@ -228,14 +227,14 @@ class environment
 	{
 		on_accept_ended();
 		call_depth_ = prior_call_depth;
-		prune_depth_ = max_call_depth;
+		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 	}
 
 	[[nodiscard]] bool accept_response(std::size_t response_call_depth) noexcept
 	{
 		if (prune_depth_ > response_call_depth) {
 			call_depth_ = response_call_depth;
-			prune_depth_ = max_call_depth;
+			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 			return true;
 		}
 		return false;
@@ -255,16 +254,18 @@ class environment
 	}
 
 public:
+	static constexpr std::uint_least32_t default_tab_width{8};
+	static constexpr std::uint_least32_t default_tab_alignment{8};
 	environment() = default;
 	environment(environment const&) = delete;
 	environment(environment&&) noexcept = default;
 	environment& operator=(environment const&) = delete;
 	environment& operator=(environment&&) noexcept = default;
 	virtual ~environment() = default;
-	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
-	void tab_width(unsigned int w) { tab_width_ = w; }
-	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
-	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
+	[[nodiscard]]std::uint_least32_t tab_width() const { return tab_width_; }
+	void tab_width(std::uint_least32_t w) { tab_width_ = w; }
+	[[nodiscard]] std::uint_least32_t tab_alignment() const { return tab_alignment_; }
+	void tab_alignment(std::uint_least32_t a) { tab_alignment_ = a; }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
@@ -364,6 +365,9 @@ template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_
 
 class encoder
 {
+	static constexpr std::size_t inline_max_instructions{8};
+	static constexpr std::size_t inline_max_objects{4};
+
 	rule* rule_{nullptr};
 	program* program_{nullptr};
 	program_callees* callees_{nullptr};
@@ -427,15 +431,15 @@ public:
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
 	std::ptrdiff_t call(program const& p, std::uint_least16_t prec) { return do_call(nullptr, &p, 0, prec); }
-	std::ptrdiff_t call(grammar const& g, std::uint_least16_t prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	std::ptrdiff_t match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, add_item(program_->runesets, std::move(runes)), 0); }
 	std::ptrdiff_t match_any() { return skip().encode(opcode::match_any); }
 	std::ptrdiff_t match_eps() { return skip(directives::lexeme).encode(opcode::match, std::string_view{}); }
 
 	std::ptrdiff_t call(rule const& r, std::uint_least16_t prec, bool allow_inlining = true)
 	{
-		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
-										(p.instructions.size() <= 8) && (p.actions.size() <= 1) && (p.captures.size() <= 1) && (p.predicates.size() <= 1))
+		if (auto const& p = r.program_; allow_inlining && (prec <= 0) && !r.currently_encoding_ && r.callees_.empty() &&
+										(!p.instructions.empty() && (p.instructions.size() <= inline_max_instructions)) &&
+										((p.runesets.size() + p.actions.size() + p.captures.size() + p.predicates.size()) <= inline_max_objects))
 			return skip(p.entry_mode, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
@@ -745,7 +749,7 @@ inline constexpr directive_modifier<directives::preskip, directives::postskip, d
 
 struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 0x8000, 0); d.encode(opcode::fail, 0, 2); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 1, 0); d.encode(opcode::fail, 0, 2); return m; } };
 struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
 struct cut_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::cut); return m; } };
 
@@ -1843,7 +1847,7 @@ public:
 				} break;
 				case opcode::match_any: {
 					if constexpr (detail::input_source_has_options<InputSource>::value) {
-						if (((instr.immediate16 & 0x8000U) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
+						if ((instr.immediate16 != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
 							fc = 1;
 							break;
 						}

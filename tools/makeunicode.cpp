@@ -1245,6 +1245,8 @@ template <> inline constexpr property_enum to_property_enum_v<eawtype> = propert
 
 template <class T> inline constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+
 // Unicode Character Database record
 class record
 {
@@ -1614,6 +1616,8 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 	return table;
 }
+
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
 } // namespace lug::unicode
 

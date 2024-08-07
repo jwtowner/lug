@@ -10,14 +10,12 @@ Checks:
   - -cert-dcl21-cpp # this check is deprecated, it is no longer part of the CERT standard
   - concurrency-*
   - cppcoreguidelines-*
-  - -cppcoreguidelines-avoid-magic-numbers # revisit after new instruction scheme, maybe only disable for unicode tables
   - -cppcoreguidelines-avoid-do-while # if removing do-while does not cause serious performance issues remove this check
   - -cppcoreguidelines-pro-bounds-* # requires gsl::at and std::span to suppress, would prefer Standard Library hardening approach
-  - -cppcoreguidelines-pro-type-union-access # remove after developing new instruction encoding scheme that doesn't use union
   - darwin-*
   - fuschia-*
   - google-*
-  - -google-build-using-namespace # would require too many invidual using-declarations to satisfy
+  - -google-build-using-namespace # would require too many individual using-declarations to satisfy
   - -google-readability-braces-around-statements # adversely affects line count
   - -google-runtime-int # revisit after new instruction scheme
   - hicpp-*
@@ -35,7 +33,6 @@ Checks:
   - -readability-container-contains # C++20 feature
   - -readability-function-cognitive-complexity # grammar::start() and basic_parser::parse() are complex, revisit or suppress only for these functions
   - -readability-identifier-length # revisit later
-  - -readability-magic-numbers # revisit after new instruction scheme, maybe only disable for unicode tables
   - -readability-qualified-auto # stylistic preference that unfortunately warns when marking 'auto*' as 'auto* const' or just 'auto const'
 WarningsAsErrors: ''
 HeaderFileExtensions:
