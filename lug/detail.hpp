@@ -6,6 +6,7 @@
 #define LUG_INCLUDE_LUG_DETAIL_HPP
 
 #include <algorithm>
+#include <exception>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -270,17 +271,24 @@ class scope_exit
 {
 	static_assert(std::is_invocable_v<EF>);
 
-	EF destructor;
+	EF destructor_;
+	bool released_{false};
 
 public:
 	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
 	constexpr explicit scope_exit( Fn&& fn ) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
-		: destructor{std::forward<Fn>(fn)}
+		: destructor_{std::forward<Fn>(fn)}
 	{}
 
 	~scope_exit()
 	{
-		destructor();
+		if (!released_)
+			destructor_();
+	}
+
+	void release() noexcept
+	{
+		released_ = true;
 	}
 
 	scope_exit(scope_exit const&) = delete;
@@ -291,6 +299,41 @@ public:
 
 template <class Fn, class = std::enable_if_t<std::is_invocable_v<Fn>>>
 scope_exit(Fn) -> scope_exit<std::decay_t<Fn>>;
+
+template <class EF>
+class scope_fail
+{
+	static_assert(std::is_invocable_v<EF>);
+
+	EF destructor_;
+	int uncaught_on_construction_;
+
+public:
+	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
+	constexpr explicit scope_fail( Fn&& fn ) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
+		: destructor_{std::forward<Fn>(fn)}
+		, uncaught_on_construction_(std::uncaught_exceptions())
+	{}
+
+	~scope_fail()
+	{
+		if (std::uncaught_exceptions() > uncaught_on_construction_)
+			destructor_();
+	}
+
+	void release() noexcept
+	{
+		uncaught_on_construction_ = (std::numeric_limits<int>::max)();
+	}
+
+	scope_fail(scope_fail const&) = delete;
+	scope_fail(scope_fail&&) = delete;
+	scope_fail& operator=(scope_fail const&) = delete;
+	scope_fail& operator=(scope_fail&&) = delete;
+};
+
+template <class Fn, class = std::enable_if_t<std::is_invocable_v<Fn>>>
+scope_fail(Fn) -> scope_fail<std::decay_t<Fn>>;
 
 template <class Error, class T, class U, class V, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<U> && std::is_integral_v<V>>>
 constexpr void assure_in_range(T x, U minval, V maxval)
@@ -351,6 +394,22 @@ template <class Integral>
 [[nodiscard]] inline Integral string_unpack(std::string_view s)
 {
 	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
+
+template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
+[[nodiscard]] constexpr T sar(T x, unsigned int n) noexcept
+{
+	if constexpr ((static_cast<T>(-1) >> 1U) == static_cast<T>(-1)) { // NOLINT(hicpp-signed-bitwise)
+		return x >> n; // NOLINT(hicpp-signed-bitwise)
+	} else {
+		using U = std::make_unsigned_t<T>;
+		constexpr auto digits = static_cast<unsigned int>(std::numeric_limits<U>::digits);
+		auto const ux = static_cast<U>(x);
+		auto const sign_bit = ux & (static_cast<U>(1) << (digits - 1U));
+		auto const shifted = ux >> n;
+		auto const sign_mask = static_cast<U>(-static_cast<T>(sign_bit != 0)) << (digits - n);
+		return static_cast<T>(shifted | sign_mask);
+	}
 }
 
 } // namespace detail
