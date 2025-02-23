@@ -383,15 +383,15 @@ public:
 
 class failure
 {
-	std::string label_;
+	std::string_view label_;
 	rule const* recovery_{nullptr};
 public:
-	template <class StringLike, class = std::enable_if_t<std::is_constructible_v<std::string, StringLike&&>>> explicit failure(StringLike&& lab) : label_{std::forward<StringLike>(lab)} {}
-	template <class StringLike, class = std::enable_if_t<std::is_constructible_v<std::string, StringLike&&>>> explicit failure(StringLike&& lab, rule const& rec) : label_{std::forward<StringLike>(lab)}, recovery_{&rec} {}
-	[[nodiscard]] bool operator==(failure const& rhs) const noexcept { return (label_ == rhs.label_) && (recovery_ == rhs.recovery_); }
-	[[nodiscard]] bool operator!=(failure const& rhs) const noexcept { return (label_ != rhs.label_) || (recovery_ != rhs.recovery_); }
-	[[nodiscard]] std::string const& label() const noexcept { return label_; }
-	[[nodiscard]] rule const* recovery() const noexcept { return recovery_; }
+	constexpr explicit failure(std::string_view lab) noexcept : label_{lab} {}
+	constexpr explicit failure(std::string_view lab, rule const& rec) noexcept : label_{lab}, recovery_{&rec} {}
+	[[nodiscard]] constexpr bool operator==(failure const& rhs) const noexcept { return (label_ == rhs.label_) && (recovery_ == rhs.recovery_); }
+	[[nodiscard]] constexpr bool operator!=(failure const& rhs) const noexcept { return (label_ != rhs.label_) || (recovery_ != rhs.recovery_); }
+	[[nodiscard]] constexpr std::string_view label() const noexcept { return label_; }
+	[[nodiscard]] constexpr rule const* recovery() const noexcept { return recovery_; }
 };
 
 template <class AttributeFrameType = std::tuple<>>
@@ -1227,6 +1227,7 @@ inline namespace operators {
 [[nodiscard]] constexpr auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_fail(char const* s, std::size_t n) { return failure{std::string_view{s, n}}; }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{matches_eps[e]}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{matches_eps[e]}; } // NOLINT(google-runtime-operator)
