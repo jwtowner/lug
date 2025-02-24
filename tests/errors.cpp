@@ -27,37 +27,44 @@ void test_basic_error_recovery()
 	Sentence = lexeme[+(!chr('\n') > any) > chr('\n')];
 	S = *Sentence;
 
-	environment E;
 	grammar G = start(S > eoi);
-
-	// Should be able to continue parsing after errors
-	bool const result = lug::parse(invalid_input, G, E);
+	bool const result = lug::parse(invalid_input, G);
 	assert(result); // Should complete despite errors
 }
 
-/*
-void test_error_position_tracking()
+void test_basic_error_handling()
 {
-	rule S;
-	std::array<lug::syntax_position, 2> error_pos;
-	error_pos.fill({0, 0});
+	using namespace lug::language;
 
-	failure f_at{"@"};
+	lug::syntax error_syntax;
+	lug::syntax_position error_pos{0, 0};
 
-	//S = (+(~chr('@')) > chr('@'))[f_at] ^[&](error& e) -> error_response { };
+	failure const FSymbolChar{"symbol character"};
+	auto const Symbol = lexeme[+(!chr('@') > any) > (!chr('@'))[FSymbolChar]];
 
-	S = lexeme[+(!chr('@') > any) > chr('@')] <[&](environment& e, syntax x) {
-		error_pos[0] = e.position_begin(x);
-	};
+	rule S = Symbol > eoi ^= [&](error& e) -> error_response {
+			assert(e.label() == "symbol character"sv);
+			error_syntax = e.syntax();
+			error_pos = e.position_begin();
+			return error_response::halt;
+		};
 
-	environment E;
-	grammar G = start(S > eoi);
+	grammar G = start(S);
 
-	bool const result = lug::parse("invalid@symbol", G, E);
-	assert(!result);
-	assert(error_pos[0].line > 0); // Should have tracked error position
+	assert(!lug::parse("invalid@symbol", G));
+	assert(error_syntax == "@symbol"sv);
+	assert(error_pos.line == 1);
+	assert(error_pos.column == 8);
+
+	error_syntax = lug::syntax{};
+	error_pos = lug::syntax_position{0, 0};
+	assert(lug::parse("valid_symbol", G));
+	assert(error_syntax.empty());
+	assert(error_pos.line == 0);
+	assert(error_pos.column == 0);
 }
 
+/*
 void test_custom_error_handlers()
 {
 	rule S, ErrorRecovery;
@@ -102,7 +109,7 @@ int main()
 {
 	try {
 		test_basic_error_recovery();
-		//test_error_position_tracking();
+		test_basic_error_handling();
 		//test_custom_error_handlers();
 		//test_nested_recovery();
 		return 0;
