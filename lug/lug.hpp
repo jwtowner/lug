@@ -1008,7 +1008,7 @@ struct condition_block_combinator
 	struct condition_block_expression : unary_encoder_expression_interface<condition_block_expression<E1>, E1>
 	{
 		using base_type = unary_encoder_expression_interface<condition_block_expression<E1>, E1>;
-		using base_type::unary_encoder_expression_interface;
+		using base_type::base_type;
 		std::string_view name;
 		constexpr condition_block_expression(E1 const& x1, std::string_view n) noexcept : base_type{x1}, name{n} {}
 
