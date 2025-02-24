@@ -34,26 +34,26 @@ class string_input_source;
 class string_view_input_source;
 class syntax;
 struct program;
-struct syntax_position { std::size_t column; std::size_t line; };
-struct syntax_range { std::size_t index; std::size_t size; };
+struct syntax_position;
+struct syntax_range;
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 enum class error_response : std::uint_least8_t { halt, recover, accept, backtrack, rethrow };
 using error_handler = std::function<error_response(error&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
-using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 using parser = basic_parser<multi_input_source>;
+using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct encoder_expression_trait_tag {};
 template <class E, class = void> struct is_encoder_expression : std::false_type {};
 template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
 template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
 template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_r_v<error_response, std::decay_t<H>, error&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
-template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_r_v<error_response, std::decay_t<H>, error&>;
 
 [[nodiscard]] grammar start(rule const& start_rule);
 
@@ -194,6 +194,30 @@ public:
 	[[nodiscard]] static std::shared_ptr<std::function<void(encoder&)>> const& implicit_space();
 };
 
+struct syntax_position
+{
+	std::size_t line{0};
+	std::size_t column{0};
+	[[nodiscard]] constexpr bool operator==(syntax_position const& other) const noexcept { return line == other.line && column == other.column; }
+	[[nodiscard]] constexpr bool operator!=(syntax_position const& other) const noexcept { return !(*this == other); }
+	[[nodiscard]] constexpr bool operator<(syntax_position const& other) const noexcept { return line < other.line || (line == other.line && column < other.column); }
+	[[nodiscard]] constexpr bool operator<=(syntax_position const& other) const noexcept { return !(other < *this); }
+	[[nodiscard]] constexpr bool operator>(syntax_position const& other) const noexcept { return other < *this; }
+	[[nodiscard]] constexpr bool operator>=(syntax_position const& other) const noexcept { return !(*this < other); }
+};
+
+struct syntax_range
+{
+	std::size_t index{0};
+	std::size_t size{0};
+	[[nodiscard]] constexpr bool operator==(syntax_range const& other) const noexcept { return index == other.index && size == other.size; }
+	[[nodiscard]] constexpr bool operator!=(syntax_range const& other) const noexcept { return !(*this == other); }
+	[[nodiscard]] constexpr bool operator<(syntax_range const& other) const noexcept { return index < other.index || (index == other.index && size < other.size); }
+	[[nodiscard]] constexpr bool operator<=(syntax_range const& other) const noexcept { return !(other < *this); }
+	[[nodiscard]] constexpr bool operator>(syntax_range const& other) const noexcept { return other < *this; }
+	[[nodiscard]] constexpr bool operator>=(syntax_range const& other) const noexcept { return !(*this < other); }
+};
+
 class syntax
 {
 	std::string_view str_;
@@ -309,8 +333,8 @@ public:
 		auto const pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (pos != std::end(positions_) && index == pos->first)
 			return pos->second;
-		std::size_t startindex = 0;
-		syntax_position position = origin_;
+		std::size_t startindex{0};
+		syntax_position position{origin_};
 		if (pos != std::begin(positions_)) {
 			auto prevpos = std::prev(pos);
 			startindex = prevpos->first;
@@ -318,13 +342,13 @@ public:
 		}
 		auto first = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(startindex));
 		auto const last = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(index));
-		char32_t rune = U'\0';
-		char32_t prevrune = U'\0';
+		char32_t rune{U'\0'};
+		char32_t prevrune{U'\0'};
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);
 			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
-				position.column = 1;
 				++position.line;
+				position.column = 1;
 				first = next;
 			}
 		}
