@@ -23,7 +23,7 @@ namespace lug {
 template <class> class basic_parser;
 class encoder;
 class environment;
-class error;
+class error_context;
 class failure;
 class grammar;
 class multi_input_source;
@@ -37,8 +37,8 @@ struct program;
 struct syntax_position;
 struct syntax_range;
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
-enum class error_response : std::uint_least8_t { halt, recover, accept, backtrack, rethrow };
-using error_handler = std::function<error_response(error&)>;
+enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
+using error_handler = std::function<error_response(error_context&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
@@ -50,7 +50,7 @@ template <class E, class = void> struct is_encoder_expression : std::false_type 
 template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
 template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
 template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_r_v<error_response, std::decay_t<H>, error&>;
+template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_r_v<error_response, std::decay_t<H>, error_context&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
@@ -71,6 +71,7 @@ struct registers
 	std::size_t ri{0}; // raise inhibited register
 	std::ptrdiff_t eh{-1}; // error handler register
 	std::ptrdiff_t rh{-1}; // recovery handler register
+	error_response rr{error_response::resume}; // recovery response latch register
 	std::ptrdiff_t pc{-1}; // program counter
 };
 
@@ -78,9 +79,9 @@ enum class opcode : std::uint_least8_t
 {
 	choice,         commit,         commit_back,    commit_partial, cut,
 	jump,           call,           ret,            fail,           recover_push,
-	recover_pop,    report_push,    report_pop,     predicate,      action,
-	capture_start,  capture_end,    condition_pop,  symbol_end,     symbol_pop,
-	match_any,      match_set,      match_eol,
+	recover_pop,    recover_resp,   report_push,    report_pop,     predicate,
+	action,         capture_start,  capture_end,    condition_pop,  symbol_end,
+	symbol_pop,     match_any,      match_set,      match_eol,
 	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
 	condition_test, condition_push, symbol_exists,  symbol_all,     symbol_all_cf,
 	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
@@ -395,16 +396,20 @@ public:
 	}
 };
 
-class error
+class error_context
 {
 	std::reference_wrapper<lug::environment> envr_;
-	std::string_view label_;
 	lug::syntax syntax_;
+	std::string_view label_;
+	error_response recovery_response_;
 public:
-	error(lug::environment& envr, std::string_view lab, syntax syn) : envr_{envr}, label_{lab}, syntax_{syn} {}
+	error_context(lug::environment& envr, lug::syntax const& syn, std::string_view lab, error_response resp) : envr_{envr}, syntax_{syn}, label_{lab}, recovery_response_{resp} {}
+	error_context(error_context const&) = delete;
+	error_context& operator=(error_context const&) = delete;
 	[[nodiscard]] lug::environment& environment() const noexcept { return envr_.get(); }
-	[[nodiscard]] std::string_view label() const noexcept { return label_; }
 	[[nodiscard]] lug::syntax const& syntax() const noexcept { return syntax_; }
+	[[nodiscard]] std::string_view label() const noexcept { return label_; }
+	[[nodiscard]] error_response recovery_response() const noexcept { return recovery_response_; }
 	[[nodiscard]] syntax_position position_begin() const { return environment().position_begin(syntax_); }
 	[[nodiscard]] syntax_position position_end() const { return environment().position_end(syntax_); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range() const { return environment().position_range(syntax_); }
@@ -648,13 +653,13 @@ struct binary_encoder_expression_interface : common_encoder_expression_interface
 };
 
 template <class E1>
-struct raise_expression : unary_encoder_expression_interface<raise_expression<E1>, E1>
+struct expect_expression : unary_encoder_expression_interface<expect_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<raise_expression<E1>, E1>;
+	using base_type = unary_encoder_expression_interface<expect_expression<E1>, E1>;
 	failure reason;
 
 	template <class X1, class Failure, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> &&std::is_constructible_v<failure, Failure&&>>>
-	constexpr raise_expression(X1&& x1, Failure&& fail) : base_type{std::forward<X1>(x1)}, reason{std::forward<Failure>(fail)} {}
+	constexpr expect_expression(X1&& x1, Failure&& fail) : base_type{std::forward<X1>(x1)}, reason{std::forward<Failure>(fail)} {}
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -666,9 +671,26 @@ struct raise_expression : unary_encoder_expression_interface<raise_expression<E1
 		rule const* const recovery = reason.recovery();
 		if (recovery != nullptr)
 			d.recover_push(*recovery);
-		d.encode(opcode::raise, reason.label(), recovery ? 1 : 0);
+		d.encode(opcode::raise, reason.label(), ((recovery != nullptr) ? 1 : 0));
 		d.jump_to_here(commit);
 		return m2;
+	}
+};
+
+struct raise_expression : terminal_encoder_expression_interface<raise_expression>
+{
+	failure reason;
+
+	constexpr raise_expression(failure const& fail) noexcept : reason{fail} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		rule const* const recovery = reason.recovery();
+		if (recovery != nullptr)
+			d.recover_push(*recovery);
+		d.encode(opcode::raise, reason.label(), ((recovery != nullptr) ? 1 : 0));
+		return m;
 	}
 };
 
@@ -708,6 +730,20 @@ struct recover_expression : unary_encoder_expression_interface<recover_expressio
 template <class X1, class R, class = std::enable_if_t<is_encoder_expression_v<std::decay_t<R>>>> recover_expression(X1&&, R&&) -> recover_expression<std::decay_t<X1>, std::decay_t<R>>;
 template <class X1> recover_expression(X1&&, rule const&) -> recover_expression<std::decay_t<X1>, rule>;
 
+struct recover_response_expression : terminal_encoder_expression_interface<recover_response_expression>
+{
+	error_response response;
+
+	constexpr recover_response_expression(error_response r) noexcept : response{r} {}
+
+	template <class M>
+	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
+	{
+		d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response));
+		return m;
+	}
+};
+
 template <class E1, class Handler>
 struct report_expression : unary_encoder_expression_interface<report_expression<E1, Handler>, E1>
 {
@@ -733,7 +769,7 @@ template <class X1, class H> report_expression(X1&&, H&&) -> report_expression<s
 template <class Derived>
 [[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator[](failure const& reason) const
 {
-	return raise_expression<Derived>{derived(), reason};
+	return expect_expression<Derived>{derived(), reason};
 }
 
 template <class Derived> template <class Recovery>
@@ -922,7 +958,7 @@ struct rule_precedence_expression : terminal_encoder_expression_interface<rule_p
 
 [[nodiscard]] inline auto rule::operator[](failure const& reason) const
 {
-	return raise_expression<callable_expression<rule const>>{callable_expression<rule const>{*this}, reason};
+	return expect_expression<callable_expression<rule const>>{callable_expression<rule const>{*this}, reason};
 }
 
 template <class Recovery>
@@ -1333,7 +1369,7 @@ template <class X1> local_to_block_expression(X1&&, std::string_view) -> local_t
 namespace language {
 
 using environment = lug::environment; using grammar = lug::grammar; using rule = lug::rule; using lug::start;
-using error = lug::error; using error_response = lug::error_response; using failure = lug::failure; using lug::recover;
+using error_context = lug::error_context; using error_response = lug::error_response; using failure = lug::failure; using lug::recover;
 using syntax = lug::syntax; using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype; using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
@@ -1401,6 +1437,7 @@ template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), skip_before[e2]}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { auto const& x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return e | eps; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e) { return cut > e; }
@@ -1478,6 +1515,14 @@ inline constexpr struct
 	template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const { return local_block_expression{make_expression(e)}; }
 }
 local{};
+
+inline constexpr struct
+{
+	[[nodiscard]] constexpr auto operator()(failure const& reason) const noexcept { return raise_expression{reason}; }
+	[[nodiscard]] constexpr auto operator()(std::string_view label) const noexcept { return raise_expression{failure{label}}; }
+	[[nodiscard]] constexpr auto operator()(std::string_view label, rule const& recovery) const noexcept { return raise_expression{failure{label, recovery}}; }
+}
+raise{};
 
 class implicit_space_rule
 {
@@ -1654,7 +1699,7 @@ protected:
 	struct capture_frame { std::size_t sr; constexpr explicit capture_frame(std::size_t s) noexcept : sr{s} {} };
 	struct condition_frame { std::string_view name; bool value; constexpr condition_frame(std::string_view n, bool v) noexcept : name{n}, value{v} {} };
 	struct lrmemo_frame { std::size_t srr; std::size_t sra; std::size_t prec; std::ptrdiff_t pcr; std::ptrdiff_t pca; std::size_t rcr; std::vector<action_response> responses; lrmemo_frame(std::size_t sr, std::size_t sa, std::size_t p, std::ptrdiff_t pc, std::ptrdiff_t pa, std::size_t rc) noexcept : srr{sr}, sra{sa}, prec{p}, pcr{pc}, pca{pa}, rcr{rc} {} };
-	struct raise_frame { std::string_view label; std::size_t sr; std::size_t rc; std::ptrdiff_t eh; std::ptrdiff_t pc; constexpr explicit raise_frame(std::string_view l, std::size_t s, std::size_t r, std::ptrdiff_t e, std::ptrdiff_t p) noexcept : label{l}, sr{s}, rc{r}, eh{e}, pc{p} {} };
+	struct raise_frame { std::string_view label;std::size_t sr; std::size_t rc; std::ptrdiff_t eh; std::ptrdiff_t pc; constexpr explicit raise_frame(std::string_view lab, std::size_t s, std::size_t r, std::ptrdiff_t e, std::ptrdiff_t p) noexcept : label{lab}, sr{s}, rc{r}, eh{e}, pc{p} {} };
 	struct recover_frame { std::ptrdiff_t rh; constexpr explicit recover_frame(std::ptrdiff_t h) noexcept : rh{h} {} };
 	struct report_frame { std::ptrdiff_t eh; constexpr explicit report_frame(std::ptrdiff_t h) noexcept : eh{h} {} };
 	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };
@@ -1938,9 +1983,11 @@ class basic_parser : public parser_base
 	{
 		--registers_.cd;
 		--registers_.ci;
+		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
 		if (registers_.sr <= frame.sr) {
 			registers_.sr = frame.sr;
 			(void)match_default_recovery(registers_.sr);
+			rec_res = error_response::resume;
 		}
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		auto const sr0 = frame.sr;
@@ -1948,8 +1995,8 @@ class basic_parser : public parser_base
 		auto const mat = match();
 		auto const sub = subject();
 		environment_->reset_match_and_subject(mat, sub);
-		error_response err_res{(sr0 < sr1) ? error_response::recover : error_response::halt};
-		error err{*environment_, frame.label, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}};
+		error_response err_res{(sr0 < sr1) ? rec_res : error_response::halt};
+		error_context err{*environment_, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, frame.label, err_res};
 		auto handler_index = static_cast<std::size_t>(frame.eh);
 		auto next_frame = stack_frames_.rbegin();
 		auto const last_frame = stack_frames_.rend();
@@ -2116,6 +2163,7 @@ class basic_parser : public parser_base
 		drain();
 		registers_.eh = -1;
 		registers_.rh = -1;
+		registers_.rr = error_response::resume;
 		registers_.pc = 0;
 	}
 
@@ -2243,6 +2291,9 @@ public:
 				case opcode::report_push: {
 					stack_frames_.emplace_back(std::in_place_type<report_frame>, registers_.eh);
 					registers_.eh = static_cast<std::ptrdiff_t>(instr.immediate16);
+				} break;
+				case opcode::recover_resp: {
+					registers_.rr = static_cast<error_response>(instr.immediate8);
 				} break;
 				case opcode::report_pop: {
 					if (stack_frames_.empty())

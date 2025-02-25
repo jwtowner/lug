@@ -6,43 +6,45 @@
 
 #undef NDEBUG
 #include <cassert>
+#include <sstream>
 
+using namespace std::string_literals;
 using namespace std::string_view_literals;
-
-// Test data with intentional errors
-constexpr auto invalid_input =
-R"(This input has {unclosed brackets
-This line has mismatched (parentheses]}
-This line has invalid @#$ symbols
-This is an incomplete sentence that
-)"sv;
 
 void test_basic_error_recovery()
 {
 	using namespace lug::language;
 
-	rule S, Sentence;
+	// Define recovery rule that accepts "XYZ" without skipping whitespace
+	rule TermRecovery = noskip[str("XYZ") ^ error_response::accept];
 
-	// Define a simple grammar that can recover from errors
-	Sentence = lexeme[+(!chr('\n') > any) > chr('\n')];
-	S = *Sentence;
+	// Define term rule that matches 'A' followed by either "BCD" or raises error with recovery
+	rule Term = lexeme[chr('A') > (str("BCD") | raise("Error", TermRecovery))];
 
-	grammar G = start(S > eoi);
-	bool const result = lug::parse(invalid_input, G);
-	assert(result); // Should complete despite errors
+	grammar G = start(Term > eoi);
+	assert(lug::parse("ABCD", G)); // Test valid input "ABCD" - should succeed
+	assert(lug::parse("AXYZ", G)); // Test error recovery - "AXYZ" should succeed by recovering with "XYZ"
+	assert(!lug::parse("XYZA", G)); // Test invalid input starting with "XYZ" - should fail
+	assert(!lug::parse("APQR", G)); // Test invalid input with no recovery - should fail
 }
 
 void test_basic_error_handling()
 {
 	using namespace lug::language;
 
-	lug::syntax error_syntax;
-	lug::syntax_position error_pos{0, 0};
+	// Variables to capture error information
+	syntax error_syntax;
+	syntax_position error_pos;
 
+	// Define failure label for invalid symbol characters
 	failure const FSymbolChar{"symbol character"};
+	
+	// Define rule that matches any sequence of characters except '@'
+	// and fails if '@' is encountered
 	auto const Symbol = lexeme[+(!chr('@') > any) > (!chr('@'))[FSymbolChar]];
 
-	rule S = Symbol > eoi ^= [&](error& e) -> error_response {
+	// Define grammar rule with error handler that captures error details
+	rule S = Symbol > eoi ^= [&](error_context& e) -> error_response {
 			assert(e.label() == "symbol character"sv);
 			error_syntax = e.syntax();
 			error_pos = e.position_begin();
@@ -51,17 +53,75 @@ void test_basic_error_handling()
 
 	grammar G = start(S);
 
+	// Test invalid input containing '@' -- should fail and capture error
 	assert(!lug::parse("invalid@symbol", G));
 	assert(error_syntax == "@symbol"sv);
-	assert(error_pos.line == 1);
-	assert(error_pos.column == 8);
+	assert((error_pos == syntax_position{1, 8}));
 
-	error_syntax = lug::syntax{};
-	error_pos = lug::syntax_position{0, 0};
+	// Test valid input -- should succeed with no error
+	error_syntax = syntax{};
+	error_pos = syntax_position{};
 	assert(lug::parse("valid_symbol", G));
 	assert(error_syntax.empty());
-	assert(error_pos.line == 0);
-	assert(error_pos.column == 0);
+	assert((error_pos == syntax_position{}));
+}
+
+void test_calculator_with_recovery()
+{
+	using namespace lug::language;
+
+	// Define error handler that captures output
+	std::ostringstream error_output;
+	auto const error_handler = [&error_output](error_context& e) -> error_response {
+		error_output << "Error at line " << e.position_begin().line
+		             << ", column " << e.position_begin().column
+		             << ": " << e.label() << "\n";
+		return error_response::resume;
+	};
+
+	// Define failure labels
+	failure FNumber{"expected number"};
+	failure FRParen{"expected ')'"};
+	failure FOperand{"expected operand"};
+
+	rule Expr, Term, Factor, Number;
+
+	// Basic number parsing with error handling
+	Number = lexeme[+chr('0', '9')][FNumber];
+	
+	// Parenthesized expressions and atomic factors
+	Factor = (chr('(') > Expr > chr(')')[FRParen])
+	       | Number;
+	
+	// Multiplication with error recovery
+	Term = Factor > *(chr('*') > Factor[FOperand]);
+	
+	// Addition with error recovery
+	Expr = Term > *(chr('+') > Term[FOperand]);
+
+	// Create grammar with error handling
+	grammar G = start(Expr > eoi ^= error_handler);
+
+	// Test valid input
+	assert(lug::parse("123+456*789", G));
+	assert(error_output.str().empty());
+
+	// Test invalid input with recovery
+	error_output.str(""s);
+	assert(!lug::parse("123++456*789", G));  // Double plus should recover
+	assert(error_output.str() == "Error at line 1, column 4: expected operand\n"s);
+
+	error_output.str(""s);
+	assert(!lug::parse("123+456**789", G));  // Double multiply should recover
+	assert(error_output.str() == "Error at line 1, column 8: expected operand\n"s);
+
+	error_output.str(""s);
+	assert(!lug::parse("123+456)", G));      // Unmatched parenthesis should recover
+	assert(error_output.str() == "Error at line 1, column 7: expected operand\n"s);
+
+	error_output.str(""s);
+	assert(!lug::parse("123+", G));          // Incomplete expression should fail
+	assert(error_output.str() == "Error at line 1, column 4: expected number\n"s);
 }
 
 /*
@@ -110,6 +170,7 @@ int main()
 	try {
 		test_basic_error_recovery();
 		test_basic_error_handling();
+		//test_calculator_with_recovery();
 		//test_custom_error_handlers();
 		//test_nested_recovery();
 		return 0;
