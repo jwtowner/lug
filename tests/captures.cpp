@@ -151,7 +151,7 @@ void test_capture_comma_delimited_list()
 
 void test_capture_nested_calls()
 {
-    std::string name;
+	std::string name;
 	std::string sequence;
 
 	auto const add_to_sequence = [&]
@@ -161,89 +161,89 @@ void test_capture_nested_calls()
 		sequence += name;
 	};
 
-    lug::grammar const G = [&]
-    {
-        using namespace lug::language;
-        rule call;
-        call = lexeme[capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx]] > ~('(' > call > ')') < add_to_sequence;
-        return start(call > eoi);
-    }();
+	lug::grammar const G = [&]
+	{
+		using namespace lug::language;
+		rule call;
+		call = lexeme[capture(name)["[a-zA-Z]"_rx > *"[a-zA-Z0-9]"_rx]] > ~('(' > call > ')') < add_to_sequence;
+		return start(call > eoi);
+	}();
 
-    std::string const text1 = "func";
-    assert(lug::parse(text1, G));
+	std::string const text1 = "func";
+	assert(lug::parse(text1, G));
 	assert(sequence == "func");
-    assert(name == "func"); // name is scoped to the recursive rule, so it should reflect the base case
+	assert(name == "func"); // name is scoped to the recursive rule, so it should reflect the base case
 
 	name.clear();
 	sequence.clear();
-    std::string const text2 = "func(nestedFunc)";
-    assert(lug::parse(text2, G));
+	std::string const text2 = "func(nestedFunc)";
+	assert(lug::parse(text2, G));
 	assert(sequence == "nestedFunc,func");
-    assert(name == "func"); // name is scoped to the recursive rule, so it should reflect the base case
+	assert(name == "func"); // name is scoped to the recursive rule, so it should reflect the base case
 
 	name.clear();
 	sequence.clear();
-    std::string const text3 = "func2(nestedFunc(deeperFunc))";
-    assert(lug::parse(text3, G));
-    assert(sequence == "deeperFunc,nestedFunc,func2");
+	std::string const text3 = "func2(nestedFunc(deeperFunc))";
+	assert(lug::parse(text3, G));
+	assert(sequence == "deeperFunc,nestedFunc,func2");
 	assert(name == "func2"); // name is scoped to the recursive rule, so it should reflect the base case
 
-    std::string const text4 = "func(invalid";
-    assert(!lug::parse(text4, G));
-    // failure to parse the above should not change captures, as no semantic actions should be executed
-    assert(sequence == "deeperFunc,nestedFunc,func2");
+	std::string const text4 = "func(invalid";
+	assert(!lug::parse(text4, G));
+	// failure to parse the above should not change captures, as no semantic actions should be executed
+	assert(sequence == "deeperFunc,nestedFunc,func2");
 	assert(name == "func2"); // name is scoped to the recursive rule, so it should reflect the base case
 }
 
 void test_capture_arithmetic_expressions()
 {
-    std::vector<std::string> numbers;
-    std::vector<char> operations;
+	std::vector<std::string> numbers;
+	std::vector<char> operations;
 
-    auto const add_number = [&](std::string n) { numbers.push_back(std::move(n)); };
-    auto const add_operation = [&](std::string_view op) { operations.push_back(op[0]); };
+	auto const add_number = [&](std::string n) { numbers.push_back(std::move(n)); };
+	auto const add_operation = [&](std::string_view op) { operations.push_back(op[0]); };
 
-    lug::grammar const G = [&]
-    {
-        using namespace lug::language;
-        rule expression;
-        rule number = capture(add_number)[lexeme[+"[0-9]"_rx]];
-        rule operation = capture(add_operation)['+'_cx | '-' | '*' | '/'];
-        expression = number >> operation;
-        return start(expression > eoi);
-    }();
+	lug::grammar const G = [&]
+	{
+		using namespace lug::language;
+		rule expression;
+		rule number = capture(add_number)[lexeme[+"[0-9]"_rx]];
+		rule operation = capture(add_operation)['+'_cx | '-' | '*' | '/'];
+		expression = number >> operation;
+		return start(expression > eoi);
+	}();
 
 	std::stringstream source{"3+5"};
-    assert(lug::parse(source, G));
-    assert(numbers.size() == 2);
-    assert(numbers[0] == "3");
-    assert(numbers[1] == "5");
-    assert(operations.size() == 1);
-    assert(operations[0] == '+');
+	assert(lug::parse(source, G));
+	assert(numbers.size() == 2);
+	assert(numbers[0] == "3");
+	assert(numbers[1] == "5");
+	assert(operations.size() == 1);
+	assert(operations[0] == '+');
 
-    numbers.clear();
-    operations.clear();
-    std::string const source2 = "10-2+4";
-    assert(lug::parse(source2, G));
-    assert(numbers.size() == 3);
-    assert(numbers[0] == "10");
-    assert(numbers[1] == "2");
-    assert(numbers[2] == "4");
-    assert(operations.size() == 2);
-    assert(operations[0] == '-');
-    assert(operations[1] == '+');
+	numbers.clear();
+	operations.clear();
+	std::string const source2 = "10-2+4";
+	assert(lug::parse(source2, G));
+	assert(numbers.size() == 3);
+	assert(numbers[0] == "10");
+	assert(numbers[1] == "2");
+	assert(numbers[2] == "4");
+	assert(operations.size() == 2);
+	assert(operations[0] == '-');
+	assert(operations[1] == '+');
 
-    numbers.clear();
-    operations.clear();
-    std::string_view const source3 = "8*3/2";
-    assert(lug::parse(source3, G));
-    assert(numbers.size() == 3);
-    assert(numbers[0] == "8");
-    assert(numbers[1] == "3");
-    assert(numbers[2] == "2");
-    assert(operations.size() == 2);
-    assert(operations[0] == '*');
-    assert(operations[1] == '/');
+	numbers.clear();
+	operations.clear();
+	std::string_view const source3 = "8*3/2";
+	assert(lug::parse(source3, G));
+	assert(numbers.size() == 3);
+	assert(numbers[0] == "8");
+	assert(numbers[1] == "3");
+	assert(numbers[2] == "2");
+	assert(operations.size() == 2);
+	assert(operations[0] == '*');
+	assert(operations[1] == '/');
 }
 
 int main()
