@@ -403,11 +403,8 @@ template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
 		return x >> n; // NOLINT(hicpp-signed-bitwise)
 	} else {
 		using U = std::make_unsigned_t<T>;
-		constexpr auto digits = static_cast<unsigned int>(std::numeric_limits<U>::digits);
-		auto const ux = static_cast<U>(x);
-		auto const sign_bit = ux & (static_cast<U>(1) << (digits - 1U));
-		auto const shifted = ux >> n;
-		auto const sign_mask = static_cast<U>(-static_cast<T>(sign_bit != 0)) << (digits - n);
+		auto const shifted = static_cast<U>(x) >> n;
+		auto const sign_mask = static_cast<U>(-static_cast<T>(x < 0)) << (static_cast<unsigned int>(std::numeric_limits<U>::digits) - n);
 		return static_cast<T>(shifted | sign_mask);
 	}
 }
