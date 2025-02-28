@@ -1716,6 +1716,7 @@ protected:
 
 	// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 	lug::grammar const* grammar_;
+	lug::program const* program_;
 	lug::environment* environment_;
 	std::vector<action_response> responses_;
 	std::vector<stack_frame> stack_frames_;
@@ -1825,13 +1826,12 @@ protected:
 	void do_accept(std::string_view match, std::string_view subject)
 	{
 		detail::scope_exit const cleanup{[this, prior_call_depth = environment_->start_accept(match, subject)]{ environment_->end_accept(prior_call_depth); }};
-		auto const& prog = grammar_->program();
 		for (auto& resp : responses_) {
 			if (environment_->accept_response(resp.call_depth)) {
 				if (resp.range.index < parser_base::max_size)
-					prog.captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
+					program_->captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
 				else
-					prog.actions[resp.action_index](*environment_);
+					program_->actions[resp.action_index](*environment_);
 			}
 		}
 	}
@@ -1850,7 +1850,7 @@ protected:
 	}
 
 public:
-	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, environment_{&e} {}
+	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, program_{&g.program()}, environment_{&e} {}
 	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
 	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
 	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
@@ -2008,9 +2008,8 @@ class basic_parser : public parser_base
 		auto handler_index = static_cast<std::size_t>(frame.eh);
 		auto next_frame = stack_frames_.rbegin();
 		auto const last_frame = stack_frames_.rend();
-		auto const& prog = grammar_->program();
-		while (handler_index < prog.handlers.size()) {
-			err_res = prog.handlers[handler_index](err);
+		while (handler_index < program_->handlers.size()) {
+			err_res = program_->handlers[handler_index](err);
 			if (err_res != error_response::rethrow)
 				break;
 			err_res = error_response::halt;
@@ -2214,16 +2213,15 @@ public:
 	bool parse()
 	{
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
-		program const& prog = grammar_->program();
-		if (prog.instructions.empty() || prog.data.empty())
+		if (program_->instructions.empty() || program_->data.empty())
 			throw bad_grammar{};
 		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
 		std::ptrdiff_t fail_count{0};
 		bool success{true};
 		reset();
-		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < prog.instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
-			instruction const instr{prog.instructions[instr_index]};
-			std::string_view const str{prog.data.data() + instr.offset32, instr.immediate16};
+		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < program_->instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
+			instruction const instr{program_->instructions[instr_index]};
+			std::string_view const str{program_->data.data() + instr.offset32, instr.immediate16};
 			switch (instr.op) {
 				case opcode::choice: {
 					auto const predicate_inhibited_flag = static_cast<std::size_t>(instr.immediate8) << lug::registers::inhibited_shift;
@@ -2315,7 +2313,7 @@ public:
 				case opcode::predicate: {
 					registers_.mr = (std::max)(registers_.mr, registers_.sr);
 					environment_->reset_match_and_subject(match(), subject());
-					bool const accepted = prog.predicates[instr.immediate16](*environment_);
+					bool const accepted = program_->predicates[instr.immediate16](*environment_);
 					pop_responses_after(registers_.rc);
 					fail_count = accepted ? 0 : 1;
 				} break;
@@ -2365,7 +2363,7 @@ public:
 					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
 				} break;
 				case opcode::match_set: {
-					fail_count = match_single(registers_.sr, [&runes = prog.runesets[instr.immediate16]](char32_t rune) {
+					fail_count = match_single(registers_.sr, [&runes = program_->runesets[instr.immediate16]](char32_t rune) {
 							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return (interval != runes.end()) && (interval->first <= rune) && (rune <= interval->second); });
 				} break;
