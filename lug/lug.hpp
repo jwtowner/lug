@@ -1659,6 +1659,12 @@ public:
 		buffer_.insert(buffer_.end(), first, last);
 	}
 
+	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
+	void enqueue(InputRng&& rng)
+	{
+		enqueue(rng.begin(), rng.end());
+	}
+
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
@@ -1675,6 +1681,7 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
+	template <class Rng, class = detail::enable_if_char_input_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); }
 };
 
 class string_view_input_source
@@ -1685,6 +1692,7 @@ public:
 	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
 	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
 	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = (last > first) ? std::string_view{&(*first), static_cast<std::size_t>(last - first)} : std::string_view{}; }
+	template <class Rng, class = detail::enable_if_char_contiguous_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); }
 };
 
 class parser_base
@@ -2171,6 +2179,8 @@ public:
 	basic_parser(lug::grammar const& g, lug::environment& e) : parser_base{g, e} {}
 	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
 	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
+	[[nodiscard]] std::string_view max_match() const noexcept { return input_source_.buffer().substr(0, registers_.mr); }
+	[[nodiscard]] std::string_view max_subject() const noexcept { return input_source_.buffer().substr(registers_.mr, input_source_.buffer().size() - registers_.mr); }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
 	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
@@ -2276,6 +2286,7 @@ public:
 						fail_count = 1;
 						break;
 					}
+					registers_.rr = error_response::resume;
 					registers_.pc = recovery_handler;
 				} break;
 				case opcode::recover_push: {
@@ -2468,6 +2479,34 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 	return parse(first, last, grmr, envr);
 }
 
+template <class Rng, class = std::enable_if_t<
+		detail::is_char_input_range_v<Rng>
+		&& !std::is_same_v<std::decay_t<Rng>, std::string_view>
+		&& !std::is_same_v<std::decay_t<Rng>, std::istream>>>
+inline bool parse(Rng&& rng, grammar const& grmr, environment& envr)
+{
+	return parse(rng.begin(), rng.end(), grmr, envr);
+}
+
+template <class Rng, class = std::enable_if_t<
+		detail::is_char_input_range_v<Rng>
+		&& !std::is_same_v<std::decay_t<Rng>, std::string_view>
+		&& !std::is_same_v<std::decay_t<Rng>, std::istream>>>
+inline bool parse(Rng&& rng, grammar const& grmr)
+{
+	return parse(rng.begin(), rng.end(), grmr);
+}
+
+inline bool parse(std::string_view input, grammar const& grmr)
+{
+	return parse(input.cbegin(), input.cend(), grmr);
+}
+
+inline bool parse(std::string_view input, grammar const& grmr, environment& envr)
+{
+	return parse(input.cbegin(), input.cend(), grmr, envr);
+}
+
 inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
 {
 	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
@@ -2483,16 +2522,6 @@ inline bool parse(std::istream& input, grammar const& grmr, source_options opt =
 {
 	environment envr;
 	return parse(input, grmr, envr, opt);
-}
-
-inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
-{
-	return parse(sv.cbegin(), sv.cend(), grmr, envr);
-}
-
-inline bool parse(std::string_view sv, grammar const& grmr)
-{
-	return parse(sv.cbegin(), sv.cend(), grmr);
 }
 
 inline bool parse(grammar const& grmr, environment& envr)

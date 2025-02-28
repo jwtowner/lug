@@ -146,6 +146,12 @@ template <class... Args> struct remove_cvref_from_tuple<std::tuple<Args...>> { u
 template <class T> using remove_cvref_from_tuple_t = typename remove_cvref_from_tuple<T>::type;
 
 template <class It>
+inline constexpr bool is_char_input_iterator_v =
+	!std::is_integral_v<It> &&
+	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<It>::iterator_category> &&
+	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<It>::value_type>>;
+
+template <class It>
 inline constexpr bool is_char_contiguous_iterator_v =
 	std::is_convertible_v<It, std::vector<char>::const_iterator> ||
 	std::is_convertible_v<It, std::string::const_iterator> ||
@@ -153,14 +159,21 @@ inline constexpr bool is_char_contiguous_iterator_v =
 	std::is_same_v<std::decay_t<It>, char*> ||
 	std::is_same_v<std::decay_t<It>, const char*>;
 
-template <class It, class T = void>
-using enable_if_char_input_iterator_t = std::enable_if_t<
-	!std::is_integral_v<It> &&
-	std::is_base_of_v<std::input_iterator_tag, typename std::iterator_traits<It>::iterator_category> &&
-	std::is_same_v<char, std::remove_cv_t<typename std::iterator_traits<It>::value_type>>, T>;
+template <class Rng> using range_begin_t = std::decay_t<decltype(std::declval<Rng>().begin())>;
+template <class Rng> using range_end_t = std::decay_t<decltype(std::declval<Rng>().end())>;
 
-template <class It, class T = void>
-using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
+template <class Rng, class = void> struct is_char_input_range_impl : std::false_type {};
+template <class Rng> struct is_char_input_range_impl<Rng, std::void_t<decltype(std::declval<Rng>().begin()), decltype(std::declval<Rng>().end())>> : std::integral_constant<bool, is_char_input_iterator_v<range_begin_t<Rng>> && is_char_input_iterator_v<range_end_t<Rng>>> {};
+template <class Rng> inline constexpr bool is_char_input_range_v = is_char_input_range_impl<Rng>::value;
+
+template <class Rng, class = void> struct is_char_contiguous_range_impl : std::false_type {};
+template <class Rng> struct is_char_contiguous_range_impl<Rng, std::void_t<decltype(std::declval<Rng>().begin()), decltype(std::declval<Rng>().end())>> : std::integral_constant<bool, is_char_contiguous_iterator_v<range_begin_t<Rng>> && is_char_contiguous_iterator_v<range_end_t<Rng>>> {};
+template <class Rng> inline constexpr bool is_char_contiguous_range_v = is_char_contiguous_range_impl<Rng>::value;
+
+template <class It, class T = void> using enable_if_char_input_iterator_t = std::enable_if_t<is_char_input_iterator_v<It>, T>;
+template <class It, class T = void> using enable_if_char_contiguous_iterator_t = std::enable_if_t<is_char_contiguous_iterator_v<It>, T>;
+template <class Rng, class T = void> using enable_if_char_input_range_t = std::enable_if_t<is_char_input_range_v<Rng>, T>;
+template <class Rng, class T = void> using enable_if_char_contiguous_range_t = std::enable_if_t<is_char_contiguous_range_v<Rng>, T>;
 
 struct identity
 {
