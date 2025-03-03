@@ -69,10 +69,10 @@ Syntax Reference
 | Attribute Binding | `v % e` | Assigns the return value of the last evaluated semantic action within the expression *e* to the variable *v*. |
 | Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
 | Error Handler | `e ^= [](error_context&){}` | Associates the error handler callable with expression *e*. |
-| Error Response | `e ^ error_response::<enumerator>` | Returns the specified *error_response* enumeration value for a recovery rule expression *e*. |
+| Error Response | `e ^ error_response` | Returns the specified `error_response` enumeration value for a recovery rule expression *e*. |
 | Recover With | `e[recover_with(r)]` | If a failure is raised in expression *e*, installs rule *r* as the default for recovery. |
 | Expects | `e[failure(f)]` | Expects that expression *e* will match, otherwise raises the labeled failure *f*. |
-| Expects | `e[failure(f,r)]` | Expects that expression *e* will match, otherwise raises the labeld failure *f* and recovers with rule *r* |
+| Expects | `e[failure(f,r)]` | Expects that expression *e* will match, otherwise raises the labeld failure *f* and recovers with rule *r*. |
 
 | Control | Description |
 | --- | --- |
