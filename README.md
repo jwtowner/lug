@@ -70,9 +70,9 @@ Syntax Reference
 | Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
 | Error Handler | `e ^= [](error_context&){}` | Associates the error handler callable with expression *e*. |
 | Error Response | `e ^ error_response` | Returns the specified `error_response` enumeration value for a recovery rule expression *e*. |
-| Recover With | `e[recover_with(r)]` | If a failure is raised in expression *e*, installs rule *r* as the default for recovery. |
-| Expects | `e[failure(f)]` | Expects that expression *e* will match, otherwise raises the labeled failure *f*. |
-| Expects | `e[failure(f,r)]` | Expects that expression *e* will match, otherwise raises the labeld failure *f* and recovers with rule *r*. |
+| Recover With | `e[recover_with(r)]` | Installs rule *r* as the default for error recovery for failures in expression *e*. |
+| Expects | `e[failure(f)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f*. |
+| Expects | `e[failure(f,r)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f* and recovers with rule *r*. |
 
 | Control | Description |
 | --- | --- |
@@ -91,9 +91,12 @@ Syntax Reference
 | Factory | Description |
 | --- | --- |
 | `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
-| `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response::resume`. |
 | `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value *r*. |
-| `sync<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `sync_with_value(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `sync_with_value<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_value(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `with_value<r>(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_response<r>()` | Factory function that makes a recovery rule expression that returns `error_response` enumerator value *r*. |
 
 | Terminal | Description |
 | --- | --- |
