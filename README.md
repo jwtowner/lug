@@ -52,8 +52,9 @@ As a baseline, the following compiler versions are known to work with lug.
 
 Demonstration
 ---
-Here's a simple example that parses and evaluates basic arithmetic expressions containing addition and multiplication.
+The following example demonstrates an arithmetic expression evaluator supporting addition and multiplication.
 
+`demo.cpp`
 ```cpp
 // Include the lug library header file
 #include <lug/lug.hpp>
@@ -74,10 +75,10 @@ int main() {
     // Define a rule that matches a number or a parenthesized expression
     rule Factor = Number | ('(' > Expr > ')');
 
-    // Define a rule that matches a factor followed by zero or more '*' and a factor, and multiplies the factors
+    // Define a rule that multiplies the factors
     rule Term = l%Factor > *('*' > r%Factor <[&]{ l *= r; }) <[&]{ return l; };
 
-    // Define a rule that matches a term followed by zero or more '+' and a term, and adds the terms
+    // Define a rule that adds the terms
     Expr = l%Term > *('+' > r%Term <[&]{ l += r; }) <[&]{ return l; };
 
     // Create grammar starting with an Expr and finishes by matching end-of-input
@@ -97,6 +98,16 @@ int main() {
     return 0;
 }
 ```
+
+To compile the demonstration with GCC, save the code above to a file named `demo.cpp` and use the following command,
+making sure to substitute `<path-to-lug>` with the location of `lug` on your filesystem:
+`g++ -std=c++17 -I<path-to-lug> -o demo demo.cpp`
+
+Then run the demonstration executable with the following command:
+`./demo`
+
+You should see the output:
+`2 * (3 + 4) = 14`
 
 The above example demonstrates:
 - Lexical rules with semantic actions to convert matched text into values
