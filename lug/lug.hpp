@@ -1563,21 +1563,33 @@ inline constexpr struct
 raise{};
 
 template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
-auto sync(Pattern const& pattern)
+constexpr auto sync(Pattern const& pattern)
 {
 	return noskip[*(!pattern > any) ^ Response];
 }
 
 template <error_response Response = error_response::resume, class Pattern, class DefaultValue, class = std::enable_if_t<is_expression_v<Pattern>>>
-auto sync(Pattern const& pattern, DefaultValue&& default_value)
+constexpr auto sync_with_value(Pattern const& pattern, DefaultValue&& default_value)
 {
-	auto default_value_action = [value = std::forward<DefaultValue>(default_value)] {
-		if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
-			return value();
-		else
-			return value;
-	};
-	return noskip[*(!pattern > any) < std::move(default_value_action) ^ Response];
+	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+		return noskip[*(!pattern > any) < std::forward<DefaultValue>(default_value) ^ Response];
+	else
+		return noskip[*(!pattern > any) < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
+}
+
+template <error_response Response = error_response::resume, class DefaultValue>
+constexpr auto with_value(DefaultValue&& default_value)
+{
+	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+		return noskip[nop < std::forward<DefaultValue>(default_value) ^ Response];
+	else
+		return noskip[nop < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
+}
+
+template <error_response Response>
+constexpr auto with_response()
+{
+	return noskip[nop ^ Response];
 }
 
 class implicit_space_rule
@@ -2244,8 +2256,10 @@ class basic_parser : public parser_base
 
 	void drain()
 	{
-		input_source_.drain_buffer(registers_.sr);
-		do_drain(input_source_.buffer());
+		if (registers_.sr > 0) {
+			input_source_.drain_buffer(registers_.sr);
+			do_drain(input_source_.buffer());
+		}
 	}
 
 	void accept_or_drain_if_deferred()
@@ -2270,7 +2284,8 @@ class basic_parser : public parser_base
 
 	void reset()
 	{
-		input_source_.drain_buffer(registers_.sr);
+		if (registers_.sr > 0)
+			input_source_.drain_buffer(registers_.sr);
 		do_reset(input_source_.buffer());
 	}
 
@@ -2517,15 +2532,16 @@ public:
 				case opcode::symbol_end: {
 					if (stack_frames_.empty())
 						throw bad_stack{};
-					auto const symbol = std::get<symbol_frame>(stack_frames_.back());
+					auto const& symbol = std::get<symbol_frame>(stack_frames_.back());
 					auto const sr0 = static_cast<std::size_t>(symbol.sr);
 					auto const sr1 = registers_.sr;
+					auto const name = symbol.name;
 					stack_frames_.pop_back();
 					if (sr0 > sr1) {
 						fail_count = 1;
 						break;
 					}
-					environment_->add_symbol(symbol.name, std::string{input_source_.buffer().substr(sr0, sr1 - sr0)});
+					environment_->add_symbol(name, std::string{input_source_.buffer().substr(sr0, sr1 - sr0)});
 				} break;
 				case opcode::symbol_push: {
 					stack_frames_.emplace_back(std::in_place_type<symbol_table_frame>, environment_->symbols_);

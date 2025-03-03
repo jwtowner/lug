@@ -7,6 +7,7 @@
 #undef NDEBUG
 #include <cassert>
 
+// Test environment class that counts the number of times the environment hooks are called
 struct test_environment : public lug::environment
 {
 	int reset_count{0};

@@ -37,7 +37,7 @@ It is based on research introduced in the following papers:
 
 Building
 ---
-As a header-only library, lug itself does not require any build process.
+As a self-contained header-only library, lug itself does not require any build process.
 To use lug, make sure to include the `lug` header directory in your project's include path.
 Once that is done, you are ready to start using lug in your code.
 To build the sample programs and unit tests both [CMake](https://cmake.org/) and [make](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/make.html) are supported.
@@ -49,6 +49,75 @@ As a baseline, the following compiler versions are known to work with lug.
 | Clang 14.0.0 (March 2022) or later | -std=c++17 or -std=gnu++17 |
 | GCC 9.5 (May 2022) or later | -std=c++17 or -std=gnu++17 |
 | Microsoft Visual C++ 2019 16.11 (August 2021) or later | Platform Toolset: Visual Studio 2019 Toolset (v142), Language Standard: ISO C++17 Standard (/std:c++17) |
+
+Demonstration
+---
+The following example demonstrates an arithmetic expression evaluator supporting addition and multiplication.
+
+`demo.cpp`
+```cpp
+// Include the lug library header file
+#include <lug/lug.hpp>
+
+int main() {
+    // Import the namespace containing the embedded DSL operators and types
+    using namespace lug::language;
+
+    // Define attribute variables for the recursive rules
+    int l = 0, r = 0;
+
+    // Define a lexical rule that matches one or more digits and converts them to an integer
+    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
+
+    // Forward declaration for recursive rules
+    rule Expr;
+
+    // Define a rule that matches a number or a parenthesized expression
+    rule Factor = Number | ('(' > Expr > ')');
+
+    // Define a rule that multiplies the factors
+    rule Term = l%Factor > *('*' > r%Factor <[&]{ l *= r; }) <[&]{ return l; };
+
+    // Define a rule that adds the terms
+    Expr = l%Term > *('+' > r%Term <[&]{ l += r; }) <[&]{ return l; };
+
+    // Create grammar that matches an arithmetic expression followed by end-of-input
+    auto grammar = start(Expr > eoi);
+
+    // Parse and evaluate the sample input
+    std::string input = "2 * (3 + 4)";
+    lug::environment env;
+    if (!lug::parse(input, grammar, env)) {
+        std::cout << "parse failed\n";
+        return -1;
+    }
+
+    // Pop the result from the environment and display it to the console
+    int result = env.pop_attribute<int>();
+    std::cout << input << " = " << result << "\n"; // Outputs: 2 * (3 + 4) = 14
+    return 0;
+}
+```
+
+To compile the demonstration with GCC, save the code above to a file named `demo.cpp` and use the following command,
+making sure to substitute `<path-to-lug>` with the location of `lug` on your filesystem:
+
+`g++ -std=c++17 -I<path-to-lug> -o demo demo.cpp`
+
+Then run the demonstration executable with the following command:
+
+`./demo`
+
+You should see the output:
+
+`2 * (3 + 4) = 14`
+
+In summary, the above example demonstrates:
+- Lexical rules with semantic actions to convert matched text into values.
+- Recursive grammar rules for handling nested expressions.
+- Operator precedence through hierarchical rule structure (multiplication before addition).
+- Attribute capture and propagation for expression evaluation.
+- Environment management for storing and retrieving parsed results.
 
 Syntax Reference
 ---
@@ -70,9 +139,9 @@ Syntax Reference
 | Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
 | Error Handler | `e ^= [](error_context&){}` | Associates the error handler callable with expression *e*. |
 | Error Response | `e ^ error_response` | Returns the specified `error_response` enumeration value for a recovery rule expression *e*. |
-| Recover With | `e[recover_with(r)]` | If a failure is raised in expression *e*, installs rule *r* as the default for recovery. |
-| Expects | `e[failure(f)]` | Expects that expression *e* will match, otherwise raises the labeled failure *f*. |
-| Expects | `e[failure(f,r)]` | Expects that expression *e* will match, otherwise raises the labeld failure *f* and recovers with rule *r*. |
+| Recover With | `e[recover_with(r)]` | Installs rule *r* as the default for error recovery for failures in expression *e*. |
+| Expects | `e[failure(f)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f*. |
+| Expects | `e[failure(f,r)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f* and recovers with rule *r*. |
 
 | Control | Description |
 | --- | --- |
@@ -91,9 +160,12 @@ Syntax Reference
 | Factory | Description |
 | --- | --- |
 | `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
-| `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response::resume`. |
 | `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value *r*. |
-| `sync<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `sync_with_value(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `sync_with_value<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_value(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `with_value<r>(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_response<r>()` | Factory function that makes a recovery rule expression that returns `error_response` enumerator value *r*. |
 
 | Terminal | Description |
 | --- | --- |

@@ -78,7 +78,7 @@ void test_nested_arithmetic_with_attributes()
 	// Ensure the result was not modified when parsing failed
 	assert(result == 16);
 	assert(lhs == 16);
-	assert(rhs == 2);	
+	assert(rhs == 2);
 }
 
 int main()

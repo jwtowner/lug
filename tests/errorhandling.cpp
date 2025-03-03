@@ -197,9 +197,9 @@ void test_calculator_errors_with_recovery_resume()
 	};
 
 	// Define labeled failures with recovery rules
-	failure FNoExpr{"missing expression", sync(nop, "<MISSING-EXPRESSION>"s)};
-	failure FExpr{"expected an expression after opening parenthesis", sync("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FNoExpr{"missing expression", with_value("<MISSING-EXPRESSION>"s)};
+	failure FExpr{"expected an expression after opening parenthesis", sync_with_value("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync_with_value("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
 	failure FRParen{"expected a closing parenthesis after expression", sync(')'_cx)};
 	failure FLParen{"closing parenthesis with no matching opening parenthesis"};
 	failure FInvalid{"invalid character"};
@@ -302,12 +302,12 @@ void test_calculator_errors_with_recovery_accept()
 	};
 
 	// Define labeled failures with recovery rules
-	failure FNoExpr{"missing expression", sync<error_response::accept>(nop, "<MISSING-EXPRESSION>"s) };
-	failure FExpr{"expected an expression after opening parenthesis", sync<error_response::accept>("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync<error_response::accept>("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FNoExpr{"missing expression", with_value<error_response::accept>("<MISSING-EXPRESSION>"s)};
+	failure FExpr{"expected an expression after opening parenthesis", sync_with_value<error_response::accept>("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync_with_value<error_response::accept>("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
 	failure FRParen{"expected a closing parenthesis after expression", sync<error_response::accept>(')'_cx)};
-	failure FLParen{"closing parenthesis with no matching opening parenthesis", nop ^ error_response::accept};
-	failure FInvalid{"invalid character", nop ^ error_response::accept};
+	failure FLParen{"closing parenthesis with no matching opening parenthesis", with_response<error_response::accept>()};
+	failure FInvalid{"invalid character", with_response<error_response::accept>()};
 
 	// Define lexical token rule that matches a number
 	auto NUMBER = lexeme[~'-'_cx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx)];
