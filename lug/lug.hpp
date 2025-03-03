@@ -1892,6 +1892,35 @@ protected:
 		return true;
 	}
 
+	[[nodiscard]] error_response do_return_from_raise(raise_frame const& frame, syntax const& sx, error_response rec_res)
+	{
+		error_response err_res{rec_res};
+		error_context err{*environment_, sx, frame.label, err_res};
+		auto handler_index = static_cast<std::size_t>(frame.eh);
+		auto next_frame = stack_frames_.rbegin();
+		auto const last_frame = stack_frames_.rend();
+		while (handler_index < program_->handlers.size()) {
+			err_res = program_->handlers[handler_index](err);
+			if (err_res != error_response::rethrow)
+				break;
+			err_res = error_response::halt;
+			handler_index = (std::numeric_limits<std::size_t>::max)();
+			for (++next_frame; next_frame != last_frame; ++next_frame) {
+				if (auto const* const next_report_frame = std::get_if<report_frame>(&*next_frame); next_report_frame != nullptr) {
+					handler_index = static_cast<std::size_t>(next_report_frame->eh);
+					break;
+				}
+			}
+		}
+		if (err_res >= error_response::backtrack) {
+			registers_.sr = frame.sr;
+			registers_.rc = frame.rc;
+			return err_res;
+		}
+		registers_.pc = frame.pc;
+		return err_res;
+	}
+
 	void do_accept(std::string_view match)
 	{
 		detail::scope_exit const cleanup{[this, prior_call_depth = environment_->start_accept()]{
@@ -2100,31 +2129,7 @@ class basic_parser : public parser_base
 		auto const mat = match();
 		auto const sub = subject();
 		environment_->set_match_and_subject(mat, sub);
-		error_response err_res{rec_res};
-		error_context err{*environment_, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, frame.label, err_res};
-		auto handler_index = static_cast<std::size_t>(frame.eh);
-		auto next_frame = stack_frames_.rbegin();
-		auto const last_frame = stack_frames_.rend();
-		while (handler_index < program_->handlers.size()) {
-			err_res = program_->handlers[handler_index](err);
-			if (err_res != error_response::rethrow)
-				break;
-			err_res = error_response::halt;
-			handler_index = (std::numeric_limits<std::size_t>::max)();
-			for (++next_frame; next_frame != last_frame; ++next_frame) {
-				if (auto const* const next_report_frame = std::get_if<report_frame>(&*next_frame); next_report_frame != nullptr) {
-					handler_index = static_cast<std::size_t>(next_report_frame->eh);
-					break;
-				}
-			}
-		}
-		if (err_res >= error_response::backtrack) {
-			registers_.sr = frame.sr;
-			registers_.rc = frame.rc;
-			return err_res;
-		}
-		registers_.pc = frame.pc;
-		return err_res;
+		return do_return_from_raise(frame, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, rec_res);
 	}
 
 	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
@@ -2264,8 +2269,7 @@ class basic_parser : public parser_base
 
 	void accept_or_drain_if_deferred()
 	{
-		if ((registers_.ci & lug::registers::count_mask) == 0)
-		{
+		if ((registers_.ci & lug::registers::count_mask) == 0) {
 			bool const should_cut = (registers_.ci & lug::registers::inhibited_flag) != 0;
 			bool const should_accept = (registers_.ci & lug::registers::ignore_errors_flag) != 0;
 			if (should_cut || should_accept) {
