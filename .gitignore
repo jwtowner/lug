@@ -20,10 +20,9 @@ x86/
 [Oo]bj/
 [Ll]og/
 
-# Visual Studio Code cache/options directory
+# Editor cache/options directories
+.cursor/
 .vscode/
-
-# Visual Studio cache/options directory
 .vs/
 
 # Visual C++ cache files

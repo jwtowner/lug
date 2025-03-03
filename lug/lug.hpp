@@ -20,29 +20,38 @@
 
 namespace lug {
 
-class rule;
-class grammar;
 class encoder;
-class syntax;
 class environment;
+class error_context;
+class grammar;
 class multi_input_source;
+class parser_base;
+class rule;
 class string_input_source;
 class string_view_input_source;
-class parser_base;
-template <class> class basic_parser;
-using parser = basic_parser<multi_input_source>;
+class syntax;
 struct program;
-struct syntax_position { std::size_t column; std::size_t line; };
-struct syntax_range { std::size_t index; std::size_t size; };
+struct syntax_position;
+struct syntax_range;
+template <class> class basic_parser;
+template <class> class failure;
+template <class> class recover_with;
+enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
+enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
+using error_handler = std::function<error_response(error_context&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
+using parser = basic_parser<multi_input_source>;
+using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct encoder_expression_trait_tag {};
 template <class E, class = void> struct is_encoder_expression : std::false_type {};
 template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
 template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
 template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> inline constexpr bool is_recovery_expression_v = is_encoder_expression_v<E> || std::is_same_v<rule, std::decay_t<E>>;
+template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_v<std::decay_t<H>, error_context&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
@@ -51,27 +60,40 @@ template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<st
 
 struct registers
 {
-	static constexpr std::size_t cut_deferred_flag = std::size_t{1} << static_cast<unsigned int>(std::numeric_limits<std::size_t>::digits - 1);
-	std::size_t sr; // subject register
-	std::size_t mr; // match register
-	std::size_t rc; // response counter
-	std::size_t cd; // call depth
-	std::size_t cf; // cut frame
-	std::size_t ci; // cut inhibited
-	std::ptrdiff_t pc; // program counter
+	static constexpr unsigned int flags_count = 2U;
+	static constexpr unsigned int inhibited_shift = static_cast<unsigned int>(std::numeric_limits<std::size_t>::digits - 1);
+	static constexpr unsigned int ignore_errors_shift = static_cast<unsigned int>(std::numeric_limits<std::size_t>::digits - 2);
+	static constexpr std::size_t inhibited_flag = std::size_t{1} << inhibited_shift;
+	static constexpr std::size_t ignore_errors_flag = std::size_t{1} << ignore_errors_shift;
+	static constexpr std::size_t count_mask = ~(inhibited_flag | ignore_errors_flag);
+	std::size_t sr{0}; // subject register
+	std::size_t mr{0}; // match register
+	std::size_t rc{0}; // response counter
+	std::size_t cd{0}; // call depth counter
+	std::size_t ci{0}; // accept/cut inhibited register
+	std::size_t ri{0}; // raise inhibited register
+	std::ptrdiff_t eh{-1}; // error handler register
+	std::ptrdiff_t rh{-1}; // recovery handler register
+	error_response rr{error_response::resume}; // recovery response latch register
+	std::ptrdiff_t pc{-1}; // program counter
 };
 
 enum class opcode : std::uint_least8_t
 {
-	choice,         commit,         commit_back,    commit_partial, jump,
-	call,           ret,            fail,           cut,            halt,
-	predicate,      action,         capture_start,  capture_end,    condition_pop,
-	symbol_end,     symbol_pop,     match_any,      match_set,      match_eol,
+	jump,           choice,         commit,         commit_back,    commit_partial,
+	accept,         call,           ret,            fail,           recover_push,
+	recover_pop,    recover_resp,   report_push,    report_pop,     predicate,
+	action,         capture_start,  capture_end,    condition_pop,  symbol_end,
+	symbol_pop,     match_any,      match_set,      match_eol,
 	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
 	condition_test, condition_push, symbol_exists,  symbol_all,     symbol_all_cf,
 	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
-	symbol_tail_cf, symbol_start,   symbol_push
+	symbol_tail_cf, symbol_start,   symbol_push,    raise
 };
+
+namespace auxcode {
+
+} // namespace auxcode
 
 struct alignas(std::uint_least64_t) instruction
 {
@@ -79,20 +101,17 @@ struct alignas(std::uint_least64_t) instruction
 	std::uint_least8_t immediate8;
 	std::uint_least16_t immediate16;
 	std::int_least32_t offset32;
-	constexpr instruction(opcode o, std::uint_least8_t i8, std::uint_least16_t i16, std::int_least32_t o32) noexcept : op{o}, immediate8{i8}, immediate16{i16}, offset32{o32} {}
 };
 
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
 static_assert(alignof(instruction) == alignof(std::uint_least64_t), "expected instruction alignment to be same size as std::uint_least64_t");
-
-enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
-using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct program
 {
 	std::vector<instruction> instructions;
 	std::vector<char> data;
 	std::vector<unicode::rune_set> runesets;
+	std::vector<error_handler> handlers;
 	std::vector<syntactic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture_action> captures;
@@ -102,6 +121,7 @@ struct program
 	{
 		std::size_t const data_offset = data.size();
 		std::size_t const runesets_offset = runesets.size();
+		std::size_t const handlers_offset = handlers.size();
 		std::size_t const predicates_offset = predicates.size();
 		std::size_t const actions_offset = actions.size();
 		std::size_t const captures_offset = captures.size();
@@ -112,6 +132,7 @@ struct program
 				std::optional<std::size_t> object;
 				switch (new_instr.op) {
 					case opcode::match_set: object = instr.immediate16 + runesets_offset; break;
+					case opcode::report_push: object = instr.immediate16 + handlers_offset; break;
 					case opcode::predicate: object = instr.immediate16 + predicates_offset; break;
 					case opcode::action: object = instr.immediate16 + actions_offset; break;
 					case opcode::capture_end: object = instr.immediate16 + captures_offset; break;
@@ -127,6 +148,7 @@ struct program
 		}
 		data.insert(data.end(), src.data.begin(), src.data.end());
 		runesets.insert(runesets.end(), src.runesets.begin(), src.runesets.end());
+		handlers.insert(handlers.end(), src.handlers.begin(), src.handlers.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
@@ -138,6 +160,7 @@ struct program
 		instructions.swap(p.instructions);
 		data.swap(p.data);
 		runesets.swap(p.runesets);
+		handlers.swap(p.handlers);
 		predicates.swap(p.predicates);
 		actions.swap(p.actions);
 		captures.swap(p.captures);
@@ -162,6 +185,9 @@ public:
 	~rule() = default;
 	void swap(rule& r) noexcept { program_.swap(r.program_); callees_.swap(r.callees_); }
 	[[nodiscard]] auto operator[](std::uint_least16_t prec) const noexcept;
+	template <class Recovery> [[nodiscard]] auto operator[](failure<Recovery> const& reason) const;
+	template <class Recovery> [[nodiscard]] auto operator[](recover_with<Recovery> const& rec) const;
+	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] auto operator^=(Handler&& handler) const;
 };
 
 class grammar
@@ -176,6 +202,30 @@ public:
 	[[nodiscard]] static std::shared_ptr<std::function<void(encoder&)>> const& implicit_space();
 };
 
+struct syntax_position
+{
+	std::size_t line{0};
+	std::size_t column{0};
+	[[nodiscard]] constexpr bool operator==(syntax_position const& other) const noexcept { return line == other.line && column == other.column; }
+	[[nodiscard]] constexpr bool operator!=(syntax_position const& other) const noexcept { return !(*this == other); }
+	[[nodiscard]] constexpr bool operator<(syntax_position const& other) const noexcept { return line < other.line || (line == other.line && column < other.column); }
+	[[nodiscard]] constexpr bool operator<=(syntax_position const& other) const noexcept { return !(other < *this); }
+	[[nodiscard]] constexpr bool operator>(syntax_position const& other) const noexcept { return other < *this; }
+	[[nodiscard]] constexpr bool operator>=(syntax_position const& other) const noexcept { return !(*this < other); }
+};
+
+struct syntax_range
+{
+	std::size_t index{0};
+	std::size_t size{0};
+	[[nodiscard]] constexpr bool operator==(syntax_range const& other) const noexcept { return index == other.index && size == other.size; }
+	[[nodiscard]] constexpr bool operator!=(syntax_range const& other) const noexcept { return !(*this == other); }
+	[[nodiscard]] constexpr bool operator<(syntax_range const& other) const noexcept { return index < other.index || (index == other.index && size < other.size); }
+	[[nodiscard]] constexpr bool operator<=(syntax_range const& other) const noexcept { return !(other < *this); }
+	[[nodiscard]] constexpr bool operator>(syntax_range const& other) const noexcept { return other < *this; }
+	[[nodiscard]] constexpr bool operator>=(syntax_range const& other) const noexcept { return !(*this < other); }
+};
+
 class syntax
 {
 	std::string_view str_;
@@ -184,6 +234,7 @@ public:
 	constexpr syntax() noexcept = default;
 	constexpr syntax(std::string_view c, std::size_t i) noexcept : str_{c}, index_{i} {}
 	[[nodiscard]] constexpr std::string_view str() const noexcept { return str_; }
+	[[nodiscard]] constexpr std::size_t index() const noexcept { return index_; }
 	[[nodiscard]] constexpr syntax_range range() const noexcept { return syntax_range{index_, str_.size()}; }
 	[[nodiscard]] operator std::string() const { return std::string{str_}; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	[[nodiscard]] constexpr operator std::string_view() const noexcept { return str_; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
@@ -199,7 +250,6 @@ class environment
 	friend class parser_base;
 	template <class> friend class basic_parser;
 
-	static constexpr std::size_t max_call_depth = (std::numeric_limits<std::size_t>::max)();
 	static inline std::vector<std::string> const empty_symbols_{};
 	std::vector<std::any> attribute_frame_stack_;
 	std::vector<std::any> attribute_result_stack_;
@@ -209,17 +259,32 @@ class environment
 	std::string_view match_;
 	std::string_view subject_;
 	std::size_t call_depth_{0};
-	std::size_t prune_depth_{max_call_depth};
+	std::size_t prune_depth_{(std::numeric_limits<std::size_t>::max)()};
 	syntax_position origin_{1, 1};
-	unsigned int tab_width_{8};
-	unsigned int tab_alignment_{8};
+	std::uint_least32_t tab_width_{default_tab_width};
+	std::uint_least32_t tab_alignment_{default_tab_alignment};
 
+	virtual void on_reset() {}
+	virtual void on_drain() {}
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
-	std::size_t start_accept(std::string_view m, std::string_view s)
+	void reset(std::string_view sub)
 	{
-		reset_match_and_subject(m, s);
+		origin_ = position_at(match_.size());
+		set_match_and_subject(sub.substr(0, 0), sub);
+		on_reset();
+	}
+	
+	void drain(std::string_view sub)
+	{
+		origin_ = position_at(match_.size());
+		set_match_and_subject(sub.substr(0, 0), sub);
+		on_drain();
+	}
+
+	[[nodiscard]] std::size_t start_accept()
+	{
 		on_accept_started();
 		return call_depth_;
 	}
@@ -228,54 +293,53 @@ class environment
 	{
 		on_accept_ended();
 		call_depth_ = prior_call_depth;
-		prune_depth_ = max_call_depth;
+		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 	}
 
 	[[nodiscard]] bool accept_response(std::size_t response_call_depth) noexcept
 	{
 		if (prune_depth_ > response_call_depth) {
 			call_depth_ = response_call_depth;
-			prune_depth_ = max_call_depth;
+			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 			return true;
 		}
 		return false;
 	}
 
-	void reset_match_and_subject(std::string_view m, std::string_view s)
+	void set_match_and_subject(std::string_view m, std::string_view s) noexcept
 	{
 		match_ = m;
 		subject_ = s;
 		positions_.clear();
 	}
 
-	void reset_origin()
-	{
-		origin_ = position_at(match_.size());
-		reset_match_and_subject(std::string_view{}, std::string_view{});
-	}
-
 public:
+	static constexpr std::uint_least32_t default_tab_width{8};
+	static constexpr std::uint_least32_t default_tab_alignment{8};
 	environment() = default;
 	environment(environment const&) = delete;
 	environment(environment&&) noexcept = default;
 	environment& operator=(environment const&) = delete;
 	environment& operator=(environment&&) noexcept = default;
 	virtual ~environment() = default;
-	[[nodiscard]] unsigned int tab_width() const { return tab_width_; }
-	void tab_width(unsigned int w) { tab_width_ = w; }
-	[[nodiscard]] unsigned int tab_alignment() const { return tab_alignment_; }
-	void tab_alignment(unsigned int a) { tab_alignment_ = a; }
+	[[nodiscard]] std::uint_least32_t tab_width() const noexcept { return tab_width_; }
+	void tab_width(std::uint_least32_t w) noexcept { tab_width_ = w; }
+	[[nodiscard]] std::uint_least32_t tab_alignment() const noexcept { return tab_alignment_; }
+	void tab_alignment(std::uint_least32_t a) noexcept { tab_alignment_ = a; }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
 	[[nodiscard]] bool has_symbol(std::string_view name) const noexcept { return (symbols_.count(name) > 0); }
-	[[nodiscard]] std::vector<std::string> const& get_symbols(std::string_view name) const { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
+	[[nodiscard]] std::vector<std::string> const& get_symbols(std::string_view name) const noexcept { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
 	void add_symbol(std::string_view name, std::string value) { symbols_[name].emplace_back(std::move(value)); }
 	void clear_symbols(std::string_view name) { symbols_.erase(name); }
 	[[nodiscard]] std::string_view match() const noexcept { return match_; }
 	[[nodiscard]] std::string_view subject() const noexcept { return subject_; }
+	[[nodiscard]] syntax_position position_begin(syntax const& stx) { return position_at(stx.index()); }
+	[[nodiscard]] syntax_position position_end(syntax const& stx) { return position_at(stx.index() + stx.size()); }
 	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return position_at(range.index); }
 	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return position_at(range.index + range.size); }
+	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax const& stx) { return {position_begin(stx), position_end(stx)}; }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] std::size_t call_depth() const noexcept { return call_depth_; }
 	[[nodiscard]] std::size_t prune_depth() const noexcept { return prune_depth_; }
@@ -286,8 +350,8 @@ public:
 		auto const pos = std::lower_bound(std::begin(positions_), std::end(positions_), index, [](auto& x, auto& y) { return x.first < y; });
 		if (pos != std::end(positions_) && index == pos->first)
 			return pos->second;
-		std::size_t startindex = 0;
-		syntax_position position = origin_;
+		std::size_t startindex{0};
+		syntax_position position{origin_};
 		if (pos != std::begin(positions_)) {
 			auto prevpos = std::prev(pos);
 			startindex = prevpos->first;
@@ -295,13 +359,13 @@ public:
 		}
 		auto first = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(startindex));
 		auto const last = std::next(std::begin(match_), static_cast<std::ptrdiff_t>(index));
-		char32_t rune = U'\0';
-		char32_t prevrune = U'\0';
+		char32_t rune{U'\0'};
+		char32_t prevrune{U'\0'};
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);
 			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
-				position.column = 1;
 				++position.line;
+				position.column = 1;
 				first = next;
 			}
 		}
@@ -348,6 +412,65 @@ public:
 	}
 };
 
+class error_context
+{
+	std::reference_wrapper<lug::environment> envr_;
+	lug::syntax syntax_;
+	std::string_view label_;
+	error_response recovery_response_;
+public:
+	error_context(lug::environment& envr, lug::syntax const& syn, std::string_view lab, error_response resp) : envr_{envr}, syntax_{syn}, label_{lab}, recovery_response_{resp} {}
+	error_context(error_context const&) = delete;
+	error_context& operator=(error_context const&) = delete;
+	error_context(error_context&&) = delete;
+	error_context& operator=(error_context&&) = delete;
+	~error_context() = default;
+	[[nodiscard]] lug::environment& environment() const noexcept { return envr_.get(); }
+	[[nodiscard]] lug::syntax const& syntax() const noexcept { return syntax_; }
+	[[nodiscard]] std::string_view label() const noexcept { return label_; }
+	[[nodiscard]] error_response recovery_response() const noexcept { return recovery_response_; }
+	[[nodiscard]] syntax_position position_begin() const { return environment().position_begin(syntax_); }
+	[[nodiscard]] syntax_position position_end() const { return environment().position_end(syntax_); }
+	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range() const { return environment().position_range(syntax_); }
+};
+
+template <class Recovery>
+class recover_with
+{
+	using storage_type = std::conditional_t<std::is_void_v<Recovery>, std::nullptr_t, std::conditional_t<is_encoder_expression_v<Recovery>, Recovery, std::reference_wrapper<rule const>>>;
+	storage_type recovery_;
+public:
+	template <class R = Recovery, class = std::enable_if_t<std::is_void_v<R>>>
+	constexpr recover_with() noexcept : recovery_{nullptr} {}
+	template <class R, class = std::enable_if_t<std::is_constructible_v<storage_type, R&&>>>
+	constexpr explicit recover_with(R&& r) noexcept(std::is_nothrow_constructible_v<storage_type, R&&>) : recovery_{std::forward<R>(r)} {}
+
+	[[nodiscard]] constexpr auto const& recovery() const noexcept {
+		if constexpr (is_encoder_expression_v<Recovery> || std::is_void_v<Recovery>)
+			return recovery_;
+		else
+			return recovery_.get();
+	}
+};
+
+template <class R, class = std::enable_if_t<is_recovery_expression_v<R>>> recover_with(R&&) -> recover_with<std::decay_t<R>>;
+recover_with() -> recover_with<void>;
+
+template <class Recovery = void>
+class failure : public recover_with<Recovery>
+{
+	std::string_view label_;
+public:
+	template <class R = Recovery, class = std::enable_if_t<std::is_void_v<R>>>
+	constexpr explicit failure(std::string_view lab) noexcept : label_{lab} {}
+	template <class R, class = std::enable_if_t<std::is_constructible_v<recover_with<Recovery>, R&&>>>
+	constexpr explicit failure(std::string_view lab, R&& rec) noexcept(std::is_nothrow_constructible_v<recover_with<Recovery>, R&&>) : recover_with<Recovery>{std::forward<R>(rec)}, label_{lab} {}
+	[[nodiscard]] constexpr std::string_view label() const noexcept { return label_; }
+};
+
+template <class R, class = std::enable_if_t<is_recovery_expression_v<R>>> failure(std::string_view, R&&) -> failure<std::decay_t<R>>;
+failure(std::string_view) -> failure<void>;
+
 template <class AttributeFrameType = std::tuple<>>
 struct encoder_metadata
 {
@@ -364,18 +487,21 @@ template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_
 
 class encoder
 {
+	static constexpr std::size_t inline_max_instructions{8};
+	static constexpr std::size_t inline_max_objects{4};
+
 	rule* rule_{nullptr};
 	program* program_{nullptr};
 	program_callees* callees_{nullptr};
 	std::vector<directives> mode_;
 	directives entry_mode_{directives::none};
 
-	template <class Item>
-	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, Item&& item)
+	template <class Item, class ItemValue, class = std::enable_if_t<std::is_constructible_v<Item, ItemValue&&>>>
+	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, ItemValue&& item)
 	{
-		items.push_back(std::forward<Item>(item));
+		items.push_back(std::forward<ItemValue>(item));
 		return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
-	}	
+	}
 
 	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> add_string(std::string_view str)
 	{
@@ -389,7 +515,7 @@ class encoder
 
 	std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
 	{
-		auto callee_mode = mode_.back();
+		directives const callee_mode = mode_.back();
 		skip(p->entry_mode ^ directives::eps, directives::noskip);
 		callees_->emplace_back(r, p, here(), callee_mode);
 		return encode(opcode::call, off, prec, 0);
@@ -405,15 +531,16 @@ class encoder
 public:
 	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, mode_{initial} {}
 	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
-	~encoder() { if (rule_ != nullptr) { rule_->currently_encoding_ = false; } if (program_ != nullptr) { program_->entry_mode = entry_mode(); } }
 	encoder(encoder const&) = delete;
-	encoder(encoder&&) = default;
+	encoder(encoder&& e) noexcept : rule_{std::exchange(e.rule_, nullptr)}, program_{std::exchange(e.program_, nullptr)}, callees_{std::exchange(e.callees_, nullptr)}, mode_{std::move(e.mode_)}, entry_mode_{e.entry_mode_} {}
 	encoder& operator=(encoder const&) = delete;
-	encoder& operator=(encoder&&) = default;
+	encoder& operator=(encoder&& e) noexcept { encoder{std::move(e)}.swap(*this); return *this; }
+	~encoder() { if (program_ != nullptr) { program_->entry_mode = entry_mode(); } if (rule_ != nullptr) { rule_->currently_encoding_ = false; } }
+	void swap(encoder& e) noexcept { std::swap(rule_, e.rule_); std::swap(program_, e.program_); std::swap(callees_, e.callees_); mode_.swap(e.mode_); std::swap(entry_mode_, e.entry_mode_); }
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
 	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
 	[[nodiscard]] std::ptrdiff_t here() const noexcept { return static_cast<std::ptrdiff_t>(program_->instructions.size()); }
-	instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
+	[[nodiscard]] instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
 	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
 	void jump_to_here(std::ptrdiff_t addr) { jump_to_target(addr, here()); }
 	std::ptrdiff_t append(instruction instr) { std::ptrdiff_t const addr{here()}; program_->instructions.push_back(instr); return addr; }
@@ -422,19 +549,24 @@ public:
 	std::ptrdiff_t encode(opcode op, std::ptrdiff_t off, std::uint_least16_t imm16, std::uint_least8_t imm8) { return append(instruction{op, imm8, imm16, detail::checked_cast<std::int_least32_t, program_limit_error>(off)}); }
 	std::ptrdiff_t encode(opcode op, std::uint_least16_t imm16, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, 0}); }
 	std::ptrdiff_t encode(opcode op, std::string_view str, std::uint_least8_t imm8 = 0) { auto const rng = add_string(str); return append(instruction{op, imm8, rng.second, rng.first}); }
+	std::ptrdiff_t encode(opcode op, error_handler&& h, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->handlers, std::move(h)), 0}); }
 	std::ptrdiff_t encode(opcode op, semantic_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->actions, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
-	std::ptrdiff_t call(program const& p, std::uint_least16_t prec) { return do_call(nullptr, &p, 0, prec); }
-	std::ptrdiff_t call(grammar const& g, std::uint_least16_t prec) { return do_call(nullptr, &g.program(), 3, prec); }
 	std::ptrdiff_t match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, add_item(program_->runesets, std::move(runes)), 0); }
 	std::ptrdiff_t match_any() { return skip().encode(opcode::match_any); }
 	std::ptrdiff_t match_eps() { return skip(directives::lexeme).encode(opcode::match, std::string_view{}); }
 
+	std::ptrdiff_t call(program const& p, std::uint_least16_t prec, [[maybe_unused]] bool allow_inlining = true)
+	{
+		return do_call(nullptr, &p, 0, prec);
+	}
+
 	std::ptrdiff_t call(rule const& r, std::uint_least16_t prec, bool allow_inlining = true)
 	{
-		if (auto const& p = r.program_; allow_inlining && prec <= 0 && !r.currently_encoding_ && r.callees_.empty() && !p.instructions.empty() &&
-										(p.instructions.size() <= 8) && (p.actions.size() <= 1) && (p.captures.size() <= 1) && (p.predicates.size() <= 1))
+		if (auto const& p = r.program_; allow_inlining && (prec <= 0) && !r.currently_encoding_ && r.callees_.empty() &&
+										(!p.instructions.empty() && (p.instructions.size() <= inline_max_instructions)) &&
+										((p.runesets.size() + p.actions.size() + p.captures.size() + p.predicates.size()) <= inline_max_objects))
 			return skip(p.entry_mode, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
@@ -448,6 +580,34 @@ public:
 		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
 			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) mutable { envr.pop_attribute_frame(frame); }});
 		return m;
+	}
+
+	std::ptrdiff_t recover_push_call(rule const& r)
+	{
+		callees_->emplace_back(&r, &r.program_, here(), mode_.back());
+		return encode(opcode::recover_push, 0, 0, 0);
+	}
+
+	template <class M, class Recovery>
+	[[nodiscard]] decltype(auto) raise_failure(M const& m, failure<Recovery> const& reason)
+	{
+		if constexpr (is_encoder_expression_v<Recovery>) {
+			auto const recovery_subroutine = encode(opcode::recover_push);
+			encode(opcode::raise, reason.label(), 1);
+			auto const finished = encode(opcode::jump);
+			jump_to_here(recovery_subroutine);
+			auto m2 = reason.recovery().evaluate(*this, m);
+			encode(opcode::ret);
+			jump_to_here(finished);
+			return m2;
+		} else if constexpr (std::is_same_v<Recovery, rule>) {
+			recover_push_call(reason.recovery());
+			encode(opcode::raise, reason.label(), 1);
+			return m;
+		} else {
+			encode(opcode::raise, reason.label(), 0);
+			return m;
+		}
 	}
 
 	std::ptrdiff_t match(std::string_view subject)
@@ -506,28 +666,160 @@ inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t 
 	return std::forward<RuneSet>(runes);
 }
 
-struct terminal_encoder_expression_interface
+template <class Derived>
+struct common_encoder_expression_interface
 {
 	using expression_trait = encoder_expression_trait_tag;
+	[[nodiscard]] constexpr Derived& derived() noexcept { return static_cast<Derived&>(*this); }
+	[[nodiscard]] constexpr const Derived& derived() const noexcept { return static_cast<const Derived&>(*this); }
+	template <class Recovery> [[nodiscard]] constexpr auto operator[](failure<Recovery> const& reason) const;
+	template <class Recovery> [[nodiscard]] constexpr auto operator[](recover_with<Recovery> const& rec) const;
+	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] constexpr auto operator^=(Handler&& handler) const;
 };
 
-template <class E1>
-struct unary_encoder_expression_interface
+template <class Derived>
+struct terminal_encoder_expression_interface : common_encoder_expression_interface<Derived> {};
+
+template <class Derived, class E1>
+struct unary_encoder_expression_interface : common_encoder_expression_interface<Derived>
 {
-	using expression_trait = encoder_expression_trait_tag; E1 e1;
+	E1 e1;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr explicit unary_encoder_expression_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
 };
 
-template <class E1, class E2>
-struct binary_encoder_expression_interface
+template <class Derived, class E1, class E2>
+struct binary_encoder_expression_interface : common_encoder_expression_interface<Derived>
 {
-	using expression_trait = encoder_expression_trait_tag; E1 e1; E2 e2;
+	E1 e1;
+	E2 e2;
 	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
 	constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
 };
 
-class basic_regular_expression : public terminal_encoder_expression_interface
+template <class Recovery>
+struct raise_expression : terminal_encoder_expression_interface<raise_expression<Recovery>>
+{
+	failure<Recovery> reason;
+	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		return d.raise_failure(m, reason);
+	}
+};
+
+template <class E1, class Recovery>
+struct expect_expression : unary_encoder_expression_interface<expect_expression<E1, Recovery>, E1>
+{
+	using base_type = unary_encoder_expression_interface<expect_expression<E1, Recovery>, E1>;
+	failure<Recovery> reason;
+	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
+	constexpr expect_expression(X1&& x1, failure<Recovery> const& fail) : base_type{std::forward<X1>(x1)}, reason{fail} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		auto const choice = d.encode(opcode::choice);
+		auto m2 = this->e1.evaluate(d, m);
+		auto const commit = d.encode(opcode::commit);
+		d.jump_to_here(choice);
+		auto m3 = d.raise_failure(m2, reason);
+		d.jump_to_here(commit);
+		return m3;
+	}
+};
+
+template <class E1, class Recovery>
+struct recover_with_expression : unary_encoder_expression_interface<recover_with_expression<E1, Recovery>, E1>
+{
+	using base_type = unary_encoder_expression_interface<recover_with_expression<E1, Recovery>, E1>;
+	recover_with<Recovery> rec;
+	template <class X1, class R, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<recover_with<Recovery>, R&&>>>
+	constexpr recover_with_expression(X1&& x1, R&& r) : base_type{std::forward<X1>(x1)}, rec{std::forward<R>(r)} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_encoder_expression_v<Recovery>) {
+			auto const recovery_subroutine = d.encode(opcode::recover_push);
+			auto m2 = this->e1.evaluate(d, m);
+			d.encode(opcode::recover_pop);
+			auto const finished = d.encode(opcode::jump);
+			d.jump_to_here(recovery_subroutine);
+			auto m3 = rec.recovery().evaluate(d, m2);
+			d.encode(opcode::ret);
+			d.jump_to_here(finished);
+			return m3;
+		} else if constexpr (std::is_same_v<Recovery, rule>) {
+			d.recover_push_call(rec.recovery());
+			auto m2 = this->e1.evaluate(d, m);
+			d.encode(opcode::recover_pop);
+			return m2;
+		} else {
+			return this->e1.evaluate(d, m);
+		}
+	}
+};
+
+struct recover_response_expression : terminal_encoder_expression_interface<recover_response_expression>
+{
+	error_response response;
+	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
+
+	template <class M>
+	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
+	{
+		d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response));
+		return m;
+	}
+};
+
+template <class E1, class Handler>
+struct report_expression : unary_encoder_expression_interface<report_expression<E1, Handler>, E1>
+{
+	using base_type = unary_encoder_expression_interface<report_expression<E1, Handler>, E1>;
+	using base_type::base_type;
+	Handler handler;
+
+	template <class X1, class H, class = std::enable_if_t<std::is_constructible_v<Handler, H&&>>>
+	constexpr report_expression(X1&& x1, H&& h) : base_type{std::forward<X1>(x1)}, handler{std::forward<H>(h)} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (std::is_invocable_r_v<error_response, Handler, error_context&>)
+			d.encode(opcode::report_push, error_handler{handler});
+		else
+			d.encode(opcode::report_push, error_handler{[h = handler](error_context& e) -> error_response { (void)h(e); return e.recovery_response(); }});
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::report_pop);
+		return m2;
+	}
+};
+
+template <class X1, class H> report_expression(X1&&, H&&) -> report_expression<std::decay_t<X1>, std::decay_t<H>>;
+
+template <class Derived> template <class Recovery>
+[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator[](failure<Recovery> const& reason) const
+{
+	return expect_expression<Derived, Recovery>{derived(), reason};
+}
+
+template <class Derived> template <class Recovery>
+[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator[](recover_with<Recovery> const& rec) const
+{
+	return recover_with_expression<Derived, Recovery>{derived(), rec};
+}
+
+template <class Derived> template <class Handler, class>
+[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator^=(Handler&& handler) const
+{
+	return report_expression<Derived, std::decay_t<Handler>>{derived(), std::forward<Handler>(handler)};
+}
+
+class basic_regular_expression : public terminal_encoder_expression_interface<basic_regular_expression>
 {
 	std::string expression_;
 	std::shared_ptr<program> program_;
@@ -543,8 +835,7 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 		bool circumflex{false};
 
 		generator(basic_regular_expression const& se, directives mode)
-			: encoder{*se.program_, callees, mode | directives::eps | directives::lexeme}
-		{}
+			: encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
 
 		void bracket_class(std::string_view s)
 		{
@@ -586,7 +877,9 @@ class basic_regular_expression : public terminal_encoder_expression_interface
 					encoder.match_any();
 				}
 			}
-			runes.clear(), classes = unicode::ctype::none, circumflex = false;
+			runes.clear();
+			classes = unicode::ctype::none;
+			circumflex = false;
 		}
 	};
 
@@ -595,28 +888,28 @@ public:
 	template <class M> [[nodiscard]] auto evaluate(encoder& d, M const& m) const -> M const&;
 };
 
-struct string_expression : terminal_encoder_expression_interface
+struct string_expression : terminal_encoder_expression_interface<string_expression>
 {
 	std::string_view text;
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(text); return m; }
 };
 
-struct char_expression : terminal_encoder_expression_interface
+struct char_expression : terminal_encoder_expression_interface<char_expression>
 {
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(std::string_view{&c, 1}); return m; }
 };
 
-struct char32_expression : terminal_encoder_expression_interface
+struct char32_expression : terminal_encoder_expression_interface<char32_expression>
 {
 	char32_t c;
 	constexpr explicit char32_expression(char32_t x) noexcept : c{x} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(utf8::encode_rune(c)); return m; }
 };
 
-struct char32_range_expression : terminal_encoder_expression_interface
+struct char32_range_expression : terminal_encoder_expression_interface<char32_range_expression>
 {
 	char32_t start;
 	char32_t end;
@@ -625,7 +918,7 @@ struct char32_range_expression : terminal_encoder_expression_interface
 };
 
 template <class Target>
-struct callable_expression : terminal_encoder_expression_interface
+struct callable_expression : terminal_encoder_expression_interface<callable_expression<Target>>
 {
 	std::reference_wrapper<Target> target;
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
@@ -633,19 +926,17 @@ struct callable_expression : terminal_encoder_expression_interface
 };
 
 template <class T> struct is_callable_encoder_expression : std::false_type {};
-template <class Target> struct is_callable_encoder_expression<callable_expression<Target>> : std::true_type {};
+template <class T> struct is_callable_encoder_expression<callable_expression<T>> : std::true_type {};
 template <class T> inline constexpr bool is_callable_encoder_expression_v = is_callable_encoder_expression<T>::value;
 
 template <class Pred>
-struct predicate_expression : terminal_encoder_expression_interface
+struct predicate_expression : terminal_encoder_expression_interface<predicate_expression<Pred>>
 {
 	Pred pred;
 	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::predicate, syntactic_predicate{pred}); return m; }
 };
 
-template <class X1> unary_encoder_expression_interface(X1&&) -> unary_encoder_expression_interface<std::decay_t<X1>>;
-template <class X1, class X2> binary_encoder_expression_interface(X1&&, X2&&) -> binary_encoder_expression_interface<std::decay_t<X1>, std::decay_t<X2>>;
 template <class P> predicate_expression(P&&) -> predicate_expression<std::decay_t<P>>;
 
 template <class E, class = std::enable_if_t<is_encoder_expression_v<E>>>
@@ -687,7 +978,7 @@ inline rule::rule(rule const& r)
 	rule_encoder.call(r, 1);
 }
 
-struct rule_precedence_expression : terminal_encoder_expression_interface
+struct rule_precedence_expression : terminal_encoder_expression_interface<rule_precedence_expression>
 {
 	std::reference_wrapper<rule const> target;
 	std::uint_least16_t prec;
@@ -700,16 +991,35 @@ struct rule_precedence_expression : terminal_encoder_expression_interface
 	return rule_precedence_expression{*this, prec};
 }
 
-template <class E1>
-struct directive_expression : unary_encoder_expression_interface<E1>
+template <class Recovery>
+[[nodiscard]] inline auto rule::operator[](failure<Recovery> const& reason) const
 {
+	return expect_expression<callable_expression<rule const>, Recovery>{callable_expression<rule const>{*this}, reason};
+}
+
+template <class Recovery>
+[[nodiscard]] inline auto rule::operator[](recover_with<Recovery> const& rec) const
+{
+	return recover_with_expression<callable_expression<rule const>, Recovery>{callable_expression<rule const>{*this}, rec};
+}
+
+template <class Handler, class>
+[[nodiscard]] inline auto rule::operator^=(Handler&& handler) const
+{
+	return report_expression<callable_expression<rule const>, std::decay_t<Handler>>{callable_expression<rule const>{*this}, std::forward<Handler>(handler)};
+}
+
+template <class E1>
+struct directive_expression : unary_encoder_expression_interface<directive_expression<E1>, E1>
+{
+	using base_type = unary_encoder_expression_interface<directive_expression<E1>, E1>;
 	directives enable_mask{directives::none};
 	directives disable_mask{directives::none};
 	directives relay_mask{directives::none};
 
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr directive_expression(X1&& x1, directives enable, directives disable, directives relay)
-		: unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, enable_mask{enable}, disable_mask{disable}, relay_mask{relay} {}
+		: base_type{std::forward<X1>(x1)}, enable_mask{enable}, disable_mask{disable}, relay_mask{relay} {}
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -742,17 +1052,18 @@ inline constexpr directive_modifier<directives::none, directives::none, directiv
 inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 
-struct nop_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
-struct eps_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 0x8000, 0); d.encode(opcode::fail, 0, 2); return m; } };
-struct eol_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
-struct cut_expression : terminal_encoder_expression_interface { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::cut); return m; } };
+struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
+struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
+struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
+struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 1, 0); d.encode(opcode::fail, 0, 2); return m; } };
+struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
 
 template <opcode Op>
 struct match_class_combinator
 {
 	template <class Property>
-	struct match_class_expression : terminal_encoder_expression_interface
+	struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Property>>
 	{
 		Property property;
 		constexpr explicit match_class_expression(Property p) noexcept : property{p} {}
@@ -763,13 +1074,13 @@ struct match_class_combinator
 	[[nodiscard]] constexpr match_class_expression<std::decay_t<Property>> operator()(Property p) const { return match_class_expression<std::decay_t<Property>>{p}; }
 };
 
-struct match_any_expression : terminal_encoder_expression_interface, match_class_combinator<opcode::match_any_of>
+struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator<opcode::match_any_of>
 {
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_any(); return m; }
 };
 
 template <unicode::ctype Property>
-struct ctype_expression : terminal_encoder_expression_interface
+struct ctype_expression : terminal_encoder_expression_interface<ctype_expression<Property>>
 {
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class<opcode::match_any_of>(Property); return m; }
 };
@@ -777,7 +1088,7 @@ struct ctype_expression : terminal_encoder_expression_interface
 template <bool Value>
 struct condition_test_combinator
 {
-	struct condition_test_expression : terminal_encoder_expression_interface
+	struct condition_test_expression : terminal_encoder_expression_interface<condition_test_expression>
 	{
 		std::string_view name;
 		constexpr explicit condition_test_expression(std::string_view n) noexcept : name{n} {}
@@ -791,10 +1102,12 @@ template <bool Value>
 struct condition_block_combinator
 {
 	template <class E1>
-	struct condition_block_expression : unary_encoder_expression_interface<E1>
+	struct condition_block_expression : unary_encoder_expression_interface<condition_block_expression<E1>, E1>
 	{
+		using base_type = unary_encoder_expression_interface<condition_block_expression<E1>, E1>;
+		using base_type::base_type;
 		std::string_view name;
-		constexpr condition_block_expression(E1 const& x1, std::string_view n) noexcept : unary_encoder_expression_interface<E1>{x1}, name{n} {}
+		constexpr condition_block_expression(E1 const& x1, std::string_view n) noexcept : base_type{x1}, name{n} {}
 
 		template <class M>
 		[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -823,7 +1136,7 @@ struct condition_block_combinator
 template <bool Value>
 struct symbol_exists_combinator
 {
-	struct symbol_exists_expression : terminal_encoder_expression_interface
+	struct symbol_exists_expression : terminal_encoder_expression_interface<symbol_exists_expression>
 	{
 		std::string_view name;
 		constexpr explicit symbol_exists_expression(std::string_view n) noexcept : name{n} {}
@@ -836,7 +1149,7 @@ struct symbol_exists_combinator
 template <opcode Op, opcode OpCf>
 struct symbol_match_combinator
 {
-	struct symbol_match_expression : terminal_encoder_expression_interface
+	struct symbol_match_expression : terminal_encoder_expression_interface<symbol_match_expression>
 	{
 		std::string_view name;
 		constexpr explicit symbol_match_expression(std::string_view n) noexcept : name{n} {}
@@ -849,7 +1162,7 @@ struct symbol_match_combinator
 template <opcode Op, opcode OpCf>
 struct symbol_match_offset_combinator
 {
-	struct symbol_match_offset_expression : terminal_encoder_expression_interface
+	struct symbol_match_offset_expression : terminal_encoder_expression_interface<symbol_match_offset_expression>
 	{
 		std::string_view name;
 		std::uint_least8_t offset;
@@ -864,14 +1177,15 @@ struct symbol_match_offset_combinator
 };
 
 template <class E1>
-struct negative_lookahead_expression : unary_encoder_expression_interface<E1>
+struct negative_lookahead_expression : unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>
 {
-	using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
+	using base_type = unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
-		auto const choice = d.encode(opcode::choice);
+		auto const choice = d.encode(opcode::choice, 0, 1);
 		auto m2 = this->e1.evaluate(d, m);
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
@@ -880,14 +1194,15 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class E1>
-struct positive_lookahead_expression : unary_encoder_expression_interface<E1>
+struct positive_lookahead_expression : unary_encoder_expression_interface<positive_lookahead_expression<E1>, E1>
 {
-	using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
+	using base_type = unary_encoder_expression_interface<positive_lookahead_expression<E1>, E1>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
-		auto const choice = d.encode(opcode::choice);
+		auto const choice = d.encode(opcode::choice, 0, 1);
 		auto m2 = this->e1.evaluate(d, m);
 		d.encode(opcode::commit_back, 1, 0, 0);
 		d.jump_to_here(choice);
@@ -897,9 +1212,10 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class E1>
-struct repetition_expression : unary_encoder_expression_interface<E1>
+struct repetition_expression : unary_encoder_expression_interface<repetition_expression<E1>, E1>
 {
-	using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1>, E1>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -915,9 +1231,10 @@ struct repetition_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class E1, class E2>
-struct choice_expression : binary_encoder_expression_interface<E1, E2>
+struct choice_expression : binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>
 {
-	using binary_encoder_expression_interface<E1, E2>::binary_encoder_expression_interface;
+	using base_type = binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -933,9 +1250,10 @@ struct choice_expression : binary_encoder_expression_interface<E1, E2>
 };
 
 template <class E1, class E2>
-struct sequence_expression : binary_encoder_expression_interface<E1, E2>
+struct sequence_expression : binary_encoder_expression_interface<sequence_expression<E1, E2>, E1, E2>
 {
-	using binary_encoder_expression_interface<E1, E2>::binary_encoder_expression_interface;
+	using base_type = binary_encoder_expression_interface<sequence_expression<E1, E2>, E1, E2>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -945,10 +1263,12 @@ struct sequence_expression : binary_encoder_expression_interface<E1, E2>
 };
 
 template <class Derived, class E1, class Operand>
-struct attribute_action_expression : unary_encoder_expression_interface<E1>
+struct attribute_action_expression : unary_encoder_expression_interface<Derived, E1>
 {
+	using base_type = unary_encoder_expression_interface<Derived, E1>;
+	using base_type::base_type;
 	Operand operand;
-	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
+	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) : base_type{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
 
 	template <class M>
 	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const
@@ -965,14 +1285,16 @@ struct attribute_action_expression : unary_encoder_expression_interface<E1>
 template <class Derived, class E1, class Target>
 struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, Target*>
 {
-	using attribute_action_expression<Derived, E1, Target*>::attribute_action_expression;
+	using base_type = attribute_action_expression<Derived, E1, Target*>;
+	using base_type::base_type;
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const { return encoder_metadata{std::tuple_cat((attribute_action_expression<Derived, E1, Target*>::evaluate(d, m)).attribute_frame, std::forward_as_tuple(*(this->operand)))}; }
 };
 
 template <class E1, class Action>
 struct action_expression : attribute_action_expression<action_expression<E1, Action>, E1, Action>
 {
-	using attribute_action_expression<action_expression<E1, Action>, E1, Action>::attribute_action_expression;
+	using base_type = attribute_action_expression<action_expression<E1, Action>, E1, Action>;
+	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
@@ -981,7 +1303,8 @@ struct action_expression : attribute_action_expression<action_expression<E1, Act
 template <class E1, class Action>
 struct capture_expression : attribute_action_expression<capture_expression<E1, Action>, E1, Action>
 {
-	using attribute_action_expression<capture_expression<E1, Action>, E1, Action>::attribute_action_expression;
+	using base_type = attribute_action_expression<capture_expression<E1, Action>, E1, Action>;
+	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
@@ -990,7 +1313,8 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 template <class E1, class Target>
 struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>
 {
-	using attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
+	using base_type = attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>;
+	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
@@ -999,24 +1323,27 @@ struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<
 template <class E1, class Target>
 struct capture_to_expression : attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>
 {
-	using attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>::attribute_bind_to_expression;
+	using base_type = attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>;
+	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
 };
 
 template <class E1>
-struct symbol_assign_expression : unary_encoder_expression_interface<E1>
+struct symbol_assign_expression : unary_encoder_expression_interface<symbol_assign_expression<E1>, E1>
 {
+	using base_type = unary_encoder_expression_interface<symbol_assign_expression<E1>, E1>;
 	std::string_view name;
-	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : unary_encoder_expression_interface<E1>{std::forward<X1>(x1)}, name{n} {}
+	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : base_type{std::forward<X1>(x1)}, name{n} {}
 	template <class M> [[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const { d.skip().encode(opcode::symbol_start, name); auto m2 = this->e1.evaluate(d, m); d.encode(opcode::symbol_end); return m2; }
 };
 
 template <class E1>
-struct symbol_block_expression : unary_encoder_expression_interface<E1>
+struct symbol_block_expression : unary_encoder_expression_interface<symbol_block_expression<E1>, E1>
 {
-	using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
+	using base_type = unary_encoder_expression_interface<symbol_block_expression<E1>, E1>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -1029,9 +1356,10 @@ struct symbol_block_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class E1>
-struct local_block_expression : unary_encoder_expression_interface<E1>
+struct local_block_expression : unary_encoder_expression_interface<local_block_expression<E1>, E1>
 {
-	using unary_encoder_expression_interface<E1>::unary_encoder_expression_interface;
+	using base_type = unary_encoder_expression_interface<local_block_expression<E1>, E1>;
+	using base_type::base_type;
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -1044,10 +1372,12 @@ struct local_block_expression : unary_encoder_expression_interface<E1>
 };
 
 template <class E1>
-struct local_to_block_expression : unary_encoder_expression_interface<E1>
+struct local_to_block_expression : unary_encoder_expression_interface<local_to_block_expression<E1>, E1>
 {
+	using base_type = unary_encoder_expression_interface<local_to_block_expression<E1>, E1>;
+	using base_type::base_type;
 	std::string_view name;
-	constexpr local_to_block_expression(E1 const& x1, std::string_view n) noexcept : unary_encoder_expression_interface<E1>{x1}, name{n} {}
+	constexpr local_to_block_expression(E1 const& x1, std::string_view n) noexcept : base_type{x1}, name{n} {}
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -1075,7 +1405,8 @@ template <class X1> local_to_block_expression(X1&&, std::string_view) -> local_t
 
 namespace language {
 
-using lug::grammar; using environment = lug::environment; using lug::rule; using lug::start;
+using environment = lug::environment; using grammar = lug::grammar; using rule = lug::rule; using lug::start;
+using error_context = lug::error_context; using error_response = lug::error_response; using lug::recover_with; using lug::failure;
 using syntax = lug::syntax; using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype; using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
@@ -1083,7 +1414,8 @@ inline constexpr directive_modifier<directives::caseless, directives::none, dire
 inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
 inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
 inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
-inline constexpr nop_expression nop{}; inline constexpr eps_expression eps{}; inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr cut_expression cut{};
+inline constexpr accept_expression accept{}; inline constexpr cut_expression cut{}; inline constexpr nop_expression nop{};
+inline constexpr eps_expression eps{}; inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator<opcode::match_all_of> all{}; inline constexpr match_class_combinator<opcode::match_none_of> none{};
 inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
 inline constexpr ctype_expression<ctype::upper> upper{}; inline constexpr ctype_expression<ctype::digit> digit{}; inline constexpr ctype_expression<ctype::xdigit> xdigit{};
@@ -1134,6 +1466,7 @@ inline namespace operators {
 [[nodiscard]] constexpr auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_fail(char const* s, std::size_t n) { return failure{std::string_view{s, n}}; }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{matches_eps[e]}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{matches_eps[e]}; } // NOLINT(google-runtime-operator)
@@ -1142,7 +1475,8 @@ template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), skip_before[e2]}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { auto x{make_expression(e)}; return x > *x; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { auto const& x = make_expression(e); return x > *x; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return e | eps; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e) { return cut > e; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e, int) { return e > cut; }
@@ -1220,6 +1554,32 @@ inline constexpr struct
 }
 local{};
 
+inline constexpr struct
+{
+	[[nodiscard]] constexpr auto operator()(std::string_view label) const noexcept { return raise_expression{failure{label}}; }
+	template <class Recovery> [[nodiscard]] constexpr auto operator()(failure<Recovery> const& reason) const noexcept { return raise_expression{reason}; }
+	template <class Recovery, class = std::enable_if_t<is_recovery_expression_v<Recovery>>> [[nodiscard]] constexpr auto operator()(std::string_view label, Recovery&& recovery) const noexcept { return raise_expression{failure{label, std::forward<Recovery>(recovery)}}; }
+}
+raise{};
+
+template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
+auto sync(Pattern const& pattern)
+{
+	return noskip[*(!pattern > any) ^ Response];
+}
+
+template <error_response Response = error_response::resume, class Pattern, class DefaultValue, class = std::enable_if_t<is_expression_v<Pattern>>>
+auto sync(Pattern const& pattern, DefaultValue&& default_value)
+{
+	auto default_value_action = [value = std::forward<DefaultValue>(default_value)] {
+		if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+			return value();
+		else
+			return value;
+	};
+	return noskip[*(!pattern > any) < std::move(default_value_action) ^ Response];
+}
+
 class implicit_space_rule
 {
 	std::function<void(encoder&)> prev_rule_;
@@ -1229,8 +1589,7 @@ public:
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	implicit_space_rule(E const& e) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 		: prev_rule_{std::exchange(*grammar::implicit_space(), std::function<void(encoder&)>{make_space_expression(e)})}
-		, implicit_space_ref_{grammar::implicit_space()}
-	{}
+		, implicit_space_ref_{grammar::implicit_space()} {}
 
 	~implicit_space_rule()
 	{
@@ -1262,16 +1621,19 @@ public:
 	std::vector<std::pair<program const*, std::ptrdiff_t>> calls;
 	std::unordered_map<program const*, std::ptrdiff_t> addresses;
 	std::unordered_set<program const*> left_recursive;
-	opcode prologue{opcode::halt};
+	std::optional<std::ptrdiff_t> halt_address;
 	do {
 		auto const&& [callstack, subprogram] = detail::pop_back(unprocessed);
 		if (auto const address = grencoder.here(); addresses.emplace(subprogram, address).second) {
 			grencoder.append(*subprogram);
-			grencoder.encode(std::exchange(prologue, opcode::ret));
+			if (!halt_address)
+				halt_address = grencoder.encode(opcode::jump);
+			else
+				grencoder.encode(opcode::ret);
 			if (auto const top_rule = callstack.back().first; top_rule) {
-				for (auto&& [callee_rule, callee_program, instr_offset, mode] : top_rule->callees_) {
+				for (auto&& [callee_rule, callee_program, instr_offset, callee_mode] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
-					if ((callee_rule != nullptr) && ((mode & directives::eps) != directives::none) &&
+					if ((callee_rule != nullptr) && ((callee_mode & directives::eps) != directives::none) &&
 							detail::escaping_find_if(callstack.crbegin(), callstack.crend(), [callee = callee_rule](auto const& caller) {
 								if (caller.first == callee)
 									return 1;
@@ -1280,7 +1642,7 @@ public:
 						left_recursive.insert(callee_program);
 					} else {
 						auto callee_callstack = callstack;
-						callee_callstack.emplace_back(callee_rule, (mode & directives::eps) != directives::none);
+						callee_callstack.emplace_back(callee_rule, (callee_mode & directives::eps) != directives::none);
 						unprocessed.emplace_back(std::move(callee_callstack), callee_program);
 					}
 				}
@@ -1288,18 +1650,22 @@ public:
 		}
 	} while (!unprocessed.empty());
 	for (auto [subprogram, instr_addr] : calls) {
-		if (auto& instr = grencoder.instruction_at(instr_addr); instr.op == opcode::call) {
-			instr.immediate16 = ((left_recursive.count(subprogram) != 0) ? (std::max)(instr.immediate16, std::uint_least16_t{1}) : std::uint_least16_t{0});
+		if (auto& instr = grencoder.instruction_at(instr_addr); (instr.op == opcode::call) || (instr.op == opcode::recover_push)) {
 			instr.offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(instr.offset32 + addresses[subprogram] - (instr_addr + 1));
-			if ((instr.immediate16 == 0) && (grencoder.instruction_at(instr_addr + 1).op == opcode::ret))
-				instr.op = opcode::jump;
+			if (instr.op == opcode::call) {
+				instr.immediate16 = ((left_recursive.count(subprogram) != 0) ? (std::max)(instr.immediate16, std::uint_least16_t{1}) : std::uint_least16_t{0});
+				if ((instr.immediate16 == 0) && (grencoder.instruction_at(instr_addr + 1).op == opcode::ret))
+					instr.op = opcode::jump;
+			}
 		}
 	}
+	if (halt_address)
+		grencoder.jump_to_here(*halt_address);
 	grprogram.data.emplace_back('\0');
 	return grammar{std::move(grprogram)};
 }
 
-enum class source_options : std::uint_least8_t { none = 0, interactive = 0x01, is_bitfield_enum };
+enum class source_options : std::uint_least8_t { none = 0, interactive = 1, is_bitfield_enum };
 
 namespace detail {
 
@@ -1349,6 +1715,12 @@ public:
 		buffer_.insert(buffer_.end(), first, last);
 	}
 
+	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
+	void enqueue(InputRng&& rng) // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		enqueue(rng.begin(), rng.end());
+	}
+
 	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
@@ -1365,6 +1737,7 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
+	template <class Rng, class = detail::enable_if_char_input_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
 };
 
 class string_view_input_source
@@ -1375,6 +1748,7 @@ public:
 	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
 	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
 	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = (last > first) ? std::string_view{&(*first), static_cast<std::size_t>(last - first)} : std::string_view{}; }
+	template <class Rng, class = detail::enable_if_char_contiguous_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
 };
 
 class parser_base
@@ -1383,24 +1757,29 @@ protected:
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
 
-	struct response { std::size_t call_depth{0}; std::size_t action_index{0}; syntax_range range{0, 0}; constexpr response() noexcept = default; constexpr response(std::size_t c, std::size_t a, syntax_range const& r) noexcept : call_depth{c}, action_index{a}, range{r} {} };
-	struct backtrack_frame { std::size_t sr; std::size_t rc; std::ptrdiff_t pc; constexpr backtrack_frame(std::size_t s, std::size_t r, std::ptrdiff_t p) noexcept : sr{s}, rc{r}, pc{p} {} };
+	struct action_response { std::size_t call_depth{0}; std::size_t action_index{0}; syntax_range range{0, 0}; constexpr action_response() noexcept = default; constexpr action_response(std::size_t c, std::size_t a, syntax_range const& r) noexcept : call_depth{c}, action_index{a}, range{r} {} };
+	struct backtrack_frame { std::size_t sr; std::size_t rc; std::size_t ri; std::ptrdiff_t pc; constexpr backtrack_frame(std::size_t s, std::size_t r, std::size_t i, std::ptrdiff_t p) noexcept : sr{s}, rc{r}, ri{i}, pc{p} {} };
 	struct call_frame { std::ptrdiff_t pc; constexpr explicit call_frame(std::ptrdiff_t p) noexcept : pc{p} {} };
 	struct capture_frame { std::size_t sr; constexpr explicit capture_frame(std::size_t s) noexcept : sr{s} {} };
 	struct condition_frame { std::string_view name; bool value; constexpr condition_frame(std::string_view n, bool v) noexcept : name{n}, value{v} {} };
-	struct lrmemo_frame { std::size_t srr; std::size_t sra; std::size_t prec; std::ptrdiff_t pcr; std::ptrdiff_t pca; std::size_t rcr; std::vector<response> responses; lrmemo_frame(std::size_t sr, std::size_t sa, std::size_t p, std::ptrdiff_t pc, std::ptrdiff_t pa, std::size_t rc) noexcept : srr{sr}, sra{sa}, prec{p}, pcr{pc}, pca{pa}, rcr{rc} {} };
+	struct lrmemo_frame { std::size_t srr; std::size_t sra; std::size_t prec; std::ptrdiff_t pcr; std::ptrdiff_t pca; std::size_t rcr; std::vector<action_response> responses; lrmemo_frame(std::size_t sr, std::size_t sa, std::size_t p, std::ptrdiff_t pc, std::ptrdiff_t pa, std::size_t rc) noexcept : srr{sr}, sra{sa}, prec{p}, pcr{pc}, pca{pa}, rcr{rc} {} };
+	struct raise_frame { std::string_view label;std::size_t sr; std::size_t rc; std::ptrdiff_t eh; std::ptrdiff_t pc; constexpr explicit raise_frame(std::string_view lab, std::size_t s, std::size_t r, std::ptrdiff_t e, std::ptrdiff_t p) noexcept : label{lab}, sr{s}, rc{r}, eh{e}, pc{p} {} };
+	struct recover_frame { std::ptrdiff_t rh; constexpr explicit recover_frame(std::ptrdiff_t h) noexcept : rh{h} {} };
+	struct report_frame { std::ptrdiff_t eh; constexpr explicit report_frame(std::ptrdiff_t h) noexcept : eh{h} {} };
 	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };
 	using symbol_table_frame = std::unordered_map<std::string_view, std::vector<std::string>>;
-	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, symbol_frame, symbol_table_frame>;
+	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, raise_frame, recover_frame, report_frame, symbol_frame, symbol_table_frame>;
 
 	// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 	lug::grammar const* grammar_;
+	lug::program const* program_;
 	lug::environment* environment_;
-	std::vector<response> responses_;
+	std::vector<action_response> responses_;
 	std::vector<stack_frame> stack_frames_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
-	lug::registers registers_{0, 0, 0, 0, 0, 0, 0};
+	lug::registers registers_;
 	bool parsing_{false};
+	bool success_{false};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
 	template <opcode Opcode>
@@ -1413,8 +1792,10 @@ protected:
 			backtrack.sr = registers_.sr;
 			backtrack.rc = registers_.rc;
 		} else {
-			if constexpr (Opcode == opcode::commit_back)
+			if constexpr (Opcode == opcode::commit_back) {
 				registers_.sr = backtrack.sr;
+				registers_.ri = backtrack.ri;
+			}
 			stack_frames_.pop_back();
 		}
 		registers_.pc += off;
@@ -1426,16 +1807,16 @@ protected:
 			responses_.resize(n);
 	}
 
-	[[nodiscard]] auto restore_responses_after(std::size_t n, std::vector<response> const& restore)
+	[[nodiscard]] std::size_t restore_responses_after(std::size_t n, std::vector<action_response> const& restore)
 	{
 		pop_responses_after(n);
 		responses_.insert(responses_.end(), restore.begin(), restore.end());
 		return responses_.size();
 	}
 
-	[[nodiscard]] auto drop_responses_after(std::size_t n)
+	[[nodiscard]] std::vector<action_response> drop_responses_after(std::size_t n)
 	{
-		std::vector<response> dropped;
+		std::vector<action_response> dropped;
 		if (n < responses_.size()) {
 			dropped.assign(responses_.begin() + static_cast<std::ptrdiff_t>(n), responses_.end());
 			responses_.resize(n);
@@ -1443,7 +1824,7 @@ protected:
 		return dropped;
 	}
 
-	[[nodiscard]] auto push_response(std::size_t call_depth, std::size_t action_index, syntax_range const& range = {parser_base::max_size, 0})
+	[[nodiscard]] std::size_t push_response(std::size_t call_depth, std::size_t action_index, syntax_range const& range = {parser_base::max_size, 0})
 	{
 		responses_.emplace_back(call_depth, action_index, range);
 		return responses_.size();
@@ -1481,105 +1862,80 @@ protected:
 		return 0;
 	}
 
-	[[nodiscard]] bool return_from()
+	[[nodiscard]] bool return_from_lrmemo_call(lrmemo_frame& memo)
 	{
-		if (stack_frames_.empty())
-			throw bad_stack{};
-		auto& frame = stack_frames_.back();
-		if (auto* const call = std::get_if<call_frame>(&frame); call != nullptr) {
-			--registers_.cd;
-			registers_.pc = call->pc;
-			stack_frames_.pop_back();
+		if ((memo.sra == parser_base::lrfailcode) || (registers_.sr > memo.sra)) {
+			memo.sra = registers_.sr;
+			memo.responses = drop_responses_after(memo.rcr);
+			registers_.sr = memo.srr;
+			registers_.pc = memo.pca;
+			registers_.rc = memo.rcr;
 			return false;
 		}
-		if (auto* const memo = std::get_if<lrmemo_frame>(&frame); memo != nullptr) {
-			if ((memo->sra == parser_base::lrfailcode) || (registers_.sr > memo->sra)) {
-				memo->sra = registers_.sr;
-				memo->responses = drop_responses_after(memo->rcr);
-				registers_.sr = memo->srr;
-				registers_.pc = memo->pca;
-				registers_.rc = memo->rcr;
-				return false;
-			}
-			--registers_.cd;
-			registers_.sr = memo->sra;
-			registers_.pc = memo->pcr;
-			registers_.rc = restore_responses_after(memo->rcr, memo->responses);
-			stack_frames_.pop_back();
-			return true;
-		}
-		throw bad_stack{};
+		--registers_.cd;
+		--registers_.ci;
+		registers_.sr = memo.sra;
+		registers_.pc = memo.pcr;
+		registers_.rc = restore_responses_after(memo.rcr, memo.responses);
+		return true;
 	}
 
-	[[nodiscard]] std::pair<std::ptrdiff_t, bool> fail_one()
+	void do_accept(std::string_view match)
 	{
-		auto const fail_result = std::visit([this](auto& frame) -> std::pair<std::ptrdiff_t, bool> {
-			using frame_type = std::decay_t<decltype(frame)>;
-			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
-				registers_.sr = frame.sr;
-				registers_.rc = frame.rc;
-				registers_.pc = frame.pc;
-				return {0, false};
-			} else if constexpr (std::is_same_v<frame_type, call_frame>) {
-				--registers_.cd;
-				return {1, false};
-			} else if constexpr (std::is_same_v<frame_type, capture_frame>) {
-				return {1, true};
-			} else if constexpr (std::is_same_v<frame_type, condition_frame>) {
-				environment_->set_condition(frame.name, frame.value);
-				return {1, false};
-			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
-				--registers_.cd;
-				if (frame.sra != parser_base::lrfailcode) {
-					registers_.sr = frame.sra;
-					registers_.rc = restore_responses_after(frame.rcr, frame.responses);
-					registers_.pc = frame.pcr;
-					return {0, true};
-				}
-				return {1, true};
-			} else if constexpr (std::is_same_v<frame_type, symbol_frame>) {
-				return {1, false};
-			} else if constexpr (std::is_same_v<frame_type, symbol_table_frame>) {
-				environment_->symbols_.swap(frame);
-				return {1, false};
-			} else {
-				static_assert(detail::always_false_v<frame_type>, "non-exhaustive visitor!");
-			}
-		}, stack_frames_.back());
-		stack_frames_.pop_back();
-		return fail_result;
-	}
-
-	void do_accept(std::string_view match, std::string_view subject)
-	{
-		auto const prior_call_depth = environment_->start_accept(match, subject);
-		detail::scope_exit const cleanup{[this, prior_call_depth]{ environment_->end_accept(prior_call_depth); }};
-		auto const& actions = grammar_->program().actions;
-		auto const& captures = grammar_->program().captures;
+		detail::scope_exit const cleanup{[this, prior_call_depth = environment_->start_accept()]{
+			environment_->end_accept(prior_call_depth);
+			responses_.clear();
+			registers_.rc = 0;
+		}};
 		for (auto& resp : responses_) {
 			if (environment_->accept_response(resp.call_depth)) {
 				if (resp.range.index < parser_base::max_size)
-					captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
+					program_->captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
 				else
-					actions[resp.action_index](*environment_);
+					program_->actions[resp.action_index](*environment_);
 			}
 		}
 	}
 
-	void do_drain()
+	void do_drain(std::string_view sub)
 	{
-		environment_->reset_origin();
-		casefolded_subjects_.clear();
-		responses_.clear();
+		for (auto& frame : stack_frames_) {
+			if (auto* const backtrack = std::get_if<backtrack_frame>(&frame); backtrack) {
+				if (backtrack->sr < registers_.sr)
+					backtrack->sr = (std::numeric_limits<std::size_t>::max)();
+			}
+		}
 		registers_.mr -= registers_.sr;
 		registers_.sr = 0;
 		registers_.rc = 0;
-		registers_.cf = stack_frames_.size();
-		registers_.ci &= ~lug::registers::cut_deferred_flag;
+		registers_.ci &= lug::registers::count_mask;
+		registers_.ri &= lug::registers::count_mask;
+		casefolded_subjects_.clear();
+		responses_.clear();
+		environment_->drain(sub);
+	}
+
+	void do_reset(std::string_view sub)
+	{
+		success_ = true;
+		registers_.sr = 0;
+		registers_.mr = 0;
+		registers_.rc = 0;
+		registers_.cd = 0;
+		registers_.ci = 0;
+		registers_.ri = 0;
+		registers_.eh = -1;
+		registers_.rh = -1;
+		registers_.rr = error_response::resume;
+		registers_.pc = 0;
+		casefolded_subjects_.clear();
+		responses_.clear();
+		stack_frames_.clear();
+		environment_->reset(sub);
 	}
 
 public:
-	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, environment_{&e} {}
+	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, program_{&g.program()}, environment_{&e} {}
 	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
 	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
 	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
@@ -1698,31 +2054,232 @@ class basic_parser : public parser_base
 		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
 	}
 
+	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
+	{
+		if (!available(sr, 1))
+			return 1;
+		for (;;) {
+			auto const buffer = input_source_.buffer();
+			auto const next_space = buffer.find_first_of(" \t\n\r\f\v", sr);
+			if (next_space != std::string::npos) {
+				sr = next_space;
+				break;
+			}
+			sr = buffer.size();
+			if (!available(sr, 1))
+				break;
+		}
+		return 0;
+	}
+
+	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
+	{
+		--registers_.cd;
+		--registers_.ci;
+		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
+		if (registers_.pc == frame.pc) {
+			registers_.sr = frame.sr;
+			(void)match_default_recovery(registers_.sr);
+			rec_res = error_response::halt;
+		}
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		auto const sr0 = frame.sr;
+		auto const sr1 = registers_.sr;
+		auto const mat = match();
+		auto const sub = subject();
+		environment_->set_match_and_subject(mat, sub);
+		error_response err_res{rec_res};
+		error_context err{*environment_, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, frame.label, err_res};
+		auto handler_index = static_cast<std::size_t>(frame.eh);
+		auto next_frame = stack_frames_.rbegin();
+		auto const last_frame = stack_frames_.rend();
+		while (handler_index < program_->handlers.size()) {
+			err_res = program_->handlers[handler_index](err);
+			if (err_res != error_response::rethrow)
+				break;
+			err_res = error_response::halt;
+			handler_index = (std::numeric_limits<std::size_t>::max)();
+			for (++next_frame; next_frame != last_frame; ++next_frame) {
+				if (auto const* const next_report_frame = std::get_if<report_frame>(&*next_frame); next_report_frame != nullptr) {
+					handler_index = static_cast<std::size_t>(next_report_frame->eh);
+					break;
+				}
+			}
+		}
+		if (err_res >= error_response::backtrack) {
+			registers_.sr = frame.sr;
+			registers_.rc = frame.rc;
+			return err_res;
+		}
+		registers_.pc = frame.pc;
+		return err_res;
+	}
+
+	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
+	{
+		if (stack_frames_.empty())
+			throw bad_stack{};
+		auto ret_result = std::visit([this](auto& frame) -> std::pair<error_response, std::ptrdiff_t> {
+			using frame_type = std::decay_t<decltype(frame)>;
+			if constexpr (std::is_same_v<frame_type, call_frame>) {
+				--registers_.cd;
+				registers_.pc = frame.pc;
+				return std::pair{error_response::accept, std::ptrdiff_t{0}};
+			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
+				if (!return_from_lrmemo_call(frame))
+					return std::pair{error_response::rethrow, std::ptrdiff_t{0}};
+				accept_or_drain_if_deferred();
+				return std::pair{error_response::accept, std::ptrdiff_t{0}};
+			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
+				error_response const err_res = return_from_raise(frame);
+				if (err_res >= error_response::backtrack)
+					return std::pair{err_res, std::ptrdiff_t{1}};
+				accept_or_drain_if_deferred();
+				return std::pair{err_res, std::ptrdiff_t{0}};
+			} else {
+				throw bad_stack{};
+			}
+		}, stack_frames_.back());
+		if (ret_result.first != error_response::rethrow)
+			stack_frames_.pop_back();
+		return ret_result;
+	}
+
+	[[nodiscard]] error_response fail_one()
+	{
+		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
+			using frame_type = std::decay_t<decltype(frame)>;
+			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
+				if (frame.sr == (std::numeric_limits<std::size_t>::max)())
+					return error_response::backtrack;
+				registers_.sr = frame.sr;
+				registers_.rc = frame.rc;
+				registers_.ri = frame.ri;
+				registers_.pc = frame.pc;
+				return error_response::accept;
+			} else if constexpr (std::is_same_v<frame_type, call_frame>) {
+				--registers_.cd;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, capture_frame>) {
+				--registers_.ci;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, condition_frame>) {
+				environment_->set_condition(frame.name, frame.value);
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
+				--registers_.cd;
+				--registers_.ci;
+				if (frame.sra == parser_base::lrfailcode)
+					return error_response::backtrack;
+				registers_.sr = frame.sra;
+				registers_.rc = restore_responses_after(frame.rcr, frame.responses);
+				registers_.pc = frame.pcr;
+				return error_response::accept;
+			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
+				registers_.sr = frame.sr;
+				registers_.rc = frame.rc;
+				registers_.pc = frame.pc;
+				return return_from_raise(frame);
+			} else if constexpr (std::is_same_v<frame_type, recover_frame>) {
+				registers_.rh = frame.rh;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, report_frame>) {
+				registers_.eh = frame.eh;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, symbol_frame>) {
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, symbol_table_frame>) {
+				environment_->symbols_.swap(frame);
+				return error_response::backtrack;
+			} else {
+				static_assert(detail::always_false_v<frame_type>, "non-exhaustive visitor!");
+			}
+		}, stack_frames_.back());
+		stack_frames_.pop_back();
+		return fail_result;
+	}
+
+	[[nodiscard]] bool fail(std::ptrdiff_t fail_count)
+	{
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		do {
+			if (stack_frames_.empty())
+				return false;
+			error_response const fail_result = fail_one();
+			if (fail_result >= error_response::backtrack)
+				continue;
+			if (fail_result == error_response::halt)
+				return false;
+			if (fail_result < error_response::accept)
+				success_ = false;
+			--fail_count;
+		} while (fail_count > 0);
+		pop_responses_after(registers_.rc);
+		return true;
+	}
+
+	[[nodiscard]] bool unwind(std::size_t unwind_count)
+	{
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		for (std::size_t i = 0; i < unwind_count; ++i) {
+			if (stack_frames_.empty())
+				return false;
+			error_response const fail_result = fail_one();
+			if (fail_result == error_response::halt)
+				return false;
+			if (fail_result < error_response::accept)
+				success_ = false;
+		}
+		return true;
+	}
+
 	void accept()
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		do_accept(match(), subject());
-	}
-
-	void accept_if_deferred()
-	{
-		--registers_.ci;
-		if (registers_.ci == lug::registers::cut_deferred_flag) {
-			registers_.ci &= ~lug::registers::cut_deferred_flag;
-			accept();
-		}
+		auto const mat = match();
+		auto const sub = subject();
+		environment_->set_match_and_subject(mat, sub);
+		do_accept(mat);
 	}
 
 	void drain()
 	{
 		input_source_.drain_buffer(registers_.sr);
-		do_drain();
+		do_drain(input_source_.buffer());
+	}
+
+	void accept_or_drain_if_deferred()
+	{
+		if ((registers_.ci & lug::registers::count_mask) == 0)
+		{
+			bool const should_cut = (registers_.ci & lug::registers::inhibited_flag) != 0;
+			bool const should_accept = (registers_.ci & lug::registers::ignore_errors_flag) != 0;
+			if (should_cut || should_accept) {
+				registers_.ci = 0;
+				registers_.mr = (std::max)(registers_.mr, registers_.sr);
+				auto const mat = match();
+				auto const sub = subject();
+				environment_->set_match_and_subject(mat, sub);
+				if ((should_cut && success_) || should_accept)
+					do_accept(mat);
+				if (should_cut)
+					drain();
+			}
+		}
+	}
+
+	void reset()
+	{
+		input_source_.drain_buffer(registers_.sr);
+		do_reset(input_source_.buffer());
 	}
 
 public:
 	basic_parser(lug::grammar const& g, lug::environment& e) : parser_base{g, e} {}
 	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
 	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
+	[[nodiscard]] std::string_view max_match() const noexcept { return input_source_.buffer().substr(0, registers_.mr); }
+	[[nodiscard]] std::string_view max_subject() const noexcept { return input_source_.buffer().substr(registers_.mr, input_source_.buffer().size() - registers_.mr); }
 	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
 	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
@@ -1756,22 +2313,23 @@ public:
 	bool parse()
 	{
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
-		program const& prog = grammar_->program();
-		if (prog.instructions.empty())
+		if (program_->instructions.empty() || program_->data.empty())
 			throw bad_grammar{};
-		drain();
-		registers_.pc = 0;
-		instruction const* const instructions{prog.instructions.data()};
-		char const* const data{prog.data.data()};
-		std::ptrdiff_t fc{0};
-		bool result{false};
-		bool done{false};
-		while (!done) {
-			instruction const instr{instructions[registers_.pc++]};
-			std::string_view const str{data + instr.offset32, instr.immediate16};
+		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
+		std::ptrdiff_t fail_count{0};
+		reset();
+		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < program_->instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
+			instruction const instr{program_->instructions[instr_index]};
+			std::string_view const str{program_->data.data() + instr.offset32, instr.immediate16};
 			switch (instr.op) {
+				case opcode::jump: {
+					registers_.pc += instr.offset32;
+				} break;
 				case opcode::choice: {
-					stack_frames_.emplace_back(std::in_place_type<backtrack_frame>, registers_.sr - instr.immediate8, registers_.rc, registers_.pc + instr.offset32);
+					auto const predicate_inhibited_flag = static_cast<std::size_t>(instr.immediate8) << lug::registers::inhibited_shift;
+					auto const predicate_frame_mask = static_cast<std::size_t>(detail::sar(static_cast<std::ptrdiff_t>(predicate_inhibited_flag), lug::registers::inhibited_shift)) >> lug::registers::flags_count;
+					stack_frames_.emplace_back(std::in_place_type<backtrack_frame>, (registers_.sr - instr.immediate16), registers_.rc, registers_.ri, (registers_.pc + instr.offset32));
+					registers_.ri = (stack_frames_.size() & predicate_frame_mask) | (registers_.ri & ~predicate_frame_mask) | predicate_inhibited_flag;
 				} break;
 				case opcode::commit: {
 					commit<opcode::commit>(instr.offset32);
@@ -1782,37 +2340,77 @@ public:
 				case opcode::commit_partial: {
 					commit<opcode::commit_partial>(instr.offset32);
 				} break;
-				case opcode::jump: {
-					registers_.pc += instr.offset32;
+				case opcode::accept: {
+					registers_.ci |= static_cast<std::size_t>(instr.immediate8) << lug::registers::ignore_errors_shift;
+					accept_or_drain_if_deferred();
 				} break;
 				case opcode::call: {
-					fc = call_into(instr.immediate16, instr.offset32);
+					fail_count = call_into(instr.immediate16, instr.offset32);
 				} break;
 				case opcode::ret: {
-					if (return_from())
-						accept_if_deferred();
+					auto const [ret_response, ret_fail_count] = return_from_call();
+					if (ret_response == error_response::halt)
+						return false;
+					if (ret_response < error_response::accept)
+						success_ = false;
+					fail_count = ret_fail_count;
 				} break;
 				case opcode::fail: {
-					fc = static_cast<std::ptrdiff_t>(instr.immediate8);
+					fail_count = static_cast<std::ptrdiff_t>(instr.immediate8);
 				} break;
-				case opcode::cut: {
-					if (registers_.ci == 0) {
-						accept();
-						drain();
-					} else {
-						registers_.ci |= lug::registers::cut_deferred_flag;
+				case opcode::raise: {
+					std::ptrdiff_t const recovery_handler{registers_.rh};
+					if (instr.immediate8 != 0) {
+						if (stack_frames_.empty())
+							throw bad_stack{};
+						registers_.rh = std::get<recover_frame>(stack_frames_.back()).rh;
+						stack_frames_.pop_back();
 					}
+					if ((registers_.ri & lug::registers::inhibited_flag) != 0) {
+						if (!unwind((stack_frames_.size() - (registers_.ri & lug::registers::count_mask))))
+							return false;
+						fail_count = 1;
+						break;
+					}
+					stack_frames_.emplace_back(std::in_place_type<raise_frame>, str, registers_.sr, registers_.rc, registers_.eh, registers_.pc);
+					++registers_.cd;
+					++registers_.ci;
+					if (recovery_handler < 0) {
+						fail_count = 1;
+						break;
+					}
+					registers_.rr = error_response::resume;
+					registers_.pc = recovery_handler;
 				} break;
-				case opcode::halt: {
-					accept();
-					result = done = true;
+				case opcode::recover_push: {
+					stack_frames_.emplace_back(std::in_place_type<recover_frame>, registers_.rh);
+					registers_.rh = registers_.pc + instr.offset32;
+				} break;
+				case opcode::recover_pop: {
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					registers_.rh = std::get<recover_frame>(stack_frames_.back()).rh;
+					stack_frames_.pop_back();
+				} break;
+				case opcode::report_push: {
+					stack_frames_.emplace_back(std::in_place_type<report_frame>, registers_.eh);
+					registers_.eh = static_cast<std::ptrdiff_t>(instr.immediate16);
+				} break;
+				case opcode::recover_resp: {
+					registers_.rr = static_cast<error_response>(instr.immediate8);
+				} break;
+				case opcode::report_pop: {
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					registers_.eh = std::get<report_frame>(stack_frames_.back()).eh;
+					stack_frames_.pop_back();
 				} break;
 				case opcode::predicate: {
 					registers_.mr = (std::max)(registers_.mr, registers_.sr);
-					environment_->reset_match_and_subject(match(), subject());
-					bool const accepted = prog.predicates[instr.immediate16](*environment_);
+					environment_->set_match_and_subject(match(), subject());
+					bool const accepted = program_->predicates[instr.immediate16](*environment_);
 					pop_responses_after(registers_.rc);
-					fc = accepted ? 0 : 1;
+					fail_count = accepted ? 0 : 1;
 				} break;
 				case opcode::action: {
 					registers_.rc = push_response(registers_.cd, instr.immediate16);
@@ -1827,44 +2425,45 @@ public:
 					auto const sr0 = std::get<capture_frame>(stack_frames_.back()).sr;
 					auto const sr1 = registers_.sr;
 					stack_frames_.pop_back();
-					accept_if_deferred();
+					--registers_.ci;
 					if (sr0 > sr1) {
-						fc = 1;
+						fail_count = 1;
 						break;
 					}
 					registers_.rc = push_response(registers_.cd, instr.immediate16, syntax_range{sr0, sr1 - sr0});
+					accept_or_drain_if_deferred();
 				} break;
 				case opcode::match: {
-					fc = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::compare));
+					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::match_cf: {
-					fc = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: {
 					if constexpr (detail::input_source_has_options<InputSource>::value) {
-						if (((instr.immediate16 & 0x8000U) != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
-							fc = 1;
+						if ((instr.immediate16 != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
+							fail_count = 1;
 							break;
 						}
 					}
-					fc = match_single(registers_.sr, []{ return true; });
+					fail_count = match_single(registers_.sr, []{ return true; });
 				} break;
 				case opcode::match_any_of: {
-					fc = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
+					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
 				} break;
 				case opcode::match_all_of: {
-					fc = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
+					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
 				} break;
 				case opcode::match_none_of: {
-					fc = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
+					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
 				} break;
 				case opcode::match_set: {
-					fc = match_single(registers_.sr, [&runes = prog.runesets[instr.immediate16]](char32_t rune) {
+					fail_count = match_single(registers_.sr, [&runes = program_->runesets[instr.immediate16]](char32_t rune) {
 							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
 							return (interval != runes.end()) && (interval->first <= rune) && (rune <= interval->second); });
 				} break;
 				case opcode::match_eol: {
-					fc = match_single(registers_.sr, [](auto curr, auto last, auto& next, char32_t rune) {
+					fail_count = match_single(registers_.sr, [](auto curr, auto last, auto& next, char32_t rune) {
 							if ((curr == next) || ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None))
 								return false;
 							if (U'\r' == rune)
@@ -1873,7 +2472,7 @@ public:
 							return true; });
 				} break;
 				case opcode::condition_test: {
-					fc = (environment_->has_condition(str) == (instr.immediate8 != 0)) ? 0 : 1;
+					fail_count = (environment_->has_condition(str) == (instr.immediate8 != 0)) ? 0 : 1;
 				} break;
 				case opcode::condition_push: {
 					stack_frames_.emplace_back(std::in_place_type<condition_frame>, str, environment_->set_condition(str, instr.immediate8 != 0));
@@ -1881,36 +2480,36 @@ public:
 				case opcode::condition_pop: {
 					if (stack_frames_.empty())
 						throw bad_stack{};
-					auto& condition = std::get<condition_frame>(stack_frames_.back());
+					auto const& condition = std::get<condition_frame>(stack_frames_.back());
 					environment_->set_condition(condition.name, condition.value);
 					stack_frames_.pop_back();
 				} break;
 				case opcode::symbol_exists: {
-					fc = (environment_->has_symbol(str) == (instr.immediate8 != 0)) ? 0 : 1;
+					fail_count = (environment_->has_symbol(str) == (instr.immediate8 != 0)) ? 0 : 1;
 				} break;
 				case opcode::symbol_all: {
-					fc = match_symbol_all(registers_.sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
+					fail_count = match_symbol_all(registers_.sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_all_cf: {
-					fc = match_symbol_all(registers_.sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_symbol_all(registers_.sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_any: {
-					fc = match_symbol_any(registers_.sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
+					fail_count = match_symbol_any(registers_.sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_any_cf: {
-					fc = match_symbol_any(registers_.sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_symbol_any(registers_.sr, str, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_head: {
-					fc = match_symbol_head(registers_.sr, str, instr.immediate8, detail::identity{}, std::mem_fn(&basic_parser::compare));
+					fail_count = match_symbol_head(registers_.sr, str, instr.immediate8, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_head_cf: {
-					fc = match_symbol_head(registers_.sr, str, instr.immediate8, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_symbol_head(registers_.sr, str, instr.immediate8, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_tail: {
-					fc = match_symbol_tail(registers_.sr, str, instr.immediate8, detail::identity{}, std::mem_fn(&basic_parser::compare));
+					fail_count = match_symbol_tail(registers_.sr, str, instr.immediate8, detail::identity{}, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::symbol_tail_cf: {
-					fc = match_symbol_tail(registers_.sr, str, instr.immediate8, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_symbol_tail(registers_.sr, str, instr.immediate8, utf8::tocasefold, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::symbol_start: {
 					stack_frames_.emplace_back(std::in_place_type<symbol_frame>, str, registers_.sr);
@@ -1923,7 +2522,7 @@ public:
 					auto const sr1 = registers_.sr;
 					stack_frames_.pop_back();
 					if (sr0 > sr1) {
-						fc = 1;
+						fail_count = 1;
 						break;
 					}
 					environment_->add_symbol(symbol.name, std::string{input_source_.buffer().substr(sr0, sr1 - sr0)});
@@ -1941,25 +2540,19 @@ public:
 					environment_->symbols_.swap(std::get<symbol_table_frame>(stack_frames_.back()));
 					stack_frames_.pop_back();
 				} break;
-				default: registers_.mr = (std::max)(registers_.mr, registers_.sr); throw bad_opcode{};
+				default: throw bad_opcode{};
 			}
-			if (fc > 0) {
-				registers_.mr = (std::max)(registers_.mr, registers_.sr);
-				do {
-					if (done = (registers_.cf >= stack_frames_.size()); done) {
-						fc = 0;
-						break;
-					}
-					auto const fail_result = fail_one();
-					fc += fail_result.first;
-					if (fail_result.second)
-						accept_if_deferred();
-					--fc;
-				} while (fc > 0);
-				pop_responses_after(registers_.rc);
+			if (fail_count > 0) {
+				if (!fail(fail_count))
+					return false;
+				accept_or_drain_if_deferred();
+				fail_count = 0;
 			}
 		}
-		return result;
+		if (!success_)
+			return false;
+		accept();
+		return true;
 	}
 };
 
@@ -1979,6 +2572,34 @@ inline bool parse(InputIt first, InputIt last, grammar const& grmr)
 	return parse(first, last, grmr, envr);
 }
 
+template <class Rng, class = std::enable_if_t<
+		detail::is_char_input_range_v<Rng>
+		&& !std::is_same_v<std::decay_t<Rng>, std::string_view>
+		&& !std::is_same_v<std::decay_t<Rng>, std::istream>>>
+inline bool parse(Rng&& rng, grammar const& grmr, environment& envr) // NOLINT(cppcoreguidelines-missing-std-forward)
+{
+	return parse(rng.begin(), rng.end(), grmr, envr);
+}
+
+template <class Rng, class = std::enable_if_t<
+		detail::is_char_input_range_v<Rng>
+		&& !std::is_same_v<std::decay_t<Rng>, std::string_view>
+		&& !std::is_same_v<std::decay_t<Rng>, std::istream>>>
+inline bool parse(Rng&& rng, grammar const& grmr) // NOLINT(cppcoreguidelines-missing-std-forward)
+{
+	return parse(rng.begin(), rng.end(), grmr);
+}
+
+inline bool parse(std::string_view input, grammar const& grmr)
+{
+	return parse(input.cbegin(), input.cend(), grmr);
+}
+
+inline bool parse(std::string_view input, grammar const& grmr, environment& envr)
+{
+	return parse(input.cbegin(), input.cend(), grmr, envr);
+}
+
 inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
 {
 	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
@@ -1994,16 +2615,6 @@ inline bool parse(std::istream& input, grammar const& grmr, source_options opt =
 {
 	environment envr;
 	return parse(input, grmr, envr, opt);
-}
-
-inline bool parse(std::string_view sv, grammar const& grmr, environment& envr)
-{
-	return parse(sv.cbegin(), sv.cend(), grmr, envr);
-}
-
-inline bool parse(std::string_view sv, grammar const& grmr)
-{
-	return parse(sv.cbegin(), sv.cend(), grmr);
 }
 
 inline bool parse(grammar const& grmr, environment& envr)
@@ -2026,10 +2637,10 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 	rule const Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
 	rule const Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
 	rule const Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.str()); }
-	           | str("[:") > +(!chr(':') > any) > str(":]")   <[](generator& g, syntax const& x) { g.bracket_class(x.str().substr(2, x.range().size - 4)); }
-	           | any                                          <[](generator& g, syntax const& x) { g.bracket_range(x.str(), x.str()); };
+			   | str("[:") > +(!chr(':') > any) > str(":]")   <[](generator& g, syntax const& x) { g.bracket_class(x.str().substr(2, x.range().size - 4)); }
+			   | any                                          <[](generator& g, syntax const& x) { g.bracket_range(x.str(), x.str()); };
 	rule const Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
-	           > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
+			   > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
 	rule const Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.str()); };
 	// NOLINTEND(bugprone-chained-comparison)
 	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
@@ -2038,7 +2649,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 LUG_DIAGNOSTIC_POP
 
 template <class M>
-inline auto basic_regular_expression::evaluate(encoder& d, M const& m) const -> M const&
+[[nodiscard]] inline auto basic_regular_expression::evaluate(encoder& d, M const& m) const -> M const&
 {
 	if (program_->instructions.empty()) {
 		static grammar const grmr = make_grammar();
