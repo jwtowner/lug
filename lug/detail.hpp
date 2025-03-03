@@ -1,5 +1,5 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
-// Copyright (c) 2017-2024 Jesse W. Towner
+// Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
 #ifndef LUG_INCLUDE_LUG_DETAIL_HPP
