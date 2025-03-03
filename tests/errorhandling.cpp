@@ -11,7 +11,7 @@
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-void test_basic_error_no_recovery()
+void test_simple_error_no_recovery()
 {
 	using namespace lug::language;
 
@@ -40,7 +40,7 @@ void test_basic_error_no_recovery()
 	assert(!lug::parse("XXC", G, E));    // Invalid prefix should fail even with valid C
 }
 
-void test_basic_error_recovery()
+void test_simple_error_recovery()
 {
 	using namespace lug::language;
 
@@ -57,7 +57,7 @@ void test_basic_error_recovery()
 	assert(!lug::parse("APQR", G)); // Test invalid input with no recovery - should fail
 }
 
-void test_basic_error_handling()
+void test_simple_error_handling()
 {
 	using namespace lug::language;
 
@@ -136,7 +136,7 @@ void test_calculator_errors_no_recovery()
 	       '+' > r%Prod[FOperand]   <[&]{ l += r; }
 	     | '-' > r%Prod[FOperand]   <[&]{ l -= r; }
 	     )                          <[&]{ return l; };
-	Stmt = n%Expr[FNoExpr] > (
+	Stmt = Expr[FNoExpr] > (
 	       &')'_cx > raise(FLParen)
 	     | eoi[FInvalid]
 	     )
@@ -149,9 +149,10 @@ void test_calculator_errors_no_recovery()
 	auto const evaluate = [&](std::string_view input) -> std::optional<double> {
 		n = 0.0; e = 0.0; l = 0.0; r = 0.0;
 		error_output.str(""s);
-		if (!lug::parse(input, G))
+		lug::environment E;
+		if (!lug::parse(input, G, E))
 			return std::nullopt;
-		return n;
+		return E.pop_attribute<double>();
 	};
 
 	// Test valid input
@@ -224,7 +225,7 @@ void test_calculator_errors_with_recovery_resume()
 	       '+' > r%Prod[FOperand]   <[&]{ l += " + " + r; }
 	     | '-' > r%Prod[FOperand]   <[&]{ l += " - " + r; }
 	     )                          <[&]{ return l; };
-	Stmt = e%Expr[FNoExpr] > (
+	Stmt = Expr[FNoExpr] > (
 	       &')'_cx > raise(FLParen)
 	     | eoi[FInvalid]
 	     ) > ( when("evaluate-errors") > accept | nop ) // Force acceptance of semantic actions
@@ -243,8 +244,9 @@ void test_calculator_errors_with_recovery_resume()
 		error_output.str(""s);
 
 		// Parse the input string and return evaluated output and parse result
-		bool const m = lug::parse(input, G);
-		return std::pair{e, m};
+		lug::environment E;
+		bool const m = lug::parse(input, G, E);
+		return std::pair{E.pop_attribute<std::string>(), m};
 	};
 
 	// Test valid input
@@ -329,7 +331,7 @@ void test_calculator_errors_with_recovery_accept()
 	       '+' > r%Prod[FOperand]   <[&]{ l += " + " + r; }
 	     | '-' > r%Prod[FOperand]   <[&]{ l += " - " + r; }
 	     )                          <[&]{ return l; };
-	Stmt = e%Expr[FNoExpr] > (
+	Stmt = Expr[FNoExpr] > (
 	       &')'_cx > raise(FLParen)
 	     | eoi[FInvalid]
 	     )
@@ -348,8 +350,9 @@ void test_calculator_errors_with_recovery_accept()
 		error_output.str(""s);
 
 		// Parse the input string and return evaluated output and parse result
-		bool const m = lug::parse(input, G);
-		return std::pair{e, m};
+		lug::environment E;
+		bool const m = lug::parse(input, G, E);
+		return std::pair{E.pop_attribute<std::string>(), m};
 	};
 
 	// Test valid input
@@ -397,9 +400,9 @@ void test_calculator_errors_with_recovery_accept()
 int main()
 {
 	try {
-		test_basic_error_no_recovery();
-		test_basic_error_recovery();
-		test_basic_error_handling();
+		test_simple_error_no_recovery();
+		test_simple_error_recovery();
+		test_simple_error_handling();
 		test_calculator_errors_no_recovery();
 		test_calculator_errors_with_recovery_resume();
 		test_calculator_errors_with_recovery_accept();
