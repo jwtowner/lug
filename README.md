@@ -81,14 +81,14 @@ int main() {
     // Define a rule that adds the terms
     Expr = l%Term > *('+' > r%Term <[&]{ l += r; }) <[&]{ return l; };
 
-    // Create grammar starting with an Expr and finishes by matching end-of-input
+    // Create grammar that matches an arithmetic expression followed by end-of-input
     auto grammar = start(Expr > eoi);
 
     // Parse and evaluate the sample input
     std::string input = "2 * (3 + 4)";
     lug::environment env;
     if (!lug::parse(input, grammar, env)) {
-        std::cout << "Parse failed\n";
+        std::cout << "parse failed\n";
         return -1;
     }
 
