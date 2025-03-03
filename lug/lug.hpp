@@ -2244,8 +2244,10 @@ class basic_parser : public parser_base
 
 	void drain()
 	{
-		input_source_.drain_buffer(registers_.sr);
-		do_drain(input_source_.buffer());
+		if (registers_.sr > 0) {
+			input_source_.drain_buffer(registers_.sr);
+			do_drain(input_source_.buffer());
+		}
 	}
 
 	void accept_or_drain_if_deferred()
@@ -2270,7 +2272,8 @@ class basic_parser : public parser_base
 
 	void reset()
 	{
-		input_source_.drain_buffer(registers_.sr);
+		if (registers_.sr > 0)
+			input_source_.drain_buffer(registers_.sr);
 		do_reset(input_source_.buffer());
 	}
 
