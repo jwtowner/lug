@@ -196,23 +196,10 @@ void test_calculator_errors_with_recovery_resume()
 		return error_response::resume;
 	};
 
-	// Helper function that creates a recovery rule which consumes input until it finds a pattern
-	// Used to synchronize the parser after an error by skipping characters until a synchronization point
-	auto const sync = [](auto pattern) {
-		return noskip[*(!(pattern) > any)];
-	};
-
-	// Similar to sync, but also returns a specified error result value
-	// This allows error recovery to both skip invalid input and provide a placeholder value
-	// for the failed rule to allow parsing to continue
-	auto const sync_with_result = [](auto pattern, auto default_value) {
-		return noskip[*(!(pattern) > any) < [dv = std::move(default_value)]{ return dv; }];
-	};
-
 	// Define labeled failures with recovery rules
-	failure FNoExpr{"missing expression", sync_with_result(nop, "<MISSING-EXPRESSION>"s) };
-	failure FExpr{"expected an expression after opening parenthesis", sync_with_result("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync_with_result("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FNoExpr{"missing expression", sync(nop, "<MISSING-EXPRESSION>"s)};
+	failure FExpr{"expected an expression after opening parenthesis", sync("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
 	failure FRParen{"expected a closing parenthesis after expression", sync(')'_cx)};
 	failure FLParen{"closing parenthesis with no matching opening parenthesis"};
 	failure FInvalid{"invalid character"};
@@ -308,31 +295,17 @@ void test_calculator_errors_with_recovery_accept()
 
 	// Define error handler that captures output
 	std::ostringstream error_output;
-	auto const error_handler = [&error_output](error_context& e) -> error_response {
+	auto const error_handler = [&error_output](error_context& e) {
 		error_output << "Error at line " << e.position_begin().line
 		             << ", column " << e.position_begin().column
 		             << ": " << e.label() << "\n";
-		return error_response::accept;
-	};
-
-	// Helper function that creates a recovery rule which consumes input until it finds a pattern
-	// Used to synchronize the parser after an error by skipping characters until a synchronization point
-	auto const sync = [](auto pattern) {
-		return noskip[*(!(pattern) > any) ^ error_response::accept];
-	};
-
-	// Similar to sync, but also returns a specified error result value
-	// This allows error recovery to both skip invalid input and provide a placeholder value
-	// for the failed rule to allow parsing to continue
-	auto const sync_with_result = [](auto pattern, auto default_value) {
-		return noskip[*(!(pattern) > any) < [dv = std::move(default_value)]{ return dv; } ^ error_response::accept];
 	};
 
 	// Define labeled failures with recovery rules
-	failure FNoExpr{"missing expression", sync_with_result(nop, "<MISSING-EXPRESSION>"s) };
-	failure FExpr{"expected an expression after opening parenthesis", sync_with_result("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync_with_result("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
-	failure FRParen{"expected a closing parenthesis after expression", sync(')'_cx)};
+	failure FNoExpr{"missing expression", sync<error_response::accept>(nop, "<MISSING-EXPRESSION>"s) };
+	failure FExpr{"expected an expression after opening parenthesis", sync<error_response::accept>("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync<error_response::accept>("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FRParen{"expected a closing parenthesis after expression", sync<error_response::accept>(')'_cx)};
 	failure FLParen{"closing parenthesis with no matching opening parenthesis", nop ^ error_response::accept};
 	failure FInvalid{"invalid character", nop ^ error_response::accept};
 

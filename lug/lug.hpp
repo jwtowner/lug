@@ -51,7 +51,7 @@ template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same
 template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
 template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> inline constexpr bool is_recovery_expression_v = is_encoder_expression_v<E> || std::is_same_v<rule, std::decay_t<E>>;
-template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_r_v<error_response, std::decay_t<H>, error_context&>;
+template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_v<std::decay_t<H>, error_context&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
@@ -789,7 +789,10 @@ struct report_expression : unary_encoder_expression_interface<report_expression<
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
-		d.encode(opcode::report_push, error_handler{handler});
+		if constexpr (std::is_invocable_r_v<error_response, Handler, error_context&>)
+			d.encode(opcode::report_push, error_handler{handler});
+		else
+			d.encode(opcode::report_push, error_handler{[h = handler](error_context& e) -> error_response { (void)h(e); return e.recovery_response(); }});
 		auto m2 = this->e1.evaluate(d, m);
 		d.encode(opcode::report_pop);
 		return m2;
@@ -1558,6 +1561,24 @@ inline constexpr struct
 	template <class Recovery, class = std::enable_if_t<is_recovery_expression_v<Recovery>>> [[nodiscard]] constexpr auto operator()(std::string_view label, Recovery&& recovery) const noexcept { return raise_expression{failure{label, std::forward<Recovery>(recovery)}}; }
 }
 raise{};
+
+template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
+auto sync(Pattern const& pattern)
+{
+	return noskip[*(!pattern > any) ^ Response];
+}
+
+template <error_response Response = error_response::resume, class Pattern, class DefaultValue, class = std::enable_if_t<is_expression_v<Pattern>>>
+auto sync(Pattern const& pattern, DefaultValue&& default_value)
+{
+	auto default_value_action = [value = std::forward<DefaultValue>(default_value)] {
+		if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+			return value();
+		else
+			return value;
+	};
+	return noskip[*(!pattern > any) < std::move(default_value_action) ^ Response];
+}
 
 class implicit_space_rule
 {
