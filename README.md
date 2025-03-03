@@ -64,7 +64,7 @@ int main() {
     using namespace lug::language;
 
     // Define attribute variables for the recursive rules
-    int l{0}, r{0};
+    int l = 0, r = 0;
 
     // Define a lexical rule that matches one or more digits and converts them to an integer
     auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
