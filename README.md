@@ -60,7 +60,7 @@ The following example demonstrates an arithmetic expression evaluator supporting
 #include <lug/lug.hpp>
 
 int main() {
-    // Import the lug::language namespace
+    // Import the namespace containing the embedded DSL operators and types
     using namespace lug::language;
 
     // Define attribute variables for the recursive rules
