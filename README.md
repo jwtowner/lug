@@ -14,7 +14,7 @@ Features
 - Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping.
 - Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion.
 - Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard.
-- Error handling and recovery with composable labeled failures, recovery rules and error handlers.
+- Error handling and recovery with labeled failures, recovery rules and error handlers.
 - Automatic tracking of line and column numbers, with customizable tab width and alignment.
 - Header-only library utilizing C++17 language and library features. Forward compatible with C++20 and C++23.
 - Relatively small with the goal of keeping total line count across all header files under 6000 lines of terse code.

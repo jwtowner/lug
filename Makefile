@@ -23,7 +23,7 @@ SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # tests
-TESTS = attributes captures conditions errors leftrecursion nonterminals parser predicates symbols terminals
+TESTS = accept_and_cut attributes captures conditions errors leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 
