@@ -1049,13 +1049,12 @@ inline constexpr directive_modifier<directives::none, directives::none, directiv
 inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
 inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
 
+struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
+struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
 struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
 struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 1, 0); d.encode(opcode::fail, 0, 2); return m; } };
 struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
-struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
-struct accept_then_cut_expression : terminal_encoder_expression_interface<accept_then_cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>((registers::inhibited_flag | registers::ignore_errors_flag) >> registers::ignore_errors_shift)); return m; } };
-struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
 
 template <opcode Op>
 struct match_class_combinator
@@ -1412,8 +1411,8 @@ inline constexpr directive_modifier<directives::caseless, directives::none, dire
 inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
 inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
 inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
-inline constexpr nop_expression nop{}; inline constexpr eps_expression eps{}; inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{};
-inline constexpr accept_expression accept{}; inline constexpr accept_then_cut_expression accept_then_cut{}; inline constexpr cut_expression cut{}; 
+inline constexpr accept_expression accept{}; inline constexpr cut_expression cut{}; inline constexpr nop_expression nop{};
+inline constexpr eps_expression eps{}; inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator<opcode::match_all_of> all{}; inline constexpr match_class_combinator<opcode::match_none_of> none{};
 inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
 inline constexpr ctype_expression<ctype::upper> upper{}; inline constexpr ctype_expression<ctype::digit> digit{}; inline constexpr ctype_expression<ctype::xdigit> xdigit{};
@@ -2057,10 +2056,10 @@ class basic_parser : public parser_base
 		--registers_.cd;
 		--registers_.ci;
 		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
-		if ((registers_.sr <= frame.sr) && (rec_res != error_response::halt)) {
+		if (registers_.pc == frame.pc) {
 			registers_.sr = frame.sr;
 			(void)match_default_recovery(registers_.sr);
-			rec_res = (frame.sr < registers_.sr) ? error_response::resume : error_response::halt;
+			rec_res = error_response::halt;
 		}
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		auto const sr0 = frame.sr;
@@ -2158,6 +2157,7 @@ class basic_parser : public parser_base
 			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
 				registers_.sr = frame.sr;
 				registers_.rc = frame.rc;
+				registers_.pc = frame.pc;
 				return return_from_raise(frame);
 			} else if constexpr (std::is_same_v<frame_type, recover_frame>) {
 				registers_.rh = frame.rh;
@@ -2215,8 +2215,8 @@ class basic_parser : public parser_base
 	void accept()
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		const auto mat = match();
-		const auto sub = subject();
+		auto const mat = match();
+		auto const sub = subject();
 		environment_->set_match_and_subject(mat, sub);
 		do_accept(mat);
 	}
@@ -2236,8 +2236,8 @@ class basic_parser : public parser_base
 			if (should_cut || should_accept) {
 				registers_.ci = 0;
 				registers_.mr = (std::max)(registers_.mr, registers_.sr);
-				const auto mat = match();
-				const auto sub = subject();
+				auto const mat = match();
+				auto const sub = subject();
 				environment_->set_match_and_subject(mat, sub);
 				if ((should_cut && success_) || should_accept)
 					do_accept(mat);
