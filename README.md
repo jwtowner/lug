@@ -37,7 +37,7 @@ It is based on research introduced in the following papers:
 
 Building
 ---
-As a header-only library, lug itself does not require any build process.
+As a self-contained header-only library, lug itself does not require any build process.
 To use lug, make sure to include the `lug` header directory in your project's include path.
 Once that is done, you are ready to start using lug in your code.
 To build the sample programs and unit tests both [CMake](https://cmake.org/) and [make](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/make.html) are supported.
@@ -49,6 +49,61 @@ As a baseline, the following compiler versions are known to work with lug.
 | Clang 14.0.0 (March 2022) or later | -std=c++17 or -std=gnu++17 |
 | GCC 9.5 (May 2022) or later | -std=c++17 or -std=gnu++17 |
 | Microsoft Visual C++ 2019 16.11 (August 2021) or later | Platform Toolset: Visual Studio 2019 Toolset (v142), Language Standard: ISO C++17 Standard (/std:c++17) |
+
+Demonstration
+---
+Here's a simple example that parses and evaluates basic arithmetic expressions containing addition and multiplication.
+
+```cpp
+// Include the lug library header file
+#include <lug/lug.hpp>
+
+int main() {
+    // Import the lug::language namespace
+    using namespace lug::language;
+
+    // Define attribute variables for the recursive rules
+    int l{0}, r{0};
+
+    // Define a lexical rule that matches one or more digits and converts them to an integer
+    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
+
+    // Forward declaration for recursive rules
+    rule Expr;
+
+    // Define a rule that matches a number or a parenthesized expression
+    rule Factor = Number | ('(' > Expr > ')');
+
+    // Define a rule that matches a factor followed by zero or more '*' and a factor, and multiplies the factors
+    rule Term = l%Factor > *('*' > r%Factor <[&]{ l *= r; }) <[&]{ return l; };
+
+    // Define a rule that matches a term followed by zero or more '+' and a term, and adds the terms
+    Expr = l%Term > *('+' > r%Term <[&]{ l += r; }) <[&]{ return l; };
+
+    // Create grammar starting with an Expr and finishes by matching end-of-input
+    auto grammar = start(Expr > eoi);
+
+    // Parse and evaluate the sample input
+    std::string input = "2 * (3 + 4)";
+    lug::environment env;
+    if (!lug::parse(input, grammar, env)) {
+        std::cout << "Parse failed\n";
+        return -1;
+    }
+
+    // Pop the result from the environment and display it to the console
+    int result = env.pop_attribute<int>();
+    std::cout << input << " = " << result << "\n"; // Outputs: 2 * (3 + 4) = 14
+    return 0;
+}
+```
+
+The above example demonstrates:
+- Lexical rules with semantic actions to convert matched text into values
+- Recursive grammar rules for handling nested expressions
+- Operator precedence through hierarchical rule structure (multiplication before addition)
+- Attribute capture and propagation for expression evaluation
+- Environment management for storing and retrieving parsed results
 
 Syntax Reference
 ---
