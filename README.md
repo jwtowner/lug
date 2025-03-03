@@ -92,8 +92,8 @@ Syntax Reference
 | --- | --- |
 | `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
 | `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response::resume`. |
-| `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value `r`. |
-| `sync<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response` enumerator value `r`. |
+| `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value *r*. |
+| `sync<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
 
 | Terminal | Description |
 | --- | --- |
