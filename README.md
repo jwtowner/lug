@@ -101,20 +101,23 @@ int main() {
 
 To compile the demonstration with GCC, save the code above to a file named `demo.cpp` and use the following command,
 making sure to substitute `<path-to-lug>` with the location of `lug` on your filesystem:
+
 `g++ -std=c++17 -I<path-to-lug> -o demo demo.cpp`
 
 Then run the demonstration executable with the following command:
+
 `./demo`
 
 You should see the output:
+
 `2 * (3 + 4) = 14`
 
-The above example demonstrates:
-- Lexical rules with semantic actions to convert matched text into values
-- Recursive grammar rules for handling nested expressions
-- Operator precedence through hierarchical rule structure (multiplication before addition)
-- Attribute capture and propagation for expression evaluation
-- Environment management for storing and retrieving parsed results
+In summary, the above example demonstrates:
+- Lexical rules with semantic actions to convert matched text into values.
+- Recursive grammar rules for handling nested expressions.
+- Operator precedence through hierarchical rule structure (multiplication before addition).
+- Attribute capture and propagation for expression evaluation.
+- Environment management for storing and retrieving parsed results.
 
 Syntax Reference
 ---
