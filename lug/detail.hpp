@@ -192,6 +192,7 @@ template <class T, class U> struct member_pointer_value<T U::*> { using type = T
 template <class ObjectIterator, class MemberPtrType, MemberPtrType MemberPtr>
 class member_access_iterator
 {
+	ObjectIterator object_;
 public:
 	using base_type = ObjectIterator;
 	using object_type = typename member_pointer_object<MemberPtrType>::type;
@@ -222,8 +223,6 @@ public:
 	[[nodiscard]] friend constexpr member_access_iterator operator+(difference_type n, member_access_iterator const& x) noexcept { return member_access_iterator{x.object_ + n}; }
 	[[nodiscard]] friend constexpr member_access_iterator operator-(member_access_iterator const& x, difference_type n) noexcept { return member_access_iterator{x.object_ - n}; }
 	[[nodiscard]] friend constexpr difference_type operator-(member_access_iterator const& x, member_access_iterator const& y) noexcept { return x.object_ - y.object_; }
-private:
-	ObjectIterator object_;
 };
 
 template <class MemberPtrType, MemberPtrType MemberPtr, class ObjectIterator>
@@ -376,11 +375,11 @@ template <class Error, class T, class U, class = std::enable_if_t<std::is_integr
 	return x + y;
 }
 
-template<class InputIt, class UnaryPredicate>
+template <class InputIt, class UnaryPredicate>
 [[nodiscard]] constexpr InputIt escaping_find_if(InputIt first, InputIt last, UnaryPredicate pred)
 {
 	for ( ; first != last; ++first) {
-		const int status = pred(*first);
+		int const status = pred(*first);
 		if (status > 0)
 			return first;
 		if (status < 0)

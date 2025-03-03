@@ -420,10 +420,6 @@ class error_context
 	error_response recovery_response_;
 public:
 	error_context(lug::environment& envr, lug::syntax const& syn, std::string_view lab, error_response resp) : envr_{envr}, syntax_{syn}, label_{lab}, recovery_response_{resp} {}
-	error_context(error_context const&) = delete;
-	error_context& operator=(error_context const&) = delete;
-	error_context(error_context&&) = delete;
-	error_context& operator=(error_context&&) = delete;
 	~error_context() = default;
 	[[nodiscard]] lug::environment& environment() const noexcept { return envr_.get(); }
 	[[nodiscard]] lug::syntax const& syntax() const noexcept { return syntax_; }
@@ -432,6 +428,10 @@ public:
 	[[nodiscard]] syntax_position position_begin() const { return environment().position_begin(syntax_); }
 	[[nodiscard]] syntax_position position_end() const { return environment().position_end(syntax_); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range() const { return environment().position_range(syntax_); }
+	error_context(error_context const&) = delete;
+	error_context& operator=(error_context const&) = delete;
+	error_context(error_context&&) = delete;
+	error_context& operator=(error_context&&) = delete;
 };
 
 template <class Recovery>
