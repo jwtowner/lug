@@ -89,6 +89,7 @@ Syntax Reference
 | `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
 
 | Factory | Description |
+| --- | --- |
 | `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*. |
 | `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns the attribute value *v*. |
 | `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value `r`. |
