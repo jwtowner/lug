@@ -76,22 +76,22 @@ Syntax Reference
 
 | Control | Description |
 | --- | --- |
-| `cased⁠[e]` | Case sensitive matching for the subexpression *e* (the default) |
-| `caseless⁠[e]` | Case insensitive matching for subexpression *e* |
-| `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default) |
-| `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace |
-| `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping |
-| `on(C)⁠[e]` | Sets the condition *C* to true for the scope of subexpression *e* |
-| `off(C)⁠[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default) |
-| `symbol(S)⁠[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e* |
-| `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e* |
-| `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference |
-| `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S* |
+| `cased⁠[e]` | Case sensitive matching for the subexpression *e* (the default). |
+| `caseless⁠[e]` | Case insensitive matching for subexpression *e*. |
+| `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default). |
+| `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace. |
+| `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping. |
+| `on(C)⁠[e]` | Sets the condition *C* to true for the scope of subexpression *e*. |
+| `off(C)⁠[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default). |
+| `symbol(S)⁠[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e*. |
+| `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*. |
+| `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference. |
+| `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S*. |
 
 | Factory | Description |
 | --- | --- |
-| `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*. |
-| `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns the attribute value *v*. |
+| `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
+| `sync(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response::resume`. |
 | `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value `r`. |
 | `sync<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the attribute value *v* into the attribute stack and returns `error_response` enumerator value `r`. |
 
