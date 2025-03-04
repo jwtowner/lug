@@ -151,14 +151,14 @@ public:
 	void repl()
 	{
 		lug::parser parser{grammar_, environment_};
-		parser.push_source([this](std::string& out) {
+		parser.push_source([this](std::string& out, lug::source_options opt) {
 			if (quit_)
 				return false;
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
 				out = lastline_->second;
 			} else {
-				if (stdin_tty_)
+				if ((opt & lug::source_options::interactive) != lug::source_options::none)
 					std::cout << "> " << std::flush;
 				if (!std::getline(std::cin >> std::ws, out))
 					return false;

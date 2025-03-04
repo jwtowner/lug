@@ -91,10 +91,6 @@ enum class opcode : std::uint_least8_t
 	symbol_tail_cf, symbol_start,   symbol_push,    raise
 };
 
-namespace auxcode {
-
-} // namespace auxcode
-
 struct alignas(std::uint_least64_t) instruction
 {
 	opcode op;
@@ -326,6 +322,7 @@ public:
 	void tab_width(std::uint_least32_t w) noexcept { tab_width_ = w; }
 	[[nodiscard]] std::uint_least32_t tab_alignment() const noexcept { return tab_alignment_; }
 	void tab_alignment(std::uint_least32_t a) noexcept { tab_alignment_ = a; }
+	[[nodiscard]] bool has_attributes() const noexcept { return !attribute_result_stack_.empty(); }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
@@ -409,6 +406,28 @@ public:
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
 		return std::any_cast<T>(detail::pop_back(attribute_result_stack_));
+	}
+
+	template <class T>
+	[[nodiscard]] T& top_attribute()
+	{
+		if (attribute_result_stack_.empty())
+			throw attribute_stack_error{};
+		T* const p = std::any_cast<T>(&attribute_result_stack_.back());
+		if (p == nullptr)
+			throw std::bad_any_cast{};
+		return *p;
+	}
+
+	template <class T>
+	[[nodiscard]] T const& top_attribute() const
+	{
+		if (attribute_result_stack_.empty())
+			throw attribute_stack_error{};
+		T const* const p = std::any_cast<T>(&attribute_result_stack_.back());
+		if (p == nullptr)
+			throw std::bad_any_cast{};
+		return *p;
 	}
 };
 
@@ -1697,7 +1716,7 @@ template <typename T, class InputFunc> struct input_source_has_push_source<T, In
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::string&)>, source_options>> sources_;
+	std::vector<std::pair<std::function<bool(std::string&, source_options)>, source_options>> sources_;
 	bool reading_{false};
 
 public:
@@ -1713,7 +1732,8 @@ public:
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		while (!sources_.empty() && text.empty()) {
 			text.clear();
-			bool const more = sources_.back().first(text);
+			auto const& [func, opt] = sources_.back();
+			bool const more = func(text, opt);
 			buffer_.insert(buffer_.end(), text.begin(), text.end());
 			if (!more)
 				sources_.pop_back();
@@ -1733,7 +1753,7 @@ public:
 		enqueue(rng.begin(), rng.end());
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&, source_options>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
@@ -1897,9 +1917,10 @@ protected:
 		error_response err_res{rec_res};
 		error_context err{*environment_, sx, frame.label, err_res};
 		auto handler_index = static_cast<std::size_t>(frame.eh);
+		auto const handler_count = program_->handlers.size();
 		auto next_frame = stack_frames_.rbegin();
 		auto const last_frame = stack_frames_.rend();
-		while (handler_index < program_->handlers.size()) {
+		while (handler_index < handler_count) {
 			err_res = program_->handlers[handler_index](err);
 			if (err_res != error_response::rethrow)
 				break;
@@ -1912,6 +1933,8 @@ protected:
 				}
 			}
 		}
+		--registers_.cd;
+		--registers_.ci;
 		if (err_res >= error_response::backtrack) {
 			registers_.sr = frame.sr;
 			registers_.rc = frame.rc;
@@ -2115,8 +2138,6 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
 	{
-		--registers_.cd;
-		--registers_.ci;
 		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
 		if (registers_.pc == frame.pc) {
 			registers_.sr = frame.sr;
@@ -2164,6 +2185,8 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] error_response fail_one()
 	{
+		if (stack_frames_.empty())
+			return error_response::halt;
 		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
 			using frame_type = std::decay_t<decltype(frame)>;
 			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
@@ -2220,8 +2243,6 @@ class basic_parser : public parser_base
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		do {
-			if (stack_frames_.empty())
-				return false;
 			error_response const fail_result = fail_one();
 			if (fail_result >= error_response::backtrack)
 				continue;
@@ -2239,8 +2260,6 @@ class basic_parser : public parser_base
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		for (std::size_t i = 0; i < unwind_count; ++i) {
-			if (stack_frames_.empty())
-				return false;
 			error_response const fail_result = fail_one();
 			if (fail_result == error_response::halt)
 				return false;
@@ -2620,15 +2639,22 @@ inline bool parse(std::string_view input, grammar const& grmr, environment& envr
 	return parse(input.cbegin(), input.cend(), grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options options = source_options::none)
 {
-	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
-		if (std::getline(input, line)) {
-			line.push_back('\n');
-			return true;
+	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& output, source_options opt) {
+		if (!input)
+			return false;
+		if ((opt & source_options::interactive) != source_options::none) {
+			if (std::getline(input, output)) {
+				output.push_back('\n');
+				return true;
+			}
+			return false;
 		}
-		return false;
-	}, opt).parse();
+		input.clear();
+		output = std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+		return input.bad();
+	}, options).parse();
 }
 
 inline bool parse(std::istream& input, grammar const& grmr, source_options opt = source_options::none)
