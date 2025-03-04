@@ -6,6 +6,7 @@
 #define LUG_INCLUDE_LUG_DETAIL_HPP
 
 #include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <functional>
 #include <iterator>
@@ -473,20 +474,24 @@ struct move_only_any_vtable_operations<void>
 	static constexpr std::type_info const& type() noexcept { return typeid(void); }
 };
 
+struct move_only_any_vtable
+{
+	using destroy_fn = void (*)(void*) noexcept;
+	using move_fn = void* (*)(void*, void*) noexcept;
+	using type_fn = std::type_info const& (*)() noexcept;
+	destroy_fn destroy;
+	move_fn move;
+	type_fn type;
+	constexpr move_only_any_vtable(destroy_fn d, move_fn m, type_fn t) noexcept : destroy{d}, move{m}, type{t} {}
+};
+
 class move_only_any
 {
 	template <class T> friend T* move_only_any_cast(move_only_any* operand) noexcept;
 	template <class T> friend T const* move_only_any_cast(move_only_any const* operand) noexcept;
 
-	struct vtable_t
-	{
-		void (*destroy)(void*) noexcept;
-		void* (*move)(void*, void*) noexcept;
-		std::type_info const& (*type)() noexcept;
-	};
-
 	template <class T>
-	static inline constexpr vtable_t const vtable_instance =
+	static inline constexpr move_only_any_vtable const vtable_instance
 	{
 		&move_only_any_vtable_operations<T>::destroy,
 		&move_only_any_vtable_operations<T>::move,
@@ -494,7 +499,7 @@ class move_only_any
 	};
 
 	alignas(move_only_any_buffer_align) char buffer_[move_only_any_buffer_size]{};
-	vtable_t const* vtable_{&vtable_instance<void>};
+	move_only_any_vtable const* vtable_{&vtable_instance<void>};
 	void* data_{nullptr};
 
 public:
