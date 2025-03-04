@@ -22,6 +22,8 @@ jobs:
             compiler: g++-12
           - os: ubuntu-24.04
             compiler: g++-13
+          - os: ubuntu-22.04
+            compiler: g++
           - os: windows-2022
             compiler: default
           - os: macos-latest
