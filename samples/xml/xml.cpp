@@ -1,5 +1,5 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
-// Copyright (c) 2017-2024 Jesse W. Towner
+// Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
@@ -30,11 +30,11 @@ public:
 		rule DTD = "<!" > *bre("[^>]") > '>';
 		rule SDDecl = str("standalone") > '=' > ("\"yes\""_sx | "'yes'"_sx | "\"no\""_sx | "'no'"_sx);
 		rule EncodingDecl = str("encoding") > '=' > ("\"UTF-8\""_sx | "'UTF-8'"_sx);
-		rule VersionInfo = str("version") > '=' > ("\"1.0\""_sx | "'1.0'"_sx);        
+		rule VersionInfo = str("version") > '=' > ("\"1.0\""_sx | "'1.0'"_sx);
 		rule Prolog = "<?xml" > VersionInfo > ~EncodingDecl > ~SDDecl > "?>";
 
 		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
-		grammar_ = start(File);
+		grammar_ = start(File > eoi);
 	}
 
 	bool parse_cin()

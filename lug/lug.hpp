@@ -1,5 +1,5 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
-// Copyright (c) 2017-2024 Jesse W. Towner
+// Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
 #ifndef LUG_INCLUDE_LUG_LUG_HPP
@@ -8,7 +8,6 @@
 #include <lug/error.hpp>
 #include <lug/utf8.hpp>
 
-#include <any>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -90,10 +89,6 @@ enum class opcode : std::uint_least8_t
 	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
 	symbol_tail_cf, symbol_start,   symbol_push,    raise
 };
-
-namespace auxcode {
-
-} // namespace auxcode
 
 struct alignas(std::uint_least64_t) instruction
 {
@@ -251,8 +246,8 @@ class environment
 	template <class> friend class basic_parser;
 
 	static inline std::vector<std::string> const empty_symbols_{};
-	std::vector<std::any> attribute_frame_stack_;
-	std::vector<std::any> attribute_result_stack_;
+	std::vector<detail::move_only_any> attribute_frame_stack_;
+	std::vector<detail::move_only_any> attribute_result_stack_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
@@ -271,11 +266,15 @@ class environment
 
 	void reset(std::string_view sub)
 	{
+		call_depth_ = 0;
+		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 		origin_ = position_at(match_.size());
 		set_match_and_subject(sub.substr(0, 0), sub);
+		attribute_frame_stack_.clear();
+		attribute_result_stack_.clear();
 		on_reset();
 	}
-	
+
 	void drain(std::string_view sub)
 	{
 		origin_ = position_at(match_.size());
@@ -326,6 +325,8 @@ public:
 	void tab_width(std::uint_least32_t w) noexcept { tab_width_ = w; }
 	[[nodiscard]] std::uint_least32_t tab_alignment() const noexcept { return tab_alignment_; }
 	void tab_alignment(std::uint_least32_t a) noexcept { tab_alignment_ = a; }
+	[[nodiscard]] bool has_attributes() const noexcept { return !attribute_result_stack_.empty(); }
+	[[nodiscard]] std::size_t attributes_size() const noexcept { return attribute_result_stack_.size(); }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
@@ -394,7 +395,7 @@ public:
 	{
 		if (attribute_frame_stack_.empty())
 			throw attribute_stack_error{};
-		frame = std::any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
+		frame = detail::move_only_any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
 	}
 
 	template <class T>
@@ -408,7 +409,29 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		return std::any_cast<T>(detail::pop_back(attribute_result_stack_));
+		return detail::move_only_any_cast<T>(detail::pop_back(attribute_result_stack_));
+	}
+
+	template <class T>
+	[[nodiscard]] T& top_attribute()
+	{
+		if (attribute_result_stack_.empty())
+			throw attribute_stack_error{};
+		T* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
+		if (p == nullptr)
+			throw bad_move_only_any_cast{};
+		return *p;
+	}
+
+	template <class T>
+	[[nodiscard]] T const& top_attribute() const
+	{
+		if (attribute_result_stack_.empty())
+			throw attribute_stack_error{};
+		T const* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
+		if (p == nullptr)
+			throw bad_move_only_any_cast{};
+		return *p;
 	}
 };
 
@@ -420,10 +443,6 @@ class error_context
 	error_response recovery_response_;
 public:
 	error_context(lug::environment& envr, lug::syntax const& syn, std::string_view lab, error_response resp) : envr_{envr}, syntax_{syn}, label_{lab}, recovery_response_{resp} {}
-	error_context(error_context const&) = delete;
-	error_context& operator=(error_context const&) = delete;
-	error_context(error_context&&) = delete;
-	error_context& operator=(error_context&&) = delete;
 	~error_context() = default;
 	[[nodiscard]] lug::environment& environment() const noexcept { return envr_.get(); }
 	[[nodiscard]] lug::syntax const& syntax() const noexcept { return syntax_; }
@@ -432,6 +451,10 @@ public:
 	[[nodiscard]] syntax_position position_begin() const { return environment().position_begin(syntax_); }
 	[[nodiscard]] syntax_position position_end() const { return environment().position_end(syntax_); }
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range() const { return environment().position_range(syntax_); }
+	error_context(error_context const&) = delete;
+	error_context& operator=(error_context const&) = delete;
+	error_context(error_context&&) = delete;
+	error_context& operator=(error_context&&) = delete;
 };
 
 template <class Recovery>
@@ -1697,7 +1720,7 @@ template <typename T, class InputFunc> struct input_source_has_push_source<T, In
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::string&)>, source_options>> sources_;
+	std::vector<std::pair<std::function<bool(std::string&, source_options)>, source_options>> sources_;
 	bool reading_{false};
 
 public:
@@ -1713,7 +1736,8 @@ public:
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		while (!sources_.empty() && text.empty()) {
 			text.clear();
-			bool const more = sources_.back().first(text);
+			auto const& [func, opt] = sources_.back();
+			bool const more = func(text, opt);
 			buffer_.insert(buffer_.end(), text.begin(), text.end());
 			if (!more)
 				sources_.pop_back();
@@ -1733,7 +1757,7 @@ public:
 		enqueue(rng.begin(), rng.end());
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&>>>
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&, source_options>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
@@ -1890,6 +1914,38 @@ protected:
 		registers_.pc = memo.pcr;
 		registers_.rc = restore_responses_after(memo.rcr, memo.responses);
 		return true;
+	}
+
+	[[nodiscard]] error_response do_return_from_raise(raise_frame const& frame, syntax const& sx, error_response rec_res)
+	{
+		error_response err_res{rec_res};
+		error_context err{*environment_, sx, frame.label, err_res};
+		auto handler_index = static_cast<std::size_t>(frame.eh);
+		auto const handler_count = program_->handlers.size();
+		auto next_frame = stack_frames_.rbegin();
+		auto const last_frame = stack_frames_.rend();
+		while (handler_index < handler_count) {
+			err_res = program_->handlers[handler_index](err);
+			if (err_res != error_response::rethrow)
+				break;
+			err_res = error_response::halt;
+			handler_index = (std::numeric_limits<std::size_t>::max)();
+			for (++next_frame; next_frame != last_frame; ++next_frame) {
+				if (auto const* const next_report_frame = std::get_if<report_frame>(&*next_frame); next_report_frame != nullptr) {
+					handler_index = static_cast<std::size_t>(next_report_frame->eh);
+					break;
+				}
+			}
+		}
+		--registers_.cd;
+		--registers_.ci;
+		if (err_res >= error_response::backtrack) {
+			registers_.sr = frame.sr;
+			registers_.rc = frame.rc;
+			return err_res;
+		}
+		registers_.pc = frame.pc;
+		return err_res;
 	}
 
 	void do_accept(std::string_view match)
@@ -2086,8 +2142,6 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
 	{
-		--registers_.cd;
-		--registers_.ci;
 		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
 		if (registers_.pc == frame.pc) {
 			registers_.sr = frame.sr;
@@ -2100,31 +2154,7 @@ class basic_parser : public parser_base
 		auto const mat = match();
 		auto const sub = subject();
 		environment_->set_match_and_subject(mat, sub);
-		error_response err_res{rec_res};
-		error_context err{*environment_, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, frame.label, err_res};
-		auto handler_index = static_cast<std::size_t>(frame.eh);
-		auto next_frame = stack_frames_.rbegin();
-		auto const last_frame = stack_frames_.rend();
-		while (handler_index < program_->handlers.size()) {
-			err_res = program_->handlers[handler_index](err);
-			if (err_res != error_response::rethrow)
-				break;
-			err_res = error_response::halt;
-			handler_index = (std::numeric_limits<std::size_t>::max)();
-			for (++next_frame; next_frame != last_frame; ++next_frame) {
-				if (auto const* const next_report_frame = std::get_if<report_frame>(&*next_frame); next_report_frame != nullptr) {
-					handler_index = static_cast<std::size_t>(next_report_frame->eh);
-					break;
-				}
-			}
-		}
-		if (err_res >= error_response::backtrack) {
-			registers_.sr = frame.sr;
-			registers_.rc = frame.rc;
-			return err_res;
-		}
-		registers_.pc = frame.pc;
-		return err_res;
+		return do_return_from_raise(frame, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, rec_res);
 	}
 
 	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
@@ -2159,6 +2189,8 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] error_response fail_one()
 	{
+		if (stack_frames_.empty())
+			return error_response::halt;
 		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
 			using frame_type = std::decay_t<decltype(frame)>;
 			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
@@ -2215,8 +2247,6 @@ class basic_parser : public parser_base
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		do {
-			if (stack_frames_.empty())
-				return false;
 			error_response const fail_result = fail_one();
 			if (fail_result >= error_response::backtrack)
 				continue;
@@ -2234,8 +2264,6 @@ class basic_parser : public parser_base
 	{
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		for (std::size_t i = 0; i < unwind_count; ++i) {
-			if (stack_frames_.empty())
-				return false;
 			error_response const fail_result = fail_one();
 			if (fail_result == error_response::halt)
 				return false;
@@ -2264,8 +2292,7 @@ class basic_parser : public parser_base
 
 	void accept_or_drain_if_deferred()
 	{
-		if ((registers_.ci & lug::registers::count_mask) == 0)
-		{
+		if ((registers_.ci & lug::registers::count_mask) == 0) {
 			bool const should_cut = (registers_.ci & lug::registers::inhibited_flag) != 0;
 			bool const should_accept = (registers_.ci & lug::registers::ignore_errors_flag) != 0;
 			if (should_cut || should_accept) {
@@ -2616,15 +2643,21 @@ inline bool parse(std::string_view input, grammar const& grmr, environment& envr
 	return parse(input.cbegin(), input.cend(), grmr, envr);
 }
 
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options opt = source_options::none)
+inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options options = source_options::none)
 {
-	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& line) {
-		if (std::getline(input, line)) {
-			line.push_back('\n');
+	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& output, source_options opt) {
+		if (!input)
+			return false;
+		if ((opt & source_options::interactive) != source_options::none) {
+			if (!std::getline(input, output))
+				return false;
+			output.push_back('\n');
 			return true;
 		}
-		return false;
-	}, opt).parse();
+		input.clear();
+		output.append(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+		return input.bad();
+	}, options).parse();
 }
 
 inline bool parse(std::istream& input, grammar const& grmr, source_options opt = source_options::none)

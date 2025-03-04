@@ -11,14 +11,39 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-22.04, ubuntu-20.04, windows-2022, macos-latest]
+        include:
+          - os: ubuntu-24.04
+            compiler: g++-9
+          - os: ubuntu-24.04
+            compiler: g++-10
+          - os: ubuntu-24.04
+            compiler: g++-11
+          - os: ubuntu-24.04
+            compiler: g++-12
+          - os: ubuntu-24.04
+            compiler: g++-13
+          - os: ubuntu-22.04
+            compiler: g++
+          - os: windows-2022
+            compiler: default
+          - os: macos-latest
+            compiler: default
     steps:
     - uses: actions/checkout@v4
+    - name: Install GCC-9
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ${{ matrix.compiler }}
     - name: make
       if: runner.os == 'Linux'
+      env:
+        CXX: ${{ matrix.compiler }}
       run: make CI_BUILD=1
     - name: make check
       if: runner.os == 'Linux'
+      env:
+        CXX: ${{ matrix.compiler }}
       run: make check CI_BUILD=1
     - name: CMake Build (Windows)
       if: runner.os == 'Windows'

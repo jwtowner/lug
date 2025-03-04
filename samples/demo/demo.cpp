@@ -1,5 +1,5 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
-// Copyright (c) 2017-2024 Jesse W. Towner
+// Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
 // This sample demonstrates how to use the lug library to parse and evaluate a simple arithmetic expression.
@@ -7,12 +7,14 @@
 // Include the lug library header file
 #include <lug/lug.hpp>
 
-int main() {
+int main()
+{
     // Import the namespace containing the embedded DSL operators and types
     using namespace lug::language;
 
     // Define attribute variables for the recursive rules
-    int l = 0, r = 0;
+    int lhs = 0;
+    int rhs = 0;
 
     // Define a lexical rule that matches one or more digits and converts them to an integer
     auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
@@ -24,10 +26,10 @@ int main() {
     rule Factor = Number | ('(' > Expr > ')');
 
     // Define a rule that matches a factor followed by zero or more '*' and a factor, and multiplies the factors
-    rule Term = l%Factor > *('*' > r%Factor <[&]{ l *= r; }) <[&]{ return l; };
+    rule Term = lhs%Factor > *('*' > rhs%Factor <[&]{ lhs *= rhs; }) <[&]{ return lhs; };
 
     // Define a rule that matches a term followed by zero or more '+' and a term, and adds the terms
-    Expr = l%Term > *('+' > r%Term <[&]{ l += r; }) <[&]{ return l; };
+    Expr = lhs%Term > *('+' > rhs%Term <[&]{ lhs += rhs; }) <[&]{ return lhs; };
 
     // Create grammar that matches an arithmetic expression followed by end-of-input
     auto grammar = start(Expr > eoi);

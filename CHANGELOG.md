@@ -3,7 +3,7 @@
 ## Release v0.4.0 (Under Development)
 
 * Added new error handling and recovery with labeled failures, recovery rules and error handlers.
-* Added new `accept` operator that work in conjuction with `cut` operator. Tested and fixed issues with `accept` and `cut`, allowing them to be used for debugging error handling.
+* Added new `accept` operator that works in conjuction with `cut` operator. Tested and fixed issues with `accept` and `cut`, allowing them to be used for debugging error handling.
 * Added `on_reset` and `on_drain` hooks to the `lug::environment` class.
 * Refactored the encoder expression interfaces into CRTP base classes to allow for common functionality to be shared by all concrete encoder expressions, such as support for labeled failures and recovery rules.
 * Implemented new 64-bit instruction encoding scheme that is simpler and more efficient. String data is no longer embedded in the instruction stream, ensuring constant instruction length of 8 bytes.
@@ -11,6 +11,8 @@
 * Extracted common base class of `lug::basic_parser` into `lug::parser_base` to reduce template bloat.
 * Reduced template bloat for parser directives (improving compiler error messages) and optimized nested directives.
 * Merged parser stack frames together into a single stack using `std::variant`.
+* Fixed issues with `lug::basic_parser` and `lug::environment` not being fully reset on each invocation of `parse()`.
+* Allow for move-only types to be used in the `lug::environment` attribute stack.
 * Removed use of `goto` in parsing machine main loop.
 * Changed grammar program generation to force inline the start rule.
 * Implemented tail call optimization.

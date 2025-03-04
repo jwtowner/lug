@@ -1,5 +1,5 @@
 // lug - Embedded DSL for PE grammar parser combinators in C++
-// Copyright (c) 2017-2024 Jesse W. Towner
+// Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
 // Derived from BASIC, Dartmouth College Computation Center, October 1st 1964
@@ -151,19 +151,19 @@ public:
 	void repl()
 	{
 		lug::parser parser{grammar_, environment_};
-		parser.push_source([this](std::string& out) {
+		parser.push_source([this](std::string& out, lug::source_options opt) {
 			if (quit_)
 				return false;
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
 				out = lastline_->second;
-			} else {
-				if (stdin_tty_)
-					std::cout << "> " << std::flush;
-				if (!std::getline(std::cin >> std::ws, out))
-					return false;
-				out.push_back('\n');
+				return true;
 			}
+			if ((opt & lug::source_options::interactive) != lug::source_options::none)
+				std::cout << "> " << std::flush;
+			if (!std::getline(std::cin >> std::ws, out))
+				return false;
+			out.push_back('\n');
 			return true;
 		}, stdin_tty_ ? lug::source_options::interactive : lug::source_options::none);
 		std::cout.precision(10);
