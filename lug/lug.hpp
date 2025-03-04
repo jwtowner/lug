@@ -2645,11 +2645,10 @@ inline bool parse(std::istream& input, grammar const& grmr, environment& envr, s
 		if (!input)
 			return false;
 		if ((opt & source_options::interactive) != source_options::none) {
-			if (std::getline(input, output)) {
-				output.push_back('\n');
-				return true;
-			}
-			return false;
+			if (!std::getline(input, output))
+				return false;
+			output.push_back('\n');
+			return true;
 		}
 		input.clear();
 		output = std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
