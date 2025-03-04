@@ -13,7 +13,9 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <typeinfo>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #ifndef LUG_NO_ISATTY
@@ -71,6 +73,8 @@ _Pragma("GCC diagnostic pop")
 #endif
 
 namespace lug {
+
+class bad_move_only_any_cast : public std::bad_cast { public: char const* what() const noexcept override { return "bad move_only_any cast"; } };
 
 [[nodiscard]] inline bool stdin_isatty() noexcept
 {
@@ -419,6 +423,182 @@ template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
 		auto const sign_mask = static_cast<U>(-static_cast<T>(x < 0)) << (static_cast<unsigned int>(std::numeric_limits<U>::digits) - n);
 		return static_cast<T>(shifted | sign_mask);
 	}
+}
+
+constexpr std::size_t move_only_any_buffer_align = alignof(std::max_align_t);
+constexpr std::size_t move_only_any_buffer_size = 6 * sizeof(void*);
+
+template <class T>
+static constexpr bool is_move_only_any_small() noexcept
+{
+	return (sizeof(T) <= move_only_any_buffer_size)
+		&& (alignof(T) <= move_only_any_buffer_align)
+		&& std::is_nothrow_move_constructible_v<T>;
+}
+
+template <class T>
+struct move_only_any_vtable_operations
+{
+	static constexpr void destroy(void* data) noexcept
+	{
+		if constexpr (detail::is_move_only_any_small<T>())
+			std::destroy_at(static_cast<T*>(data));
+		else
+			delete static_cast<T*>(data);
+	}
+	
+	static constexpr void* move(void* to, void* from) noexcept
+	{
+		if constexpr (detail::is_move_only_any_small<T>()) {
+			T* src = static_cast<T*>(from);
+			::new (to) T(std::move(*src));
+			std::destroy_at(src);
+			return to;
+		} else {
+			return from;
+		}
+	}
+
+	static constexpr std::type_info const& type() noexcept
+	{
+		return typeid(T);
+	}
+};
+
+template <>
+struct move_only_any_vtable_operations<void>
+{
+	static constexpr void destroy(void*) noexcept {}
+	static constexpr void* move(void*, void*) noexcept { return nullptr; }
+	static constexpr std::type_info const& type() noexcept { return typeid(void); }
+};
+
+class move_only_any
+{
+	template <class T> friend T* move_only_any_cast(move_only_any* operand) noexcept;
+	template <class T> friend T const* move_only_any_cast(move_only_any const* operand) noexcept;
+
+	struct vtable_t
+	{
+		void (*destroy)(void*) noexcept;
+		void* (*move)(void*, void*) noexcept;
+		std::type_info const& (*type)() noexcept;
+	};
+
+	template <class T>
+	static inline constexpr vtable_t const vtable_instance =
+	{
+		&move_only_any_vtable_operations<T>::destroy,
+		&move_only_any_vtable_operations<T>::move,
+		&move_only_any_vtable_operations<T>::type
+	};
+
+	alignas(move_only_any_buffer_align) char buffer_[move_only_any_buffer_size]{};
+	vtable_t const* vtable_{&vtable_instance<void>};
+	void* data_{nullptr};
+
+public:
+	constexpr move_only_any() noexcept = default;
+	move_only_any(move_only_any const&) = delete;
+	move_only_any& operator=(move_only_any const&) = delete;
+	~move_only_any() { vtable_->destroy(data_); }
+
+	move_only_any(move_only_any&& other) noexcept
+		: vtable_{std::exchange(other.vtable_, &vtable_instance<void>)}
+		, data_{vtable_->move(buffer_, std::exchange(other.data_, nullptr))}
+	{}
+	
+	move_only_any& operator=(move_only_any&& other) noexcept
+	{
+		if (this != &other) {
+			vtable_->destroy(data_);
+			vtable_ = std::exchange(other.vtable_, &vtable_instance<void>);
+			data_ = vtable_->move(buffer_, std::exchange(other.data_, nullptr));
+		}
+		return *this;
+	}
+
+	template <class ValueType, class... Args, class = std::enable_if_t<!std::is_same_v<std::decay_t<ValueType>, move_only_any>>>
+	move_only_any(std::in_place_type_t<ValueType>, Args&&... args)
+	{
+		if constexpr (detail::is_move_only_any_small<std::decay_t<ValueType>>())
+			data_ = ::new(buffer_) std::decay_t<ValueType>(std::forward<Args>(args)...);
+		else
+			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...);
+		vtable_ = &vtable_instance<std::decay_t<ValueType>>;
+	}
+
+	template <class ValueType, class = std::enable_if_t<!std::is_same_v<std::decay_t<ValueType>, move_only_any>>>
+	move_only_any& operator=(ValueType&& value)
+	{
+		(void)emplace<ValueType>(std::forward<ValueType>(value));
+		return *this;
+	}
+
+	template <class ValueType, class... Args>
+	std::decay_t<ValueType>& emplace(Args&&... args)
+	{
+		reset();
+		if constexpr (detail::is_move_only_any_small<std::decay_t<ValueType>>())
+			data_ = ::new(buffer_) std::decay_t<ValueType>(std::forward<Args>(args)...);
+		else
+			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...);
+		vtable_ = &vtable_instance<std::decay_t<ValueType>>;
+		return *static_cast<std::decay_t<ValueType>*>(data_);
+	}
+
+	void reset()
+	{
+		vtable_->destroy(data_);
+		vtable_ = &vtable_instance<void>;
+		data_ = nullptr;
+	}
+
+	void swap(move_only_any& other) noexcept
+	{
+		if (this != &other) {
+			move_only_any temp{std::move(*this)};
+			*this = std::move(other);
+			other = std::move(temp);
+		}
+	}
+
+	[[nodiscard]] bool has_value() const noexcept
+	{
+		return data_ != nullptr;
+	}
+
+	[[nodiscard]] std::type_info const& type() const noexcept
+	{
+		return vtable_->type();
+	}
+};
+
+template <class T>
+[[nodiscard]] T* move_only_any_cast(move_only_any* operand) noexcept
+{
+	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
+		return nullptr;
+	return static_cast<T*>(operand->data_);
+}
+
+template <class T>
+[[nodiscard]] T const* move_only_any_cast(move_only_any const* operand) noexcept
+{
+	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
+		return nullptr;
+	return static_cast<const T*>(operand->data_);
+}
+
+template <class T>
+[[nodiscard]] std::decay_t<T> move_only_any_cast(move_only_any&& operand)
+{
+	auto* const operand_ptr = move_only_any_cast<std::decay_t<T>>(&operand);
+	if (!operand_ptr)
+		throw bad_move_only_any_cast();
+	std::decay_t<T> result(std::move(*operand_ptr));
+	operand.reset();
+	return result;
 }
 
 } // namespace detail

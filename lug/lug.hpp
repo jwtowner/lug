@@ -8,7 +8,6 @@
 #include <lug/error.hpp>
 #include <lug/utf8.hpp>
 
-#include <any>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -247,8 +246,8 @@ class environment
 	template <class> friend class basic_parser;
 
 	static inline std::vector<std::string> const empty_symbols_{};
-	std::vector<std::any> attribute_frame_stack_;
-	std::vector<std::any> attribute_result_stack_;
+	std::vector<detail::move_only_any> attribute_frame_stack_;
+	std::vector<detail::move_only_any> attribute_result_stack_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
@@ -267,11 +266,15 @@ class environment
 
 	void reset(std::string_view sub)
 	{
+		call_depth_ = 0;
+		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 		origin_ = position_at(match_.size());
 		set_match_and_subject(sub.substr(0, 0), sub);
+		attribute_frame_stack_.clear();
+		attribute_result_stack_.clear();
 		on_reset();
 	}
-	
+
 	void drain(std::string_view sub)
 	{
 		origin_ = position_at(match_.size());
@@ -323,6 +326,7 @@ public:
 	[[nodiscard]] std::uint_least32_t tab_alignment() const noexcept { return tab_alignment_; }
 	void tab_alignment(std::uint_least32_t a) noexcept { tab_alignment_ = a; }
 	[[nodiscard]] bool has_attributes() const noexcept { return !attribute_result_stack_.empty(); }
+	[[nodiscard]] std::size_t attributes_size() const noexcept { return attribute_result_stack_.size(); }
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
@@ -391,7 +395,7 @@ public:
 	{
 		if (attribute_frame_stack_.empty())
 			throw attribute_stack_error{};
-		frame = std::any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
+		frame = detail::move_only_any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
 	}
 
 	template <class T>
@@ -405,7 +409,7 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		return std::any_cast<T>(detail::pop_back(attribute_result_stack_));
+		return detail::move_only_any_cast<T>(detail::pop_back(attribute_result_stack_));
 	}
 
 	template <class T>
@@ -413,9 +417,9 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		T* const p = std::any_cast<T>(&attribute_result_stack_.back());
+		T* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
 		if (p == nullptr)
-			throw std::bad_any_cast{};
+			throw bad_move_only_any_cast{};
 		return *p;
 	}
 
@@ -424,9 +428,9 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		T const* const p = std::any_cast<T>(&attribute_result_stack_.back());
+		T const* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
 		if (p == nullptr)
-			throw std::bad_any_cast{};
+			throw bad_move_only_any_cast{};
 		return *p;
 	}
 };
@@ -2651,7 +2655,7 @@ inline bool parse(std::istream& input, grammar const& grmr, environment& envr, s
 			return true;
 		}
 		input.clear();
-		output = std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+		output.append(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 		return input.bad();
 	}, options).parse();
 }
