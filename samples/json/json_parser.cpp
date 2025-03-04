@@ -13,7 +13,7 @@
 
 // JSON node pointer type
 struct json_node;
-using json_node_ptr = std::shared_ptr<json_node>;
+using json_node_ptr = std::unique_ptr<json_node>;
 
 // JSON node value types
 using json_null = std::nullptr_t;
@@ -39,18 +39,26 @@ struct json_node
 	value_type value;
 
 	json_node() = default;
-	template <typename T> explicit json_node(T&& v) : value(std::forward<T>(v)) {}
+
+	template <typename T,
+			class = std::enable_if_t<std::is_constructible_v<value_type, T&&>>>
+	explicit json_node(T&& v)
+		: value(std::forward<T>(v))
+	{}
+
 	bool is_null() const { return std::holds_alternative<json_null>(value); }
 	bool is_bool() const { return std::holds_alternative<json_bool>(value); }
 	bool is_number() const { return std::holds_alternative<json_number>(value); }
 	bool is_string() const { return std::holds_alternative<json_string>(value); }
 	bool is_array() const { return std::holds_alternative<json_array>(value); }
 	bool is_object() const { return std::holds_alternative<json_object>(value); }
+
 	json_bool& as_bool() { return std::get<json_bool>(value); }
 	json_number& as_number() { return std::get<json_number>(value); }
 	json_string& as_string() { return std::get<json_string>(value); }
 	json_array& as_array() { return std::get<json_array>(value); }
 	json_object& as_object() { return std::get<json_object>(value); }
+
 	json_bool const& as_bool() const { return std::get<json_bool>(value); }
 	json_number const& as_number() const { return std::get<json_number>(value); }
 	json_string const& as_string() const { return std::get<json_string>(value); }
@@ -67,34 +75,34 @@ public:
 		using namespace lug::language;
 
 		// JSON node factory functions
-		auto MakeNull = [] { return std::make_shared<json_node>(nullptr); };
-		auto MakeBool = [](syntax s) { return std::make_shared<json_node>(s.str() == "true"); };
-		auto MakeNumber = [](syntax s) { return std::make_shared<json_node>(std::stod(std::string{s})); };
-
-		auto MakeString = [](syntax s) {
-			auto const str = s.str();
-			return std::make_shared<json_node>(std::string{str.substr(1, str.size() - 2)});
-		};
+		auto MakeNull = []{ return std::make_unique<json_node>(nullptr); };
+		auto MakeBool = [](std::string_view str) { return std::make_unique<json_node>(str == "true"); };
+		auto MakeNumber = [](std::string_view str) { return std::make_unique<json_node>(std::stod(std::string{str})); };
+		auto MakeString = [](std::string_view str) { return std::make_unique<json_node>(std::string{str.substr(1, str.size() - 2)}); };
 
 		auto MakeArray = [](environment& env) {
-			return std::make_shared<json_node>(json_array{env.pop_attribute<json_node_ptr>()});
+			json_array array;
+			array.emplace_back(env.pop_attribute<json_node_ptr>());
+			return std::make_unique<json_node>(std::move(array));
 		};
 
 		auto AppendArray = [](environment& env) {
-			auto val{env.pop_attribute<json_node_ptr>()};
-			env.top_attribute<json_node_ptr>()->as_array().push_back(std::move(val));
+			auto value{env.pop_attribute<json_node_ptr>()};
+			env.top_attribute<json_node_ptr>()->as_array().push_back(std::move(value));
 		};
 
 		auto MakeObject = [](environment& env) {
-			auto val{env.pop_attribute<json_node_ptr>()};
-			auto name{env.pop_attribute<json_node_ptr>()};
-			return std::make_shared<json_node>(json_object{{name->as_string(), std::move(val)}});
+			auto value{env.pop_attribute<json_node_ptr>()};
+			auto key{env.pop_attribute<json_node_ptr>()};
+			json_object object;
+			object.emplace(key->as_string(), std::move(value));
+			return std::make_unique<json_node>(std::move(object));
 		};
 
 		auto AppendObject = [](environment& env) {
-			auto val{env.pop_attribute<json_node_ptr>()};
-			auto name{env.pop_attribute<json_node_ptr>()};
-			env.top_attribute<json_node_ptr>()->as_object()[name->as_string()] = std::move(val);
+			auto value{env.pop_attribute<json_node_ptr>()};
+			auto key{env.pop_attribute<json_node_ptr>()};
+			env.top_attribute<json_node_ptr>()->as_object()[key->as_string()] = std::move(value);
 		};
 
 		// JSON grammar rules
@@ -106,8 +114,8 @@ public:
 		rule Boolean        = lexeme[ "true"_sx | "false" ] < MakeBool;
 		rule Null           = lexeme[ "null" ] < MakeNull;
 		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
-		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
-		rule String         = lexeme[ "\"" > *("[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ] < MakeString;
+		rule Escape         = lexeme[ '\\' > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
+		rule String         = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeString;
 		rule Array          = '[' > JSON < MakeArray > *(',' > JSON < AppendArray) > ']';
 		rule Object         = '{' > String > ':' > JSON < MakeObject > *(',' > String > ':' > JSON < AppendObject) > '}';
 		JSON                = Null | Boolean | Number | String | Array | Object;
@@ -145,7 +153,7 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 		os << "\"" << node.as_string() << "\"";
 	} else if (node.is_array()) {
 		os << "[" << newline;
-		const auto& array = node.as_array();
+		auto const& array = node.as_array();
 		for (std::size_t i = 0; i < array.size(); ++i) {
 			if (pretty)
 				os << indentation << "  ";
@@ -157,9 +165,9 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 		os << indentation << "]";
 	} else if (node.is_object()) {
 		os << "{" << newline;
-		const auto& object = node.as_object();
+		auto const& object = node.as_object();
 		std::size_t i = 0;
-		for (const auto& [key, value] : object) {
+		for (auto const& [key, value] : object) {
 			if (pretty)
 				os << indentation << "  ";
 			os << "\"" << key << "\": ";
