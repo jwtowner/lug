@@ -157,13 +157,13 @@ public:
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
 				out = lastline_->second;
-			} else {
-				if ((opt & lug::source_options::interactive) != lug::source_options::none)
-					std::cout << "> " << std::flush;
-				if (!std::getline(std::cin >> std::ws, out))
-					return false;
-				out.push_back('\n');
+				return true;
 			}
+			if ((opt & lug::source_options::interactive) != lug::source_options::none)
+				std::cout << "> " << std::flush;
+			if (!std::getline(std::cin >> std::ws, out))
+				return false;
+			out.push_back('\n');
 			return true;
 		}, stdin_tty_ ? lug::source_options::interactive : lug::source_options::none);
 		std::cout.precision(10);
