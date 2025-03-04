@@ -1,0 +1,134 @@
+{
+  "experiment": {
+    "title": "Quantum Oscillation Measurements in Superconducting Materials",
+    "date": "2025-02-15T09:30:00Z",
+    "researchers": ["Dr. Emma Chen", "Dr. Michael Wong"],
+    "facility": "National High Magnetic Field Laboratory",
+    "metadata": {
+      "temperature_range": [0.05, 4.2],
+      "magnetic_field_range": [0, 45],
+      "sample_id": "SC-BiSr2Ca2Cu3O10-44"
+    },
+    "equipment": {
+      "magnetometer": "SQUID-VSM-7T",
+      "cryostat": "BlueFors LD-400",
+      "lock_in": "Stanford Research SR860"
+    },
+    "samples": [
+      {
+        "id": "A1",
+        "composition": "BiSr2Ca2Cu3O10",
+        "dimensions": {
+          "length": 2.34e-3,
+          "width": 1.56e-3,
+          "thickness": 0.78e-4,
+          "units": "m"
+        },
+        "critical_temperature": 93.42,
+        "doping_level": 0.16
+      },
+      {
+        "id": "A2",
+        "composition": "BiSr2Ca2Cu3O10",
+        "dimensions": {
+          "length": 2.28e-3,
+          "width": 1.53e-3,
+          "thickness": 0.82e-4,
+          "units": "m"
+        },
+        "critical_temperature": 94.17,
+        "doping_level": 0.17
+      }
+    ],
+    "measurements": [
+      {
+        "sample_id": "A1",
+        "temperature": 0.1,
+        "magnetic_field": [
+          0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0,
+          6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
+          22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0
+        ],
+        "magnetization": [
+          0.0,
+          -0.00124, -0.00285, -0.00492, -0.00731, -0.00982, -0.01246, -0.01498, -0.01743, -0.01967, -0.02183,
+          -0.02567, -0.02891, -0.03152, -0.03362, -0.03518, -0.03712, -0.03801, -0.03825, -0.03798, -0.03726,
+          -0.03625, -0.03502, -0.03372, -0.03231, -0.03089, -0.02946, -0.02802, -0.02659, -0.02516, -0.02374
+        ],
+        "resistance": [
+          1.23e-8, 1.24e-8, 1.28e-8, 1.35e-8, 1.47e-8, 1.62e-8, 1.86e-8, 2.14e-8, 2.43e-8, 2.76e-8, 3.12e-8,
+          3.92e-8, 4.73e-8, 5.65e-8, 6.58e-8, 7.49e-8, 9.32e-8, 1.12e-7, 1.31e-7, 1.47e-7, 1.63e-7,
+          1.78e-7, 1.92e-7, 2.05e-7, 2.18e-7, 2.30e-7, 2.41e-7, 2.52e-7, 2.63e-7, 2.74e-7, 2.84e-7
+        ],
+        "hall_coefficient": [
+          3.42e-10, 3.44e-10, 3.47e-10, 3.52e-10, 3.59e-10, 3.68e-10, 3.79e-10, 3.92e-10, 4.08e-10,
+          4.26e-10, 4.47e-10, 4.94e-10, 5.48e-10, 6.09e-10, 6.76e-10, 7.48e-10, 9.07e-10, 1.08e-9,
+          1.27e-9, 1.47e-9, 1.68e-9, 1.89e-9, 2.10e-9, 2.31e-9, 2.52e-9, 2.72e-9, 2.92e-9, 3.11e-9,
+          3.29e-9, 3.46e-9, 3.62e-9
+        ],
+        "dHvA_frequencies": [
+          531.2, 648.7, 943.1, 1428.6, 2371.4
+        ],
+        "effective_masses": [
+          0.87, 1.23, 1.52, 2.36, 3.18
+        ],
+        "fermi_surface_cross_sections": [
+          5.07e-3, 6.19e-3, 9.00e-3, 1.36e-2, 2.26e-2
+        ]
+      },
+      {
+        "sample_id": "A2",
+        "temperature": 0.1,
+        "magnetic_field": [
+          0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0,
+          6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
+          22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0
+        ],
+        "magnetization": [
+          0.0,
+          -0.00131, -0.00298, -0.00513, -0.00762, -0.01023, -0.01297, -0.01558, -0.01812, -0.02046, -0.02270,
+          -0.02671, -0.03006, -0.03278, -0.03497, -0.03659, -0.03860, -0.03953, -0.03978, -0.03950, -0.03875,
+          -0.03770, -0.03642, -0.03507, -0.03360, -0.03213, -0.03064, -0.02914, -0.02765, -0.02617, -0.02470
+        ],
+        "resistance": [
+          1.12e-8, 1.13e-8, 1.17e-8, 1.24e-8, 1.36e-8, 1.51e-8, 1.75e-8, 2.03e-8, 2.32e-8, 2.65e-8, 3.01e-8,
+          3.81e-8, 4.62e-8, 5.54e-8, 6.47e-8, 7.38e-8, 9.21e-8, 1.11e-7, 1.30e-7, 1.46e-7, 1.62e-7,
+          1.77e-7, 1.91e-7, 2.04e-7, 2.17e-7, 2.29e-7, 2.40e-7, 2.51e-7, 2.62e-7, 2.73e-7, 2.83e-7
+        ],
+        "hall_coefficient": [
+          3.55e-10, 3.57e-10, 3.60e-10, 3.65e-10, 3.72e-10, 3.81e-10, 3.92e-10, 4.05e-10, 4.21e-10,
+          4.39e-10, 4.60e-10, 5.07e-10, 5.61e-10, 6.22e-10, 6.89e-10, 7.61e-10, 9.20e-10, 1.09e-9,
+          1.28e-9, 1.48e-9, 1.69e-9, 1.90e-9, 2.11e-9, 2.32e-9, 2.53e-9, 2.73e-9, 2.93e-9, 3.12e-9,
+          3.30e-9, 3.47e-9, 3.63e-9
+        ],
+        "dHvA_frequencies": [
+          537.6, 655.3, 958.7, 1445.2, 2394.8
+        ],
+        "effective_masses": [
+          0.89, 1.25, 1.55, 2.41, 3.23
+        ],
+        "fermi_surface_cross_sections": [
+          5.13e-3, 6.25e-3, 9.15e-3, 1.38e-2, 2.29e-2
+        ]
+      }
+    ],
+    "analysis": {
+      "quantum_oscillation_frequency_accuracy": 0.05,
+      "effective_mass_error": 0.04,
+      "temperature_correction_factor": 1.47e-2,
+      "field_correction_factor": 2.31e-3,
+      "fourier_transform_parameters": {
+        "window_function": "Hanning",
+        "padding_factor": 4,
+        "frequency_resolution": 5.2
+      },
+      "derived_parameters": {
+        "fermi_velocity": [4.82e5, 3.41e5, 2.76e5, 1.78e5, 1.32e5],
+        "cyclotron_mass": [1.59e-30, 2.24e-30, 2.77e-30, 4.30e-30, 5.79e-30],
+        "carrier_density": 5.84e27,
+        "mean_free_path": 246e-9,
+        "coherence_length": 2.7e-9
+      }
+    }
+  }
+}

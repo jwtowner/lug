@@ -18,7 +18,7 @@ CLANGTIDY = clang-tidy
 UCD_VERSION = 15.1.0
 
 # samples
-SAMPLES = basic/basic calc/calc demo/demo json/json xml/xml
+SAMPLES = basic/basic calc/calc demo/demo json/json_matcher json/json_parser xml/xml
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 

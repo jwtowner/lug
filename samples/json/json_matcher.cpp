@@ -21,10 +21,10 @@ public:
 		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
 		rule Escape         = lexeme[ "\\" > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
 		rule String         = lexeme[ "\"" > *("[^\"\\\u0000-\u001F]"_rx | Escape) > "\"" ];
-		rule Array          = "[" > JSON > *("," > JSON) > "]";
-		rule Object         = "{" > String > ":" > JSON > *("," > String > ":" > JSON) > "}";
-		JSON                = Object | Array | String | Number | Boolean | Null;
-		grammar_ = start(JSON);
+		rule Array          = '[' > JSON > *(',' > JSON) > ']';
+		rule Object         = '{' > String > ':' > JSON > *(',' > String > ':' > JSON) > '}';
+		JSON                = Null | Boolean | Number | String | Array | Object;
+		grammar_            = start(JSON > eoi);
 	}
 
 	bool parse_cin()
