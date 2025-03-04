@@ -30,7 +30,7 @@ jobs:
             compiler: default
     steps:
     - uses: actions/checkout@v4
-    - name: Install GCC-9
+    - name: Install Compiler Toolchain
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update

@@ -75,7 +75,7 @@ _Pragma("GCC diagnostic pop")
 
 namespace lug {
 
-class bad_move_only_any_cast : public std::bad_cast { public: char const* what() const noexcept override { return "bad move_only_any cast"; } };
+class bad_move_only_any_cast : public std::bad_cast { public: [[nodiscard]] char const* what() const noexcept override { return "bad move_only_any cast"; } };
 
 [[nodiscard]] inline bool stdin_isatty() noexcept
 {
@@ -445,7 +445,7 @@ struct move_only_any_vtable_operations
 		if constexpr (detail::is_move_only_any_small<T>())
 			std::destroy_at(static_cast<T*>(data));
 		else
-			delete static_cast<T*>(data);
+			delete static_cast<T*>(data); // NOLINT(cppcoreguidelines-owning-memory)
 	}
 	
 	static constexpr void* move(void* to, void* from) noexcept
@@ -469,8 +469,8 @@ struct move_only_any_vtable_operations
 template <>
 struct move_only_any_vtable_operations<void>
 {
-	static constexpr void destroy(void*) noexcept {}
-	static constexpr void* move(void*, void*) noexcept { return nullptr; }
+	static constexpr void destroy(void* /*data*/) noexcept {}
+	static constexpr void* move(void* /*to*/, void* /*from*/) noexcept { return nullptr; }
 	static constexpr std::type_info const& type() noexcept { return typeid(void); }
 };
 
@@ -491,13 +491,14 @@ class move_only_any
 	template <class T> friend T const* move_only_any_cast(move_only_any const* operand) noexcept;
 
 	template <class T>
-	static inline constexpr move_only_any_vtable const vtable_instance
+	static constexpr move_only_any_vtable const vtable_instance
 	{
 		&move_only_any_vtable_operations<T>::destroy,
 		&move_only_any_vtable_operations<T>::move,
 		&move_only_any_vtable_operations<T>::type
 	};
 
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
 	alignas(move_only_any_buffer_align) char buffer_[move_only_any_buffer_size]{};
 	move_only_any_vtable const* vtable_{&vtable_instance<void>};
 	void* data_{nullptr};
@@ -510,26 +511,26 @@ public:
 
 	move_only_any(move_only_any&& other) noexcept
 		: vtable_{std::exchange(other.vtable_, &vtable_instance<void>)}
-		, data_{vtable_->move(buffer_, std::exchange(other.data_, nullptr))}
+		, data_{vtable_->move(&buffer_[0], std::exchange(other.data_, nullptr))}
 	{}
-	
+
 	move_only_any& operator=(move_only_any&& other) noexcept
 	{
 		if (this != &other) {
 			vtable_->destroy(data_);
 			vtable_ = std::exchange(other.vtable_, &vtable_instance<void>);
-			data_ = vtable_->move(buffer_, std::exchange(other.data_, nullptr));
+			data_ = vtable_->move(&buffer_[0], std::exchange(other.data_, nullptr));
 		}
 		return *this;
 	}
 
 	template <class ValueType, class... Args, class = std::enable_if_t<!std::is_same_v<std::decay_t<ValueType>, move_only_any>>>
-	move_only_any(std::in_place_type_t<ValueType>, Args&&... args)
+	explicit move_only_any(std::in_place_type_t<ValueType>, Args&&... args) // NOLINT(hicpp-named-parameter,readability-named-parameter)
 	{
 		if constexpr (detail::is_move_only_any_small<std::decay_t<ValueType>>())
-			data_ = ::new(buffer_) std::decay_t<ValueType>(std::forward<Args>(args)...);
+			data_ = ::new(&buffer_[0]) std::decay_t<ValueType>(std::forward<Args>(args)...); // NOLINT(cppcoreguidelines-owning-memory)
 		else
-			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...);
+			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...); // NOLINT(cppcoreguidelines-owning-memory)
 		vtable_ = &vtable_instance<std::decay_t<ValueType>>;
 	}
 
@@ -545,9 +546,9 @@ public:
 	{
 		reset();
 		if constexpr (detail::is_move_only_any_small<std::decay_t<ValueType>>())
-			data_ = ::new(buffer_) std::decay_t<ValueType>(std::forward<Args>(args)...);
+			data_ = ::new(&buffer_[0]) std::decay_t<ValueType>(std::forward<Args>(args)...); // NOLINT(cppcoreguidelines-owning-memory)
 		else
-			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...);
+			data_ = new std::decay_t<ValueType>(std::forward<Args>(args)...); // NOLINT(cppcoreguidelines-owning-memory)
 		vtable_ = &vtable_instance<std::decay_t<ValueType>>;
 		return *static_cast<std::decay_t<ValueType>*>(data_);
 	}
@@ -596,7 +597,7 @@ template <class T>
 }
 
 template <class T>
-[[nodiscard]] std::decay_t<T> move_only_any_cast(move_only_any&& operand)
+[[nodiscard]] std::decay_t<T> move_only_any_cast(move_only_any&& operand) // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 {
 	auto* const operand_ptr = move_only_any_cast<std::decay_t<T>>(&operand);
 	if (!operand_ptr)
