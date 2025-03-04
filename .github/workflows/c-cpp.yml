@@ -15,9 +15,13 @@ jobs:
           - os: ubuntu-24.04
             compiler: g++-9
           - os: ubuntu-24.04
-            compiler: default
-          - os: ubuntu-22.04
-            compiler: default
+            compiler: g++-10
+          - os: ubuntu-24.04
+            compiler: g++-11
+          - os: ubuntu-24.04
+            compiler: g++-12
+          - os: ubuntu-24.04
+            compiler: g++-13
           - os: windows-2022
             compiler: default
           - os: macos-latest
@@ -25,10 +29,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install GCC-9
-      if: matrix.compiler == 'g++-9'
+      if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y g++-9
+        sudo apt-get install -y ${{ matrix.compiler }}
     - name: make
       if: runner.os == 'Linux'
       env:
