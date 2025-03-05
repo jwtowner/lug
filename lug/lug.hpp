@@ -1262,7 +1262,7 @@ struct repetition_min_max_expression : unary_encoder_expression_interface<repeti
 	repetition_min_max_expression(E1 const& e, unsigned int nmin, unsigned int nmax) : base_type{e}, min_count{nmin}, max_count{nmax} {}
 
 	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	[[nodiscard]] decltype(auto) evaluate(encoder& d, M const& m) const
 	{
 		auto const start = d.encode(opcode::jump);
 		auto const subexpression = d.here();
