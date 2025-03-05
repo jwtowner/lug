@@ -80,6 +80,31 @@ void test_one_or_many()
 	assert(!lug::parse("xx ", G));
 }
 
+void test_repeat_count()
+{
+	using namespace lug::language;
+	rule S = noskip[ repeat(4)[chr('x')] > eoi ];
+	grammar G = start(S);
+	assert(lug::parse("xxxx", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse("xxx", G));
+	assert(!lug::parse("xxxxx", G));
+}
+
+void test_repeat_min_max()
+{
+	using namespace lug::language;
+	rule S = noskip[ repeat(3, 5)[chr('x')] > eoi ];
+	grammar G = start(S);
+	assert(lug::parse("xxx", G));
+	assert(lug::parse("xxxx", G));
+	assert(lug::parse("xxxxx", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse("xx", G));
+	assert(!lug::parse("xxxxxx", G));
+	assert(!lug::parse("xxxxxxx", G));
+}
+
 void test_not()
 {
 	using namespace lug::language;
@@ -140,6 +165,8 @@ int main()
 		test_zero_or_one();
 		test_zero_or_many();
 		test_one_or_many();
+		test_repeat_count();
+		test_repeat_min_max();
 		test_not();
 		test_predicate();
 		test_list();

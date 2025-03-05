@@ -393,29 +393,22 @@ private:
 			print_error("UNDEFINED FUNCTION");
 			return 0.0;
 		}
-
 		auto const& [param, body] = fn->second;
 		if (param.empty() || body.empty()) {
 			print_error("UNDEFINED FUNCTION");
 			return 0.0;
 		}
-
 		bool const saved_fn_eval = environment_.set_condition("fnev", true);
-
 		double& param_var = vars_[param];
 		double const saved_var = param_var;
 		param_var = arg;
-
 		bool const success = lug::parse(body, grammar_, environment_);
-
 		environment_.set_condition("fnev", saved_fn_eval);
 		param_var = saved_var;
-
 		if (!success) {
 			print_error("EVALUATION ERROR");
 			return 0.0;
 		}
-
 		return fn_result_;
 	}
 

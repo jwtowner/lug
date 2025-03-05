@@ -139,7 +139,7 @@ Syntax Reference
 | Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input. |
 | Attribute Binding | `v % e` | Assigns the return value of the last evaluated semantic action within the expression *e* to the variable *v*. |
 | Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
-| Error Handler | `e ^= [](error_context&){}` | Associates the error handler callable with expression *e*. |
+| Error Handler | `e ^= [⁠]⁠(⁠error_context&⁠)⁠{⁠}` | Associates the error handler callable with expression *e*. |
 | Error Response | `e ^ error_response` | Returns the specified `error_response` enumeration value for a recovery rule expression *e*. |
 | Recover With | `e[recover_with(r)]` | Installs rule *r* as the default for error recovery for failures in expression *e*. |
 | Expects | `e[failure(f)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f*. |
@@ -158,6 +158,8 @@ Syntax Reference
 | `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*. |
 | `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference. |
 | `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S*. |
+| `repeat(N)⁠[e]` | Matches exactly *N* occurences of expression *e*. |
+| `repeat(N,M)⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
 
 | Factory | Description |
 | --- | --- |

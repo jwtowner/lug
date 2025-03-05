@@ -1253,6 +1253,40 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	}
 };
 
+template <class E1>
+struct repetition_min_max_expression : unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>;
+	unsigned int min_count;
+	unsigned int max_count;
+	repetition_min_max_expression(E1 const& e, unsigned int nmin, unsigned int nmax) : base_type{e}, min_count{nmin}, max_count{nmax} {}
+
+	template <class M>
+	[[nodiscard]] decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		auto const start = d.encode(opcode::jump);
+		auto const subexpression = d.here();
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		for (unsigned int i = 0; i < min_count; ++i)
+			d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
+		if (max_count > min_count) {
+			std::vector<std::ptrdiff_t> choices;
+			choices.reserve(max_count - min_count);
+			for (unsigned int i = min_count; i < max_count; ++i) {
+				choices.emplace_back(d.encode(opcode::choice));
+				d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
+				auto const commit = d.encode(opcode::commit);
+				d.jump_to_here(commit);
+			}
+			for (auto const& choice : choices)
+				d.jump_to_here(choice);
+		}
+		return m2;
+	}
+};
+
 template <class E1, class E2>
 struct choice_expression : binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>
 {
@@ -1585,6 +1619,19 @@ inline constexpr struct
 }
 raise{};
 
+inline constexpr struct
+{
+	struct repeat_from_to
+	{
+		unsigned int min_count;
+		unsigned int max_count;
+		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return repetition_min_max_expression{make_expression(e), min_count, max_count}; }
+	};
+	[[nodiscard]] constexpr auto operator()(unsigned int count) const noexcept { return repeat_from_to{count, count}; }
+	[[nodiscard]] constexpr auto operator()(unsigned int min_count, unsigned int max_count) const noexcept { return repeat_from_to{min_count, max_count}; }
+}
+repeat{};
+
 template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
 constexpr auto sync(Pattern const& pattern)
 {
@@ -1799,7 +1846,7 @@ protected:
 	struct capture_frame { std::size_t sr; constexpr explicit capture_frame(std::size_t s) noexcept : sr{s} {} };
 	struct condition_frame { std::string_view name; bool value; constexpr condition_frame(std::string_view n, bool v) noexcept : name{n}, value{v} {} };
 	struct lrmemo_frame { std::size_t srr; std::size_t sra; std::size_t prec; std::ptrdiff_t pcr; std::ptrdiff_t pca; std::size_t rcr; std::vector<action_response> responses; lrmemo_frame(std::size_t sr, std::size_t sa, std::size_t p, std::ptrdiff_t pc, std::ptrdiff_t pa, std::size_t rc) noexcept : srr{sr}, sra{sa}, prec{p}, pcr{pc}, pca{pa}, rcr{rc} {} };
-	struct raise_frame { std::string_view label;std::size_t sr; std::size_t rc; std::ptrdiff_t eh; std::ptrdiff_t pc; constexpr explicit raise_frame(std::string_view lab, std::size_t s, std::size_t r, std::ptrdiff_t e, std::ptrdiff_t p) noexcept : label{lab}, sr{s}, rc{r}, eh{e}, pc{p} {} };
+	struct raise_frame { std::string_view label; std::size_t sr; std::size_t rc; std::ptrdiff_t eh; std::ptrdiff_t pc; constexpr explicit raise_frame(std::string_view lab, std::size_t s, std::size_t r, std::ptrdiff_t e, std::ptrdiff_t p) noexcept : label{lab}, sr{s}, rc{r}, eh{e}, pc{p} {} };
 	struct recover_frame { std::ptrdiff_t rh; constexpr explicit recover_frame(std::ptrdiff_t h) noexcept : rh{h} {} };
 	struct report_frame { std::ptrdiff_t eh; constexpr explicit report_frame(std::ptrdiff_t h) noexcept : eh{h} {} };
 	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };

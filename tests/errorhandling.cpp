@@ -397,6 +397,58 @@ void test_calculator_errors_with_recovery_accept()
 	assert(error_output.str() == "Error at line 1, column 6: expected an expression after opening parenthesis\nError at line 1, column 8: expected an operand after the operator\n");
 }
 
+void test_error_suppression_in_negative_lookahead()
+{
+	using namespace lug::language;
+
+	environment E;
+
+	// Define a handler that will be called when the error is raised
+	bool error_handler_called{false};
+	auto const error_handler = [&error_handler_called](error_context&) { error_handler_called = true; };
+
+	// Define a rule with a negative lookahead containing a raise
+	// The raise should be suppressed and not trigger when the negative lookahead succeeds
+	rule Term = lexeme[chr('A') > !raise("This error should be suppressed") > chr('B')];
+	grammar G = start(Term > eoi ^= error_handler);
+
+	assert(lug::parse("AB", G, E)); // Should succeed because the negative lookahead suppresses the error
+	assert(E.match() == "AB");
+	assert(!error_handler_called);
+
+	// Define a rule where the negative lookahead fails with a raise
+	rule Term2 = lexeme[chr('A') > !(chr('B') > raise("This error should be suppressed")) > chr('B')];
+	grammar G2 = start(Term2 > eoi ^= error_handler);
+
+	assert(lug::parse("AB", G2, E)); // Should succeed because the negative lookahead suppresses the error
+	assert(E.match() == "AB");
+	assert(!error_handler_called);
+}
+
+void test_error_suppression_in_positive_lookahead()
+{
+	using namespace lug::language;
+
+	// Define a handler that will be called when the error is raised
+	bool error_handler_called{false};
+	auto const error_handler = [&error_handler_called](error_context&) { error_handler_called = true; };
+
+	// Define a rule with a positive lookahead containing a raise
+	// The raise should trigger when the positive lookahead is evaluated
+	rule Term = lexeme[chr('A') > &raise("This error should be suppressed") > chr('B')];
+	grammar G = start(Term > eoi ^= error_handler);
+
+	assert(!lug::parse("AB", G)); // Should fail because the positive lookahead fails
+	assert(!error_handler_called); // But the error is suppressed
+
+	// Define a rule where the positive lookahead succeeds, causing error to be raised
+	rule Term2 = lexeme[chr('A') > &(chr('B') > raise("This error should be suppressed")) > chr('B')];
+	grammar G2 = start(Term2 > eoi ^= error_handler);
+
+	assert(!lug::parse("AB", G2)); // Should fail because the positive lookahead fails
+	assert(!error_handler_called); // But the error is suppressed
+}
+
 int main()
 {
 	try {
@@ -406,6 +458,8 @@ int main()
 		test_calculator_errors_no_recovery();
 		test_calculator_errors_with_recovery_resume();
 		test_calculator_errors_with_recovery_accept();
+		test_error_suppression_in_negative_lookahead();
+		test_error_suppression_in_positive_lookahead();
 		return 0;
 	} catch (std::exception const& e) {
 		std::cerr << "Error: " << e.what() << "\n";
