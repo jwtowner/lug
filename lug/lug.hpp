@@ -1253,6 +1253,40 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	}
 };
 
+template <class E1>
+struct repetition_min_max_expression : unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>;
+	unsigned int min_count;
+	unsigned int max_count;
+	repetition_min_max_expression(E1 const& e, unsigned int nmin, unsigned int nmax) : base_type{e}, min_count{nmin}, max_count{nmax} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		auto const start = d.encode(opcode::jump);
+		auto const subexpression = d.here();
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		for (unsigned int i = 0; i < min_count; ++i)
+			d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
+		if (max_count > min_count) {
+			std::vector<std::ptrdiff_t> choices;
+			choices.reserve(max_count - min_count);
+			for (unsigned int i = min_count; i < max_count; ++i) {
+				choices.emplace_back(d.encode(opcode::choice));
+				d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
+				auto const commit = d.encode(opcode::commit);
+				d.jump_to_here(commit);
+			}
+			for (auto const& choice : choices)
+				d.jump_to_here(choice);
+		}
+		return m2;
+	}
+};
+
 template <class E1, class E2>
 struct choice_expression : binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>
 {
@@ -1584,6 +1618,19 @@ inline constexpr struct
 	template <class Recovery, class = std::enable_if_t<is_recovery_expression_v<Recovery>>> [[nodiscard]] constexpr auto operator()(std::string_view label, Recovery&& recovery) const noexcept { return raise_expression{failure{label, std::forward<Recovery>(recovery)}}; }
 }
 raise{};
+
+inline constexpr struct
+{
+	struct repeat_from_to
+	{
+		unsigned int min_count;
+		unsigned int max_count;
+		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return repetition_min_max_expression{make_expression(e), min_count, max_count}; }
+	};
+	[[nodiscard]] constexpr auto operator()(unsigned int count) const noexcept { return repeat_from_to{count, count}; }
+	[[nodiscard]] constexpr auto operator()(unsigned int min_count, unsigned int max_count) const noexcept { return repeat_from_to{min_count, max_count}; }
+}
+repeat{};
 
 template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
 constexpr auto sync(Pattern const& pattern)

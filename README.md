@@ -158,6 +158,8 @@ Syntax Reference
 | `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*. |
 | `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference. |
 | `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S*. |
+| `repeat(N)[e]` | Matches exactly *N* occurences of expression *e*. |
+| `repeat(N,M)[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
 
 | Factory | Description |
 | --- | --- |
