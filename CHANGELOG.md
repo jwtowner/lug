@@ -1,6 +1,6 @@
 # Changelog
 
-## Release v0.4.0 (Under Development)
+## Release v0.4.0 (March 4, 2025)
 
 * Added new error handling and recovery with labeled failures, recovery rules and error handlers.
 * Added new `accept` operator that works in conjuction with `cut` operator. Tested and fixed issues with `accept` and `cut`, allowing them to be used for debugging error handling.
