@@ -1,9 +1,10 @@
 # Changelog
 
-## Release v0.4.0 (Under Development)
+## Release v0.4.0 (March 4, 2025)
 
 * Added new error handling and recovery with labeled failures, recovery rules and error handlers.
 * Added new `accept` operator that works in conjuction with `cut` operator. Tested and fixed issues with `accept` and `cut`, allowing them to be used for debugging error handling.
+* Added `repeat(N)[e]` and `repeat(N,M)[e]` control operators that repeat matching of expression `e` at least `N` and at most `M` times.
 * Added `on_reset` and `on_drain` hooks to the `lug::environment` class.
 * Refactored the encoder expression interfaces into CRTP base classes to allow for common functionality to be shared by all concrete encoder expressions, such as support for labeled failures and recovery rules.
 * Implemented new 64-bit instruction encoding scheme that is simpler and more efficient. String data is no longer embedded in the instruction stream, ensuring constant instruction length of 8 bytes.
