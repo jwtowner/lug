@@ -121,7 +121,7 @@ In summary, the above example demonstrates:
 - Attribute capture and propagation for expression evaluation.
 - Environment management for storing and retrieving parsed results.
 
-Syntax Reference
+Quick Reference
 ---
 
 | Operator | Syntax | Description |
@@ -138,38 +138,45 @@ Syntax Reference
 | Cut After | `e--` | Issues a cut instruction after the expression *e*. |
 | Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input. |
 | Attribute Binding | `v % e` | Assigns the return value of the last evaluated semantic action within the expression *e* to the variable *v*. |
-| Syntactic Capture | `capture(v)⁠[e]` | Captures the text matching the subexpression *e* into variable *v*. |
 | Error Handler | `e ^= [⁠]⁠(⁠error_context&⁠)⁠{⁠}` | Associates the error handler callable with expression *e*. |
 | Error Response | `e ^ error_response` | Returns the specified `error_response` enumeration value for a recovery rule expression *e*. |
 | Recover With | `e[recover_with(r)]` | Installs rule *r* as the default for error recovery for failures in expression *e*. |
 | Expects | `e[failure(f)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f*. |
 | Expects | `e[failure(f,r)]` | Expects that expression *e* will successfully match, otherwise raises the labeled failure *f* and recovers with rule *r*. |
 
-| Control | Description |
+| Control Directive | Description |
 | --- | --- |
+| `capture(v)⁠[e]` | Syntactic capture of the text matching the subexpression *e* into variable *v*. |
 | `cased⁠[e]` | Case sensitive matching for the subexpression *e* (the default). |
 | `caseless⁠[e]` | Case insensitive matching for subexpression *e*. |
 | `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default). |
 | `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace. |
 | `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping. |
+| `repeat(N)⁠[e]` | Matches exactly *N* occurences of expression *e*. |
+| `repeat(N,M)⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
 | `on(C)⁠[e]` | Sets the condition *C* to true for the scope of subexpression *e*. |
 | `off(C)⁠[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default). |
 | `symbol(S)⁠[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e*. |
 | `block⁠[e]` | Creates a scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*. |
 | `local⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and there are no external symbol definitions available for reference. |
 | `local(S)⁠[e]` | Creates a local scope block for subexpression *e* where all new symbols defined in *e* are local to it and all external symbols defined outside of the block are also available for reference within *e*, except for the symbol named *S*. |
-| `repeat(N)⁠[e]` | Matches exactly *N* occurences of expression *e*. |
-| `repeat(N,M)⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
+| `collect<C>⁠[e]` | Synthesizes a collection attribute of container type *C* from the attributes inherited from or synthesized within expression *e*. |
+| `collect<C,A...>⁠[e]` | Synthesizes a collection attribute of container type *C* consisting of elements, each of which are constructed from sequences of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
+| `synthesize<T,A...>⁠[e]` | Synthesizes an object of type *T* constructed from a sequence of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
+| `synthesize_shared<T>⁠[e]` | Synthesizes an object of type `std::shared_ptr<T>` by calling `std::make_shared` passing in an attribute of type *T* inherited from or synthesized within expression *e*. |
+| `synthesize_shared<T,A...>⁠[e]` | Synthesizes an object of type `std::shared_ptr<T>` by calling `std::make_shared` passing in a sequence of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
+| `synthesize_unique<T>⁠[e]` | Synthesizes an object of type `std::unique_ptr<T>` by calling `std::make_unique` passing in an attribute of type *T* inherited from or synthesized within expression *e*. |
+| `synthesize_unique<T,A...>⁠[e]` | Synthesizes an object of type `std::unique_ptr<T>` by calling `std::make_unique` passing in a sequence of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
 
 | Factory | Description |
 | --- | --- |
-| `sync(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
-| `sync<r>(p)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value *r*. |
-| `sync_with_value(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response::resume`. |
-| `sync_with_value<r>(p,v)` | Factory function that makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
-| `with_value(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response::resume`. |
-| `with_value<r>(v)` | Factory function that makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
-| `with_response<r>()` | Factory function that makes a recovery rule expression that returns `error_response` enumerator value *r*. |
+| `sync(p)` | Makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response::resume`. |
+| `sync<r>(p)` | Makes a recovery rule expression that synchronizes the token string until it finds pattern *p* and returns `error_response` enumerator value *r*. |
+| `sync_with_value(p,v)` | Makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `sync_with_value<r>(p,v)` | Makes a recovery rule expression that synchronizes the token string until it finds pattern *p*, emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_value(v)` | Makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response::resume`. |
+| `with_value<r>(v)` | Makes a recovery rule expression that emits the value *v* into the attribute stack and returns `error_response` enumerator value *r*. |
+| `with_response<r>()` | Makes a recovery rule expression that returns `error_response` enumerator value *r*. |
 
 | Terminal | Description |
 | --- | --- |

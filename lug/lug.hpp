@@ -32,6 +32,7 @@ class syntax;
 struct program;
 struct syntax_position;
 struct syntax_range;
+class attribute_collection;
 template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
@@ -242,12 +243,14 @@ public:
 
 class environment
 {
+	friend class attribute_collection;
 	friend class parser_base;
 	template <class> friend class basic_parser;
 
 	static inline std::vector<std::string> const empty_symbols_{};
 	std::vector<detail::move_only_any> attribute_frame_stack_;
 	std::vector<detail::move_only_any> attribute_result_stack_;
+	std::vector<std::size_t> attribute_collection_stack_;
 	std::unordered_set<std::string_view> conditions_;
 	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
 	std::vector<std::pair<std::size_t, syntax_position>> positions_;
@@ -272,6 +275,7 @@ class environment
 		set_match_and_subject(sub.substr(0, 0), sub);
 		attribute_frame_stack_.clear();
 		attribute_result_stack_.clear();
+		attribute_collection_stack_.clear();
 		on_reset();
 	}
 
@@ -327,6 +331,9 @@ public:
 	void tab_alignment(std::uint_least32_t a) noexcept { tab_alignment_ = a; }
 	[[nodiscard]] bool has_attributes() const noexcept { return !attribute_result_stack_.empty(); }
 	[[nodiscard]] std::size_t attributes_size() const noexcept { return attribute_result_stack_.size(); }
+	void start_attribute_collection() { attribute_collection_stack_.push_back(attribute_result_stack_.size()); }
+	[[nodiscard]] attribute_collection finish_attribute_collection(std::size_t element_multiple = 1);
+	[[nodiscard]] attribute_collection tail_attribute_collection(std::size_t element_count = 1);
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
 	void clear_conditions() { conditions_.clear(); }
@@ -364,7 +371,7 @@ public:
 		char32_t prevrune{U'\0'};
 		for (auto curr = first, next = curr; curr < last; curr = next, prevrune = rune) {
 			std::tie(next, rune) = utf8::decode_rune(curr, last);
-			if ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None && (prevrune != U'\r' || rune != U'\n')) {
+			if (((unicode::query(rune).properties() & unicode::ptype::Line_Ending) != unicode::ptype::None) && (prevrune != U'\r' || rune != U'\n')) {
 				++position.line;
 				position.column = 1;
 				first = next;
@@ -393,9 +400,7 @@ public:
 	template <class Frame>
 	void pop_attribute_frame(Frame& frame)
 	{
-		if (attribute_frame_stack_.empty())
-			throw attribute_stack_error{};
-		frame = detail::move_only_any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::pop_back(attribute_frame_stack_));
+		frame = detail::move_only_any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::guarded_pop_back<attribute_stack_error>(attribute_frame_stack_));
 	}
 
 	template <class T>
@@ -407,9 +412,7 @@ public:
 	template <class T>
 	[[nodiscard]] T pop_attribute()
 	{
-		if (attribute_result_stack_.empty())
-			throw attribute_stack_error{};
-		return detail::move_only_any_cast<T>(detail::pop_back(attribute_result_stack_));
+		return detail::move_only_any_cast<T>(detail::guarded_pop_back<attribute_stack_error>(attribute_result_stack_));
 	}
 
 	template <class T>
@@ -417,10 +420,7 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		T* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
-		if (p == nullptr)
-			throw bad_move_only_any_cast{};
-		return *p;
+		return *detail::guarded_move_only_any_cast<T>(&attribute_result_stack_.back());
 	}
 
 	template <class T>
@@ -428,12 +428,53 @@ public:
 	{
 		if (attribute_result_stack_.empty())
 			throw attribute_stack_error{};
-		T const* const p = detail::move_only_any_cast<T>(&attribute_result_stack_.back());
-		if (p == nullptr)
-			throw bad_move_only_any_cast{};
-		return *p;
+		return *detail::guarded_move_only_any_cast<T>(&attribute_result_stack_.back());
 	}
 };
+
+class attribute_collection
+{
+	friend class environment;
+	environment* envr_;
+	std::size_t first_initial_;
+	std::size_t last_initial_;
+	std::size_t first_;
+	std::size_t last_;
+	attribute_collection(environment* envr, std::size_t first) noexcept
+		: envr_{envr}
+		, first_initial_{first}, last_initial_{envr_->attribute_result_stack_.size()}
+		, first_{first_initial_}, last_{last_initial_} {}
+public:
+	attribute_collection(attribute_collection&& other) noexcept
+		: envr_{std::exchange(other.envr_, nullptr)}
+		, first_initial_{std::exchange(other.first_initial_, 0)}, last_initial_{std::exchange(other.last_initial_, 0)}
+		, first_{std::exchange(other.first_, 0)}, last_{std::exchange(other.last_, 0)} {}
+	~attribute_collection() { if (first_initial_ < last_initial_) envr_->attribute_result_stack_.resize(first_initial_); }
+	[[nodiscard]] bool empty() const noexcept { return first_ >= last_; }
+	[[nodiscard]] std::size_t size() const noexcept { return (first_ < last_) ? (last_ - first_) : 0; }
+	void consume_front(std::size_t n) { first_ += n; }
+	void consume_back(std::size_t n) { last_ -= (std::min)(n, last_); }
+	template <class T, std::size_t I> [[nodiscard]] T read_front() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[first_ + I])); }
+	template <class T, std::size_t I, std::size_t N> [[nodiscard]] T read_back() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[last_ - N + I])); }
+	attribute_collection(attribute_collection const&) = delete;
+	attribute_collection& operator=(attribute_collection const&) = delete;
+	attribute_collection& operator=(attribute_collection&&) = delete;
+};
+
+[[nodiscard]] inline attribute_collection environment::finish_attribute_collection(std::size_t element_multiple)
+{
+	std::size_t const index = detail::guarded_pop_back<attribute_stack_error>(attribute_collection_stack_);
+	if ((index > attribute_result_stack_.size()) || (((attribute_result_stack_.size() - index) % element_multiple) != 0))
+		throw attribute_stack_error{};
+	return attribute_collection{this, index};
+}
+
+[[nodiscard]] inline attribute_collection environment::tail_attribute_collection(std::size_t element_count)
+{
+	if (element_count > attribute_result_stack_.size())
+		throw attribute_stack_error{};
+	return attribute_collection{this, attribute_result_stack_.size() - element_count};
+}
 
 class error_context
 {
@@ -1434,7 +1475,7 @@ struct local_to_block_expression : unary_encoder_expression_interface<local_to_b
 	using base_type = unary_encoder_expression_interface<local_to_block_expression<E1>, E1>;
 	using base_type::base_type;
 	std::string_view name;
-	constexpr local_to_block_expression(E1 const& x1, std::string_view n) noexcept : base_type{x1}, name{n} {}
+	template <class X1> constexpr local_to_block_expression(X1&& x1, std::string_view n) noexcept : base_type{std::forward<X1>(x1)}, name{n} {}
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -1459,6 +1500,126 @@ template <class X1> symbol_assign_expression(X1&&, std::string_view) -> symbol_a
 template <class X1> symbol_block_expression(X1&&) -> symbol_block_expression<std::decay_t<X1>>;
 template <class X1> local_block_expression(X1&&) -> local_block_expression<std::decay_t<X1>>;
 template <class X1> local_to_block_expression(X1&&, std::string_view) -> local_to_block_expression<std::decay_t<X1>>;
+
+template <class E1, class Container, class... ElementArgs>
+struct collect_expression : unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>
+{
+	using base_type = unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
+	template <class X1, class C, class... As> constexpr collect_expression(X1&& x1, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.start_attribute_collection(); }});
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::action, semantic_action{[](environment& envr) { collect_expression::build_collection<ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{}); }});
+		return m2;
+	}
+
+	template <class... As, std::size_t... Is>
+	static void build_collection(environment& envr, std::index_sequence<Is...> const& seq)
+	{
+		Container container;
+		if (auto attributes = envr.finish_attribute_collection(seq.size()); !attributes.empty()) {
+			if constexpr (detail::container_has_reserve_v<Container>)
+				container.reserve(attributes.size());
+			if constexpr (detail::container_has_emplace_back_v<Container, As...>) {
+				for ( ; !attributes.empty(); attributes.consume_front(seq.size()))
+					(void)container.emplace_back(attributes.template read_front<As, Is>()...);
+			} else if constexpr (detail::container_has_emplace_after_v<Container, As...>) {
+				for ( auto last = container.cbegin(); !attributes.empty(); attributes.consume_front(seq.size()))
+					last = container.emplace_after(last, attributes.template read_front<As, Is>()...);
+			} else if constexpr (detail::container_has_emplace_v<Container, As...>) {
+				for ( ; !attributes.empty(); attributes.consume_back(seq.size()))
+					(void)container.emplace(attributes.template read_back<As, Is, sizeof...(Is)>()...);
+			} else {
+				static_assert(detail::always_false_v<Container>, "container type does not support attribute collection");
+			}
+		}
+		envr.push_attribute(std::move(container));
+	}
+};
+
+template <class X1, class C, class... As> collect_expression(X1&&, std::in_place_type_t<C>, std::in_place_type_t<As>...) -> collect_expression<std::decay_t<X1>, C, As...>;
+
+template <class Container, class... ElementArgs>
+struct collect_combinator
+{
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+	{
+		if constexpr (sizeof...(ElementArgs) == 0)
+			return collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<typename Container::value_type>};
+		else
+			return collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<ElementArgs>...};
+	}
+};
+
+template <class E1, class Factory, class T, class... Args>
+struct synthesize_expression : unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>
+{
+	using base_type = unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
+	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::action, semantic_action{[](environment& envr) { synthesize_expression::build<Args...>(envr, std::index_sequence_for<Args...>{}); }});
+		return m2;
+	}
+
+	template <class... As, std::size_t... Is>
+	static void build(environment& envr, std::index_sequence<Is...> const& seq)
+	{
+		envr.push_attribute([&]{
+			auto attributes = envr.tail_attribute_collection(seq.size());
+			return Factory{}(std::in_place_type<T>, attributes.template read_front<As, Is>()...);
+		}());
+	}
+};
+
+template <class X1, class F, class T, class... As> synthesize_expression(X1&&, std::in_place_type_t<F>, std::in_place_type_t<T>, std::in_place_type_t<As>...) -> synthesize_expression<std::decay_t<X1>, F, T, As...>;
+
+template <class Factory, class T, class... Args>
+struct synthesize_combinator
+{
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+	{
+		if constexpr (sizeof...(Args) == 0)
+			return synthesize_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<T>};
+		else
+			return synthesize_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Args>...};
+	}
+};
+
+struct synthesize_factory
+{
+	template <class T, class... Args>
+	[[nodiscard]] constexpr T operator()(std::in_place_type_t<T> /*t*/, Args&&... args) const
+	{
+		return T(std::forward<Args>(args)...);
+	}
+};
+
+struct synthesize_shared_factory
+{
+	template <class T, class... Args>
+	[[nodiscard]] std::shared_ptr<T> operator()(std::in_place_type_t<T> /*t*/, Args&&... args) const
+	{
+		return std::shared_ptr<T>(std::forward<Args>(args)...);
+	}
+};
+
+struct synthesize_unique_factory
+{
+	template <class T, class... Args>
+	[[nodiscard]] std::unique_ptr<T> operator()(std::in_place_type_t<T> /*t*/, Args&&... args) const
+	{
+		return std::make_unique<T>(std::forward<Args>(args)...);
+	}
+};
 
 namespace language {
 
@@ -1486,6 +1647,10 @@ inline constexpr symbol_match_offset_combinator<opcode::symbol_tail, opcode::sym
 inline constexpr symbol_match_combinator<opcode::symbol_all, opcode::symbol_all_cf> match_all{};
 inline constexpr symbol_match_combinator<opcode::symbol_any, opcode::symbol_any_cf> match_any{};
 inline constexpr symbol_match_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match{};
+template <class Container, class... ElementArgs> inline constexpr collect_combinator<Container, ElementArgs...> collect{};
+template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_factory, T, Args...> synthesize{};
+template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_shared_factory, T, Args...> synthesize_shared{};
+template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_unique_factory, T, Args...> synthesize_unique{};
 
 inline constexpr struct
 {
@@ -1633,13 +1798,13 @@ inline constexpr struct
 repeat{};
 
 template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
-constexpr auto sync(Pattern const& pattern)
+[[nodiscard]] constexpr auto sync(Pattern const& pattern)
 {
 	return noskip[*(!pattern > any) ^ Response];
 }
 
 template <error_response Response = error_response::resume, class Pattern, class DefaultValue, class = std::enable_if_t<is_expression_v<Pattern>>>
-constexpr auto sync_with_value(Pattern const& pattern, DefaultValue&& default_value)
+[[nodiscard]] constexpr auto sync_with_value(Pattern const& pattern, DefaultValue&& default_value)
 {
 	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
 		return noskip[*(!pattern > any) < std::forward<DefaultValue>(default_value) ^ Response];
@@ -1648,7 +1813,7 @@ constexpr auto sync_with_value(Pattern const& pattern, DefaultValue&& default_va
 }
 
 template <error_response Response = error_response::resume, class DefaultValue>
-constexpr auto with_value(DefaultValue&& default_value)
+[[nodiscard]] constexpr auto with_value(DefaultValue&& default_value)
 {
 	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
 		return noskip[nop < std::forward<DefaultValue>(default_value) ^ Response];
@@ -1657,7 +1822,7 @@ constexpr auto with_value(DefaultValue&& default_value)
 }
 
 template <error_response Response>
-constexpr auto with_response()
+[[nodiscard]] constexpr auto with_response()
 {
 	return noskip[nop ^ Response];
 }

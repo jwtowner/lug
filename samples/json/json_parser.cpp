@@ -16,7 +16,7 @@ struct json_node;
 using json_node_ptr = std::unique_ptr<json_node>;
 
 // JSON node value types
-using json_null = std::nullptr_t;
+using json_null = std::monostate;
 using json_bool = bool;
 using json_number = double;
 using json_string = std::string;
@@ -26,25 +26,10 @@ using json_object = std::map<std::string, json_node_ptr>;
 // JSON node
 struct json_node
 {
-	using value_type = std::variant
-	<
-		json_null,
-		json_bool,
-		json_number,
-		json_string,
-		json_array,
-		json_object
-	>;
-
-	value_type value;
+	std::variant<json_null, json_bool, json_number, json_string, json_array, json_object> value;
 
 	json_node() = default;
-
-	template <typename T,
-			class = std::enable_if_t<std::is_constructible_v<value_type, T&&>>>
-	explicit json_node(T&& v)
-		: value(std::forward<T>(v))
-	{}
+	template <typename T> explicit json_node(T&& v) : value(std::forward<T>(v)) {}
 
 	bool is_null() const { return std::holds_alternative<json_null>(value); }
 	bool is_bool() const { return std::holds_alternative<json_bool>(value); }
@@ -53,14 +38,8 @@ struct json_node
 	bool is_array() const { return std::holds_alternative<json_array>(value); }
 	bool is_object() const { return std::holds_alternative<json_object>(value); }
 
-	json_bool& as_bool() { return std::get<json_bool>(value); }
-	json_number& as_number() { return std::get<json_number>(value); }
-	json_string& as_string() { return std::get<json_string>(value); }
-	json_array& as_array() { return std::get<json_array>(value); }
-	json_object& as_object() { return std::get<json_object>(value); }
-
-	json_bool const& as_bool() const { return std::get<json_bool>(value); }
-	json_number const& as_number() const { return std::get<json_number>(value); }
+	json_bool as_bool() const { return std::get<json_bool>(value); }
+	json_number as_number() const { return std::get<json_number>(value); }
 	json_string const& as_string() const { return std::get<json_string>(value); }
 	json_array const& as_array() const { return std::get<json_array>(value); }
 	json_object const& as_object() const { return std::get<json_object>(value); }
@@ -74,50 +53,26 @@ public:
 	{
 		using namespace lug::language;
 
-		// JSON node factory functions
-		auto MakeNull = []{ return std::make_unique<json_node>(nullptr); };
-		auto MakeBool = [](std::string_view str) { return std::make_unique<json_node>(str == "true"); };
-		auto MakeNumber = [](std::string_view str) { return std::make_unique<json_node>(std::stod(std::string{str})); };
-		auto MakeString = [](std::string_view str) { return std::make_unique<json_node>(std::string{str.substr(1, str.size() - 2)}); };
-
-		auto MakeArray = [](environment& env) {
-			json_array array;
-			array.emplace_back(env.pop_attribute<json_node_ptr>());
-			return std::make_unique<json_node>(std::move(array));
-		};
-
-		auto AppendArray = [](environment& env) {
-			auto value{env.pop_attribute<json_node_ptr>()};
-			env.top_attribute<json_node_ptr>()->as_array().push_back(std::move(value));
-		};
-
-		auto MakeObject = [](environment& env) {
-			auto value{env.pop_attribute<json_node_ptr>()};
-			auto key{env.pop_attribute<json_node_ptr>()};
-			json_object object;
-			object.emplace(key->as_string(), std::move(value));
-			return std::make_unique<json_node>(std::move(object));
-		};
-
-		auto AppendObject = [](environment& env) {
-			auto value{env.pop_attribute<json_node_ptr>()};
-			auto key{env.pop_attribute<json_node_ptr>()};
-			env.top_attribute<json_node_ptr>()->as_object()[key->as_string()] = std::move(value);
-		};
+		// JSON node value factory functions
+		auto MakeNull = []{ return std::make_unique<json_node>(json_null{}); };
+		auto MakeBool = [](std::string_view s) { return std::make_unique<json_node>(s == "true"); };
+		auto MakeNumber = [](std::string_view s) { return std::make_unique<json_node>(std::stod(std::string{s})); };
+		auto MakeKeyOrString = [](std::string_view s) { return std::string{s.substr(1, s.size() - 2)}; };
 
 		// JSON grammar rules
 		rule JSON;
-		auto ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
-		auto FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
-		auto IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
+		rule ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
+		rule FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
+		rule IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
 		rule Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ] < MakeNumber;
 		rule Boolean        = lexeme[ "true"_sx | "false" ] < MakeBool;
 		rule Null           = lexeme[ "null" ] < MakeNull;
 		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
 		rule Escape         = lexeme[ '\\' > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
-		rule String         = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeString;
-		rule Array          = '[' > JSON < MakeArray > *(',' > JSON < AppendArray) > ']';
-		rule Object         = '{' > String > ':' > JSON < MakeObject > *(',' > String > ':' > JSON < AppendObject) > '}';
+		rule KeyOrString    = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeKeyOrString;
+		rule String         = synthesize_unique<json_node, std::string>[ KeyOrString ];
+		rule Array          = '[' > synthesize_unique<json_node, json_array>[ collect<json_array>[ JSON >> ',' ] ] > ']';
+		rule Object         = '{' > synthesize_unique<json_node, json_object>[ collect<json_object, std::string, json_node_ptr>[ ( KeyOrString > ':' > JSON ) >> ',' ] ] > '}';
 		JSON                = Null | Boolean | Number | String | Array | Object;
 		grammar_            = start(JSON > eoi);
 	}

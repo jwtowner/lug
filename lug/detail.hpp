@@ -180,6 +180,27 @@ template <class It, class T = void> using enable_if_char_contiguous_iterator_t =
 template <class Rng, class T = void> using enable_if_char_input_range_t = std::enable_if_t<is_char_input_range_v<Rng>, T>;
 template <class Rng, class T = void> using enable_if_char_contiguous_range_t = std::enable_if_t<is_char_contiguous_range_v<Rng>, T>;
 
+template <class C, class... A> using container_emplace_after_t = decltype(std::declval<C&>().emplace_after(std::declval<typename C::const_iterator>(), std::declval<A>()...));
+template <class C, class... A> using container_emplace_back_t = decltype(std::declval<C&>().emplace_back(std::declval<A>()...));
+template <class C, class... A> using container_emplace_t = decltype(std::declval<C&>().emplace(std::declval<A>()...));
+template <class C> using container_reserve_t = decltype(std::declval<C&>().reserve(std::declval<std::size_t>()));
+
+template <class V, class C, class... A> struct container_has_emplace_after_impl : std::false_type {};
+template <class C, class... A> struct container_has_emplace_after_impl<std::void_t<container_emplace_after_t<C, A...>>,  C, A...> : std::true_type {};
+template <class C, class... A> inline constexpr bool container_has_emplace_after_v = container_has_emplace_after_impl<void, C, A...>::value;
+
+template <class V, class C, class... A> struct container_has_emplace_back_impl : std::false_type {};
+template <class C, class... A> struct container_has_emplace_back_impl<std::void_t<container_emplace_back_t<C, A...>>,  C, A...> : std::true_type {};
+template <class C, class... A> inline constexpr bool container_has_emplace_back_v = container_has_emplace_back_impl<void, C, A...>::value;
+
+template <class V, class C, class... A> struct container_has_emplace_impl : std::false_type {};
+template <class C, class... A> struct container_has_emplace_impl<std::void_t<container_emplace_t<C, A...>>,  C, A...> : std::true_type {};
+template <class C, class... A> inline constexpr bool container_has_emplace_v = container_has_emplace_impl<void, C, A...>::value;
+
+template <class C, class = void> struct container_has_reserve_impl : std::false_type {};
+template <class C> struct container_has_reserve_impl<C, std::void_t<container_reserve_t<C>>> : std::true_type {};
+template <class C> inline constexpr bool container_has_reserve_v = container_has_reserve_impl<C>::value;
+
 struct identity
 {
 	template <class T>
@@ -401,6 +422,14 @@ template <class Sequence>
 	return result;
 }
 
+template <class Error, class Sequence>
+[[nodiscard]] constexpr auto guarded_pop_back(Sequence& s) -> typename Sequence::value_type
+{
+	if (s.empty())
+		throw Error();
+	return detail::pop_back(s);
+}
+
 template <class Integral>
 [[nodiscard]] inline std::string string_pack(Integral n)
 {
@@ -581,7 +610,7 @@ public:
 };
 
 template <class T>
-[[nodiscard]] T* move_only_any_cast(move_only_any* operand) noexcept
+[[nodiscard]] inline T* move_only_any_cast(move_only_any* operand) noexcept
 {
 	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
 		return nullptr;
@@ -589,7 +618,7 @@ template <class T>
 }
 
 template <class T>
-[[nodiscard]] T const* move_only_any_cast(move_only_any const* operand) noexcept
+[[nodiscard]] inline T const* move_only_any_cast(move_only_any const* operand) noexcept
 {
 	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
 		return nullptr;
@@ -597,12 +626,27 @@ template <class T>
 }
 
 template <class T>
-[[nodiscard]] std::decay_t<T> move_only_any_cast(move_only_any&& operand) // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+[[nodiscard]] inline T* guarded_move_only_any_cast(move_only_any* operand)
 {
-	auto* const operand_ptr = move_only_any_cast<std::decay_t<T>>(&operand);
-	if (!operand_ptr)
-		throw bad_move_only_any_cast();
-	std::decay_t<T> result(std::move(*operand_ptr));
+	T* const p = detail::move_only_any_cast<T>(operand);
+	if (p == nullptr)
+		throw bad_move_only_any_cast{};
+	return p;
+}
+
+template <class T>
+[[nodiscard]] inline T const* guarded_move_only_any_cast(move_only_any const* operand)
+{
+	T const* const p = detail::move_only_any_cast<T>(operand);
+	if (p == nullptr)
+		throw bad_move_only_any_cast{};
+	return p;
+}
+
+template <class T>
+[[nodiscard]] inline std::decay_t<T> move_only_any_cast(move_only_any&& operand) // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+{
+	std::decay_t<T> result(std::move(*detail::guarded_move_only_any_cast<std::decay_t<T>>(&operand)));
 	operand.reset();
 	return result;
 }
