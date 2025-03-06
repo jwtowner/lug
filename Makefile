@@ -2,7 +2,7 @@
 # See LICENSE file for copyright and license details
 
 # distribution version
-VERSION = 0.4.0
+VERSION = 0.5.0
 
 # paths
 PREFIX = /usr/local
