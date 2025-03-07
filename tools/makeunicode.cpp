@@ -1144,6 +1144,7 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #include <cstdint>
 
 #include <array>
+#include <bitset>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -1385,81 +1386,120 @@ public:
 }
 
 // Sparse character rune set
-using rune_set = std::vector<std::pair<char32_t, char32_t>>;
-
-inline void push_range(rune_set& runes, char32_t start, char32_t end)
+class rune_set
 {
-	runes.emplace_back(start, end);
-	std::push_heap(std::begin(runes), std::end(runes));
-}
+	friend rune_set negate(rune_set const& /*unused*/);
+	friend rune_set sort_and_optimize(rune_set /*unused*/);
 
-namespace detail {
+	static constexpr char32_t ascii_limit = 0x80U;
+	std::vector<std::pair<char32_t, char32_t>> intervals;
+	std::bitset<128> ascii;
 
-inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t start, char32_t end)
-{
-	if ((props & ptype::Cased) != ptype::None) {
-		push_range(runes, tolower(start), tolower(end));
-		push_range(runes, toupper(start), toupper(end));
-	} else {
-		push_range(runes, start, end);
-	}
-}
+	rune_set(std::vector<std::pair<char32_t, char32_t>>&& intr, std::bitset<128> const& asc)
+		: intervals{std::move(intr)}, ascii{asc} {}
 
-} // namespace detail
-
-inline void push_casefolded_range(rune_set& runes, char32_t start, char32_t end)
-{
-	ptype p = query(start).properties();
-	char32_t r1 = start;
-	char32_t r2 = start;
-	for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
-		ptype const q = query(start).properties();
-		if (((p ^ q) & ptype::Cased) != ptype::None) {
-			detail::push_uniform_casefolded_range(runes, p, r1, r2);
-			r1 = rn;
-			p = q;
+	void push_uniform_casefolded_range(ptype props, char32_t start, char32_t end)
+	{
+		if ((props & ptype::Cased) != ptype::None) {
+			push_range(unicode::tolower(start), unicode::tolower(end));
+			push_range(unicode::toupper(start), unicode::toupper(end));
+		} else {
+			push_range(start, end);
 		}
 	}
-	detail::push_uniform_casefolded_range(runes, p, r1, r2);
-}
 
-[[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
-{
-	rune_set optimized_runes;
-	auto out = optimized_runes.end();
-	std::sort_heap(std::begin(runes), std::end(runes));
-	for (auto const& r : runes) {
-		if (out == optimized_runes.end() || r.first < out->first || out->second < r.first)
-			out = optimized_runes.insert(optimized_runes.end(), r);
-		else
-			out->second = out->second < r.second ? r.second : out->second;
+public:
+	rune_set() = default;
+	rune_set(rune_set const&) = default;
+	rune_set(rune_set&&) = default;
+	rune_set& operator=(rune_set const&) = default;
+	rune_set& operator=(rune_set&&) = default;
+	~rune_set() = default;
+
+	void clear() noexcept
+	{
+		intervals.clear();
+		ascii.reset();
 	}
-	optimized_runes.shrink_to_fit();
-	return optimized_runes;
-}
+
+	[[nodiscard]] bool empty() const noexcept
+	{
+		return intervals.empty() && ascii.none();
+	}
+
+	[[nodiscard]] bool contains(char32_t rune) const
+	{
+		if (rune < ascii_limit)
+			return ascii.test(static_cast<std::size_t>(rune));
+		auto const interval = std::lower_bound(intervals.begin(), intervals.end(), rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
+		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
+	}
+
+	void push_range(char32_t start, char32_t end)
+	{
+		for (char32_t rn = start; rn <= end && rn < ascii_limit; ++rn)
+			ascii.set(static_cast<std::size_t>(rn));
+		if (end >= ascii_limit) {
+			intervals.emplace_back((std::max)(start, ascii_limit), end);
+			std::push_heap(std::begin(intervals), std::end(intervals));
+		}
+	}
+
+	void push_casefolded_range(char32_t start, char32_t end)
+	{
+		ptype p = query(start).properties();
+		char32_t r1 = start;
+		char32_t r2 = start;
+		for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
+			ptype const q = query(start).properties();
+			if (((p ^ q) & ptype::Cased) != ptype::None) {
+				push_uniform_casefolded_range(p, r1, r2);
+				r1 = rn;
+				p = q;
+			}
+		}
+		push_uniform_casefolded_range(p, r1, r2);
+	}
+};
 
 [[nodiscard]] inline rune_set negate(rune_set const& runes)
 {
 	rune_set negated_runes;
-	if (!runes.empty()) {
-		if (char32_t const front = runes.front().first; U'\0' < front)
-			negated_runes.emplace_back(U'\0', front - 1);
-		if (runes.size() > 1) {
-			auto const last = std::cend(runes);
-			auto left = std::cbegin(runes);
+	if (!runes.intervals.empty()) {
+		if (char32_t const front = runes.intervals.front().first; rune_set::ascii_limit < front)
+			negated_runes.intervals.emplace_back(rune_set::ascii_limit, front - 1);
+		if (runes.intervals.size() > 1) {
+			auto const last = std::cend(runes.intervals);
+			auto left = std::cbegin(runes.intervals);
 			for (;;) {
 				auto right = std::next(left);
 				if (right == last)
 					break;
-				negated_runes.emplace_back(left->second + 1, right->first - 1);
+				negated_runes.intervals.emplace_back(left->second + 1, right->first - 1);
 				left = right;
 			}
 		}
-		if (char32_t const back = runes.back().second; back < U'\xFFFFFFFF')
-			negated_runes.emplace_back(back + 1, U'\xFFFFFFFF');
-		negated_runes.shrink_to_fit();
+		if (char32_t const back = runes.intervals.back().second; back < U'\xFFFFFFFF')
+			negated_runes.intervals.emplace_back(back + 1, U'\xFFFFFFFF');
+		negated_runes.intervals.shrink_to_fit();
 	}
+	negated_runes.ascii = ~runes.ascii;
 	return negated_runes;
+}
+
+[[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
+{
+	std::vector<std::pair<char32_t, char32_t>> optimized_intervals;
+	auto out = optimized_intervals.end();
+	std::sort_heap(std::begin(runes.intervals), std::end(runes.intervals));
+	for (auto const& r : runes.intervals) {
+		if (out == optimized_intervals.end() || r.first < out->first || out->second < r.first)
+			out = optimized_intervals.insert(optimized_intervals.end(), r);
+		else
+			out->second = out->second < r.second ? r.second : out->second;
+	}
+	optimized_intervals.shrink_to_fit();
+	return rune_set{std::move(optimized_intervals), runes.ascii};
 }
 
 namespace detail {

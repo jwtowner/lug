@@ -715,7 +715,7 @@ public:
 			do_skip(last_mode);
 		mode_.back() = next;
 		return *this;
-	}	
+	}
 };
 
 template <class RuneSet>
@@ -724,9 +724,9 @@ inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t 
 	if (first > last)
 		throw bad_character_range{};
 	if ((mode & directives::caseless) != directives::none)
-		unicode::push_casefolded_range(runes, first, last);
+		static_cast<unicode::rune_set&>(runes).push_casefolded_range(first, last);
 	else
-		unicode::push_range(runes, first, last);
+		static_cast<unicode::rune_set&>(runes).push_range(first, last);
 	return std::forward<RuneSet>(runes);
 }
 
@@ -2716,9 +2716,7 @@ public:
 					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
 				} break;
 				case opcode::match_set: {
-					fail_count = match_single(registers_.sr, [&runes = program_->runesets[instr.immediate16]](char32_t rune) {
-							auto const interval = std::lower_bound(runes.begin(), runes.end(), rune, [](auto& x, auto& y) { return x.second < y; });
-							return (interval != runes.end()) && (interval->first <= rune) && (rune <= interval->second); });
+					fail_count = match_single(registers_.sr, [&runeset = program_->runesets[instr.immediate16]](char32_t rune) { return runeset.contains(rune); });
 				} break;
 				case opcode::match_eol: {
 					fail_count = match_single(registers_.sr, [](auto curr, auto last, auto& next, char32_t rune) {
