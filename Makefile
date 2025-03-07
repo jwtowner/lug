@@ -15,7 +15,7 @@ LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 
 # unicode character database version
-UCD_VERSION = 15.1.0
+UCD_VERSION = 16.0.0
 
 # samples
 SAMPLES = basic/basic calc/calc demo/demo json/json_matcher json/json_parser xml/xml

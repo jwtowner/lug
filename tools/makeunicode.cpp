@@ -124,14 +124,17 @@ static std::vector<std::string> const binary_property_names =
 	"Other_Math", "Hex_Digit", "ASCII_Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
 	"Other_Lowercase", "Other_Uppercase", "Noncharacter_Code_Point", "Other_Grapheme_Extend",
 	"IDS_Binary_Operator", "IDS_Trinary_Operator", "IDS_Unary_Operator", "Radical", "Unified_Ideograph",
-	"Other_Default_Ignorable_Code_Point", "Deprecated", "Soft_Dotted", "Logical_Order_Exception", "Other_ID_Start",
-	"Other_ID_Continue", "ID_Compat_Math_Continue", "ID_Compat_Math_Start", "Sentence_Terminal", "Variation_Selector",
-	"Pattern_White_Space", "Pattern_Syntax", "Prepended_Concatenation_Mark", "Regional_Indicator",
-	// DerivedBinaryProperties.txt
+	"Other_Default_Ignorable_Code_Point", "Deprecated", "Soft_Dotted", "Logical_Order_Exception",
+	"Other_ID_Start", "Other_ID_Continue", "ID_Compat_Math_Continue", "ID_Compat_Math_Start",
+	"Sentence_Terminal", "Variation_Selector", "Pattern_White_Space", "Pattern_Syntax",
+	"Prepended_Concatenation_Mark", "Regional_Indicator", "Modifier_Combining_Mark",
+	// DerivedCoreProperties.txt
 	"Lowercase", "Uppercase", "Cased", "Case_Ignorable", "Changes_When_Lowercased", "Changes_When_Uppercased",
 	"Changes_When_Titlecased", "Changes_When_Casefolded", "Changes_When_Casemapped", "Alphabetic",
 	"Default_Ignorable_Code_Point", "Grapheme_Base", "Grapheme_Extend", "Math", "ID_Start", "ID_Continue",
-	"XID_Start", "XID_Continue", "Grapheme_Link", "InCB; Linker", "InCB; Consonant", "InCB; Extend"
+	"XID_Start", "XID_Continue", "Grapheme_Link", "InCB; Linker", "InCB; Consonant", "InCB; Extend",
+	// DerivedBinaryProperties.txt
+	"Bidi_Mirrored"
 };
 
 static auto const binary_properties = build_namemap<enum_type::bitfield, std::uint_least64_t>(binary_property_names);
@@ -211,7 +214,9 @@ static std::vector<std::string> const script_names =
 	// Unicode 14.0.0
 	"Cypro_Minoan", "Old_Uyghur", "Tangsa", "Toto", "Vithkuqi",
 	// Unicode 15.0.0
-	"Kawi", "Nag_Mundari"
+	"Kawi", "Nag_Mundari",
+	// Unicode 16.0.0
+	"Garay", "Gurung_Khema", "Kirat_Rai", "Ol_Onal", "Sunuwar", "Todhri", "Tulu_Tigalari"
 };
 
 static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
@@ -283,7 +288,10 @@ static std::vector<std::string> const block_names =
 	"Arabic Extended-C", "Devanagari Extended-A", "Kawi", "Kaktovik Numerals", "Cyrillic Extended-D", "Nag Mundari",
 	"CJK Unified Ideographs Extension H",
 	// Unicode 15.1.0
-	"CJK Unified Ideographs Extension I"
+	"CJK Unified Ideographs Extension I",
+	// Unicode 16.0.0,
+	"Todhri", "Garay", "Tulu-Tigalari", "Myanmar Extended-C", "Sunuwar", "Egyptian Hieroglyphs Extended-A", "Gurung Khema",
+	"Kirat Rai", "Symbols for Legacy Computing Supplement", "Ol Onal"
 };
 
 static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(block_names);
@@ -291,7 +299,7 @@ static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(
 static std::vector<std::string> const age_names =
 {
 	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "6.3",
-	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1"
+	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1", "16.0"
 };
 
 static auto const ages = build_namemap<enum_type::index, std::uint_least8_t>(age_names);
@@ -444,7 +452,8 @@ void read_and_build_tables()
 			set_ptable_bits(0x2028, 0x2029, "Line_Ending");
 			auto proplist_version = read_ucd_prop_array("ucd/PropList.txt", set_ptable_bits);
 			auto dcp_version = read_ucd_prop_array("ucd/DerivedCoreProperties.txt", set_ptable_bits);
-			return std::vector<std::string>{proplist_version, dcp_version};
+			auto dbp_version = read_ucd_prop_array("ucd/extracted/DerivedBinaryProperties.txt", set_ptable_bits);
+			return std::vector<std::string>{proplist_version, dcp_version, dbp_version};
 		});
 
 		// read in general category table
@@ -483,7 +492,7 @@ void read_and_build_tables()
 			{ "graph", { make_binary_prop_compat_filter({"Assigned"}) } },
 			{ "print", { make_compat_filter({"blank", "graph"}) } },
 			{ "word", { make_compat_filter({"alnum"}), make_binary_prop_compat_filter({"Join_Control"}),
-				make_general_category_compat_filter({"Mn", "Mc", "Me", "Pc"}) } }
+						make_general_category_compat_filter({"Mn", "Mc", "Me", "Pc"}) } }
 		};
 
 		compat_filter_map compat_prop_excludes = {
@@ -889,7 +898,7 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 			do {
 				T seqlen = (std::min)(static_cast<T>(count - 1), maxseqlen);
 				pass1.insert(std::end(pass1), {static_cast<T>(seqmask | seqlen), value});
-				count -= seqlen + 1;
+				count -= static_cast<std::size_t>(seqlen) + 1;
 			} while (count > maxseqlen);
 		} else {
 			pass1.push_back(value);
@@ -1123,7 +1132,7 @@ void print_unicode_header()
 {
 double log2_block_size = std::ceil(std::log2(static_cast<double>(recordstagetable.block_size)));
 std::size_t const block_shift = static_cast<std::size_t>(std::lrint(log2_block_size));
-std::size_t const block_mask = (1u << block_shift) - 1;
+std::size_t const block_mask = (std::size_t{1} << block_shift) - 1;
 
 std::cout <<
 R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++

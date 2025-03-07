@@ -10,8 +10,9 @@ project(
   HOMEPAGE_URL "https://github.com/jwtowner/lug"
   LANGUAGES CXX)
 
-option(BUILD_TESTS "Build tests" ON)
 option(BUILD_SAMPLES "Build sample applications" ON)
+option(BUILD_TESTS "Build tests" ON)
+option(BUILD_TOOLS "Build tools" OFF)
 option(CI_BUILD "Build is running on CI" OFF)
 
 include(CMakePackageConfigHelpers)
@@ -89,6 +90,11 @@ function(setup_executable_target target_name)
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/OPT:REF /OPT:ICF>)
   endif()
 endfunction()
+
+if(BUILD_TOOLS)
+  add_executable(makeunicode tools/makeunicode.cpp)
+  setup_executable_target(makeunicode)
+endif()
 
 if(BUILD_TESTS)
   enable_testing()
