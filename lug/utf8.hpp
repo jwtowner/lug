@@ -62,13 +62,13 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 [[nodiscard]] constexpr decode_state decode_rune_octet(char32_t& rune, char octet, decode_state state) noexcept
 {
-	auto const symbol = static_cast<unsigned int>(static_cast<unsigned char>(octet));
-	auto const dfa_class = static_cast<unsigned int>(dfa_class_table[symbol]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+	auto const symbol = static_cast<std::uint_least32_t>(static_cast<unsigned char>(octet));
+	auto const dfa_class = static_cast<std::uint_least32_t>(dfa_class_table[symbol]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 	rune = (state == decode_state::accept) ? (symbol & (0xffU >> dfa_class)) : ((symbol & 0x3fU) | (rune << 6U));
 	return static_cast<decode_state>(dfa_transition_table[static_cast<std::size_t>(state) + dfa_class]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 }
 
-[[nodiscard]] constexpr unsigned int non_ascii_rune_length(char32_t rune) noexcept
+[[nodiscard]] constexpr std::uint_least32_t non_ascii_rune_length(char32_t rune) noexcept
 {
 	if (rune < 0x00000800U)
 		return 2;
@@ -89,9 +89,12 @@ template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<In
 {
 	char32_t rune = U'\0';
 	detail::decode_state state = detail::decode_state::accept;
-	while ((first != last) && (state != detail::decode_state::reject))
+	while (first != last) {
 		if (state = utf8::detail::decode_rune_octet(rune, *first++, state); state == detail::decode_state::accept)
 			return std::make_pair(first, rune);
+		if (state == detail::decode_state::reject)
+			break;
+	}
 	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead), detail::utf32_replacement);
 }
 
@@ -118,8 +121,8 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	} else {
 		if ((0x00110000U <= rune) || ((rune & 0xfffff800U) == 0x0000d800U))
 			return {std::copy(detail::utf8_replacement_sequence.begin(), detail::utf8_replacement_sequence.end(), dst), false};
-		unsigned int const n = detail::non_ascii_rune_length(rune);
-		for (unsigned int i = 0, c = ((0xf0U << (4 - n)) & 0xf0U); i < n; ++i, c = 0x80U)
+		std::uint_least32_t const n = detail::non_ascii_rune_length(rune);
+		for (std::uint_least32_t i = 0, c = ((0xf0U << (4 - n)) & 0xf0U); i < n; ++i, c = 0x80U)
 			*dst++ = static_cast<char>(((rune >> (6 * (n - i - 1))) & 0x3fU) | c);
 	}
 	return {dst, true};
