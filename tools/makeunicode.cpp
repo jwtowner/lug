@@ -1415,22 +1415,15 @@ public:
 	rune_set& operator=(rune_set const&) = default;
 	rune_set& operator=(rune_set&&) = default;
 	~rune_set() = default;
+	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept { return (ascii == rhs.ascii) && (intervals == rhs.intervals); }
+	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept { return !(*this == rhs); }
+	[[nodiscard]] bool empty() const noexcept { return intervals.empty() && ascii.none(); }
+	void clear() noexcept { intervals.clear(); ascii.reset(); }
 
-	void clear() noexcept
-	{
-		intervals.clear();
-		ascii.reset();
-	}
-
-	[[nodiscard]] bool empty() const noexcept
-	{
-		return intervals.empty() && ascii.none();
-	}
-
-	[[nodiscard]] bool contains(char32_t rune) const
+	[[nodiscard]] bool contains(char32_t rune) const noexcept
 	{
 		if (rune < ascii_limit)
-			return ascii.test(static_cast<std::size_t>(rune));
+			return ascii[static_cast<std::size_t>(rune)];
 		auto const interval = std::lower_bound(intervals.begin(), intervals.end(), rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
 		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
 	}
