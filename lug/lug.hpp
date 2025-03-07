@@ -1504,6 +1504,8 @@ template <class X1> local_to_block_expression(X1&&, std::string_view) -> local_t
 template <class E1, class Container, class... ElementArgs>
 struct collect_expression : unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>
 {
+	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression" );
+	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types" );
 	using base_type = unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
 	template <class X1, class C, class... As> constexpr collect_expression(X1&& x1, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
@@ -1522,7 +1524,7 @@ struct collect_expression : unary_encoder_expression_interface<collect_expressio
 		Container container;
 		if (auto attributes = envr.finish_attribute_collection(seq.size()); !attributes.empty()) {
 			if constexpr (detail::container_has_reserve_v<Container>)
-				container.reserve(attributes.size());
+				container.reserve(attributes.size() / seq.size());
 			if constexpr (detail::container_has_emplace_back_v<Container, As...>) {
 				for ( ; !attributes.empty(); attributes.consume_front(seq.size()))
 					(void)container.emplace_back(attributes.template read_front<As, Is>()...);
@@ -1558,6 +1560,8 @@ struct collect_combinator
 template <class E1, class Factory, class T, class... Args>
 struct synthesize_expression : unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>
 {
+	static_assert(sizeof...(Args) > 0, "no arguments types provided to synthesize expression" );
+	static_assert(std::is_constructible_v<T, std::decay_t<Args>...>, "synthesized type does not support the provided constructor arguments" );
 	using base_type = unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
 	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
