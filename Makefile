@@ -10,7 +10,7 @@ PREFIX = /usr/local
 # toolchain
 CXXSTD = -std=c++17
 CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses \
-			-Os -ffunction-sections -fdata-sections -I.
+			-Os -ffunction-sections -fdata-sections -Iinclude
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 
@@ -33,10 +33,10 @@ TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # header dependencies
-HEADERS = lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp lug/lug.hpp
+HEADERS = include/lug/detail.hpp include/lug/error.hpp include/lug/unicode.hpp include/lug/utf8.hpp include/lug/lug.hpp
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ lug/ samples/ tests/ tools/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
 
 all: options samples tests
 
@@ -77,8 +77,8 @@ tools: $(TOOLS_BIN)
 unicode: tools
 	@echo fetching Unicode Character Database $(UCD_VERSION)
 	@cd tools/ && sh fetchucd.sh $(UCD_VERSION)
-	@echo generating lug/unicode.hpp
-	@cd tools/ && ./makeunicode > ../lug/unicode.hpp
+	@echo generating include/lug/unicode.hpp
+	@cd tools/ && ./makeunicode > ../include/lug/unicode.hpp
 
 options:
 	@echo lug build options:
@@ -106,15 +106,15 @@ dist: clean
 install: all
 	@echo installing header file to $(DESTDIR)$(PREFIX)/include/lug
 	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
-	@cp -f lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
-	@cp -f lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
-	@cp -f lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/error.hpp
-	@cp -f lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
-	@cp -f lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 
 uninstall:

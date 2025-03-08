@@ -30,7 +30,7 @@ endif()
 add_library(lug INTERFACE)
 
 target_include_directories(lug INTERFACE
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/lug>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
 target_compile_features(lug INTERFACE cxx_std_17)
@@ -51,7 +51,7 @@ install(
   NAMESPACE lug::
   DESTINATION lib/cmake/lug)
 
-install(DIRECTORY lug/ DESTINATION include/lug)
+install(DIRECTORY include/lug/ DESTINATION include/lug)
 
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/lug-config-version.cmake"
@@ -61,7 +61,7 @@ function(setup_executable_target target_name)
   set_target_properties(${target_name} PROPERTIES LANGUAGE CXX)
   target_compile_features(${target_name} PRIVATE cxx_std_17)
   target_link_libraries(${target_name} PRIVATE lug)
-  target_include_directories(${target_name} PRIVATE ${PROJECT_SOURCE_DIR})
+  target_include_directories(${target_name} PRIVATE ${PROJECT_SOURCE_DIR}/include)
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     target_compile_options(${target_name} PRIVATE
       -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override

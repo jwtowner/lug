@@ -3,6 +3,9 @@
 ## Release v0.5.0 (Under Development)
 
 * Implemented collection and object attribute directives. The new `collect<C>[e]` directive synthesizes a sequence or associative container type `C` consisting of elements gathered from the inherited or synthesized attributes in expression `e`. Likewise, there also new `synthesize<C,A...>[e]`, `synthesize_shared<C,A...>[e]` and `synthesize_unique<C,A...>[e]` directives for synthesizing objects, shared pointers and unique pointers respectively, constructed from the component attributes in expression `e`.
+* Updated to Unicode Standard Version 16.0.0 and added support for building tools to CMakeLists.txt.
+* Optimized character range and rune set matching for ASCII characters.
+* Moved lug/ include directory to include/lug/ so that files in the project root are not in the include path.
 
 ## Release v0.4.0 (March 4, 2025)
 
