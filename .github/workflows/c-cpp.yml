@@ -6,15 +6,19 @@ on:
   push:
     branches: [ "master", "develop" ]
     paths-ignore:
-      - "docs/**"
+      - "doc/**"
       - "CHANGELOG.md"
       - "README.md"
+      - ".editorconfig"
+      - ".gitignore"
   pull_request:
     branches: [ "master", "develop" ]
     paths-ignore:
-      - "docs/**"
+      - "doc/**"
       - "CHANGELOG.md"
       - "README.md"
+      - ".editorconfig"
+      - ".gitignore"
 
 jobs:
   build:
@@ -22,29 +26,36 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             compiler: g++-9
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             compiler: g++-10
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             compiler: g++-11
+          - os: ubuntu-22.04
+            compiler: clang++-14
+          - os: ubuntu-22.04
+            compiler: clang++-15
           - os: ubuntu-24.04
             compiler: g++-12
           - os: ubuntu-24.04
             compiler: g++-13
-          - os: ubuntu-22.04
-            compiler: g++
+          - os: ubuntu-24.04
+            compiler: g++-14
+          - os: ubuntu-24.04
+            compiler: clang++-16
+          - os: ubuntu-24.04
+            compiler: clang++-17
+          - os: ubuntu-24.04
+            compiler: clang++-18
+          - os: ubuntu-24.04
+            compiler: clang++-19
           - os: windows-2022
             compiler: default
           - os: macos-latest
             compiler: default
     steps:
     - uses: actions/checkout@v4
-    - name: Install Compiler Toolchain
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ${{ matrix.compiler }}
     - name: make
       if: runner.os == 'Linux'
       env:

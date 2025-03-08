@@ -1,4 +1,4 @@
-name: Clang-Tidy CI
+name: clang-tidy
 permissions:
   contents: read
 
@@ -11,7 +11,7 @@ on:
       - "Makefile"
   pull_request:
     branches: [ "master", "develop" ]
-    paths-ignore:
+    paths:
       - "include/**"
       - "CMakeLists.txt"
       - "Makefile"
@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Install Clang-Tidy
+    - name: Install clang-tidy
       run: |
         sudo apt-get update -yq
         sudo apt-get install -yq clang-tidy
-    - name: Run Clang-Tidy
+    - name: Run clang-tidy
       run: make lint CI_BUILD=1
