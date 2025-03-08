@@ -1,5 +1,6 @@
 lug
 [![Build Status](https://github.com/jwtowner/lug/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/jwtowner/lug/actions/workflows/c-cpp.yml)
+[![Clang-Tidy](https://github.com/jwtowner/lug/actions/workflows/clang-tidy.yml/badge.svg)](https://github.com/jwtowner/lug/actions/workflows/clang-tidy.yml)
 [![License](https://img.shields.io/packagist/l/doctrine/orm.svg)](https://github.com/jwtowner/lug/blob/master/LICENSE.md)
 ===
 A C++ embedded domain specific language for expressing parsers as extended [parsing expression grammars (PEGs)](https://en.wikipedia.org/wiki/Parsing_expression_grammar)

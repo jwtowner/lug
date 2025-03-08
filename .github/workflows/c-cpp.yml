@@ -1,10 +1,20 @@
 name: C/C++ CI
+permissions:
+  contents: read
 
 on:
   push:
     branches: [ "master", "develop" ]
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
   pull_request:
     branches: [ "master", "develop" ]
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "README.md"
 
 jobs:
   build:
