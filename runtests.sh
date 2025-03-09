@@ -18,6 +18,8 @@ if [ $# -eq 0 ]; then
 	exit 1
 fi
 
+run_status=0
+
 printf "running tests\n"
 printf "=============================================\n"
 
@@ -28,6 +30,7 @@ while [ $# -gt 0 ]; do
 		printf "[PASS] "
 	else
 		printf "[FAIL] "
+		run_status=1
 	fi
 	printf "%s\n" "$1"
 	if [ -n "$output" ]; then
@@ -38,3 +41,5 @@ done
 
 printf "=============================================\n"
 printf "all done\n"
+
+exit $run_status

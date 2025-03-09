@@ -14,11 +14,11 @@ jsoncheck - <%*.json% <0> @.%.out
 jsoncheck -q %*.json% <0> @.%.out
 jsoncheck -q - <%*.json% <0> @.%.out
 
+# jsonformat will test json_parser class
 [jsonformat]
 jsonformat <%*.json% <0> @.%.out
 jsonformat - <%*.json% <0> @.%.out
 
-# jsonformat will test json_parser class
 [jsonformat.compact]
 jsonformat -c <%*.json% <0> @.%.out
 jsonformat -c - <%*.json% <0> @.%.out

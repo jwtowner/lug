@@ -9,8 +9,8 @@
 # Print usage if no arguments are provided
 if [ $# -eq 0 ]; then
 	printf "Usage: runsamples.sh <testplan1> [<testplan2> ...]\n\n"
-	printf "Runs the test plans specified in the given files. Each testplan\n"
-	printf "file should contain test groups and commands in the format:\n\n"
+	printf "Runs the given sample testplan files. Each testplan file\n"
+	printf "should contain test groups and commands in the format:\n\n"
 	printf "  [GROUP-NAME]\n"
 	printf "  COMMAND <S> OUTPUT-FILE\n\n"
 	printf "Where:\n"
@@ -46,6 +46,11 @@ fi
 # Trim leading and trailing whitespace from a string
 trim() {
 	echo "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# Parse the specified component from a test command line
+parse_test_command() {
+	echo "$1" | sed -E "s/^(.+)<(-?[[:digit:]]+)>(.+)$/\\$2/"
 }
 
 # Run a test command and compare the output to the expected output
@@ -91,6 +96,8 @@ run_test_command() {
 	return 0
 }
 
+run_status=0
+
 printf "running samples\n"
 printf "=============================================\n"
 
@@ -126,10 +133,12 @@ for testplan_file in "$@"; do
 		fi
 
 		# Split line into command, status, and outfile
-		command=$(echo "$line" | sed -E 's/^(.+)<(-?[[:digit:]]+)>(.+)$/\1/')
-		status=$(echo "$line" | sed -E 's/^(.+)<(-?[[:digit:]]+)>(.+)$/\2/')
-		outfile=$(echo "$line" | sed -E 's/^(.+)<(-?[[:digit:]]+)>(.+)$/\3/')
+		command=$(parse_test_command "$line" 1)
+		status=$(parse_test_command "$line" 2)
+		outfile=$(parse_test_command "$line" 3)
 		if [ "$command" = "$line" ] || [ "$status" = "$line" ] || [ "$outfile" = "$line" ]; then
+			printf "Error: Invalid test command: %s\n" "$line"
+			run_status=1
 			continue;
 		fi
 
@@ -140,6 +149,7 @@ for testplan_file in "$@"; do
 		# Skip test if no group is defined yet
 		if [ -z "$current_group" ]; then
 			printf "Error: No group defined for test command: %s <%s> %s\n" "$command" "$status" "$outfile"
+			run_status=1
 			continue
 		fi
 
@@ -148,11 +158,11 @@ for testplan_file in "$@"; do
 		if [ "$pattern" = "$command" ]; then
 			# Handle commands without input pattern
 			resolved_outfile=$(echo "$outfile" | sed "s/@/${current_group}/g")
-			run_test_command "$testplan_dir" "$command" "$status" "$resolved_outfile" || continue
+			run_test_command "$testplan_dir" "$command" "$status" "$resolved_outfile" || run_status=1
 		else
 			# Process each matching input file
 			for infile in "$testplan_dir"/$pattern; do
-				[ -e "$infile" ] || continue
+				[ -f "$infile" ] || continue
 
 				# Get base name and base name without extension
 				infile_base=$(basename "$infile")
@@ -165,10 +175,13 @@ for testplan_file in "$@"; do
 				resolved_outfile=$(echo "$outfile" | sed -e "s/@/${current_group}/g" -e "s/%/${infile_base_no_ext}/g")
 
 				# Execute command with input file
-				run_test_command "$testplan_dir" "$resolved_command" "$status" "$resolved_outfile" || continue
+				run_test_command "$testplan_dir" "$resolved_command" "$status" "$resolved_outfile" || run_status=1
 			done
 		fi
 	done 3< "$testplan_file"
 done
 
-printf "\n=============================================\nall done\n"
+printf "\n=============================================\n"
+printf "all done\n"
+
+exit $run_status

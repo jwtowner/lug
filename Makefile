@@ -66,7 +66,7 @@ tests: $(TESTS_BIN)
 
 check: tests samples $(SAMPLES_TESTPLANS)
 	@sh runtests.sh $(TESTS_BIN)
-	@printf "\n"
+	@echo
 	@sh runsamples.sh $(SAMPLES_TESTPLANS)
 
 lint:
