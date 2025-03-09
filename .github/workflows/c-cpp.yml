@@ -48,8 +48,6 @@ jobs:
             compiler: clang++-17
           - os: ubuntu-24.04
             compiler: clang++-18
-          - os: ubuntu-24.04
-            compiler: clang++-19
           - os: windows-2022
             compiler: default
           - os: macos-latest
