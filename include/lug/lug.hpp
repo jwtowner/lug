@@ -36,6 +36,7 @@ class attribute_collection;
 template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
+template <class> class recursive_wrapper;
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
 using error_handler = std::function<error_response(error_context&)>;
@@ -475,6 +476,57 @@ public:
 		throw attribute_stack_error{};
 	return attribute_collection{this, attribute_result_stack_.size() - element_count};
 }
+
+template <class T>
+class recursive_wrapper
+{
+	std::unique_ptr<T> ptr;
+public:
+	using type = T;
+	recursive_wrapper() : ptr{std::make_unique<T>()} {}
+	recursive_wrapper(recursive_wrapper const& other) : ptr{std::make_unique<T>(*other.ptr)} {}
+	recursive_wrapper(recursive_wrapper&&) noexcept = default;
+	recursive_wrapper& operator=(recursive_wrapper&&) noexcept = default;
+	~recursive_wrapper() = default;
+
+	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
+	recursive_wrapper(U&& x) noexcept
+		: ptr{std::make_unique<T>(std::forward<U>(x))} {}
+
+	template <class U = T, class = std::enable_if_t<!std::is_constructible_v<T, std::unique_ptr<U>&&>>>
+	explicit recursive_wrapper(std::unique_ptr<U>&& p) noexcept
+		: ptr{std::move(p)} {}
+
+	recursive_wrapper& operator=(recursive_wrapper const& other)
+	{
+		recursive_wrapper{other}.swap(*this);
+		return *this;
+	}
+
+	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
+	recursive_wrapper& operator=(U&& x)
+	{
+		ptr = std::make_unique<T>(std::forward<U>(x));
+		return *this;
+	}
+
+	template <class U = T, class = std::enable_if_t<!std::is_assignable_v<T, std::unique_ptr<U>&&>>>
+	recursive_wrapper& operator=(std::unique_ptr<U>&& p)
+	{
+		ptr = std::move(p);
+		return *this;
+	}
+
+	void swap(recursive_wrapper& other) noexcept { ptr.swap(other.ptr); }
+	operator T&() noexcept { return *ptr; }
+	operator T const&() const noexcept { return *ptr; }
+	T& get() noexcept { return *ptr; }
+	T const & get() const noexcept { return *ptr; }
+	T* get_pointer() noexcept { return ptr.get(); }
+	T const* get_pointer() const noexcept { return ptr.get(); }
+};
+
+template <class T> recursive_wrapper(T&&) -> recursive_wrapper<std::decay_t<T>>;
 
 class error_context
 {

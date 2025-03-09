@@ -87,7 +87,7 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 		for (std::size_t i = 0; i < array.size(); ++i) {
 			if (pretty)
 				os << indentation << "  ";
-			write_json(os, *array[i], indent + 2, pretty);
+			write_json(os, array[i], indent + 2, pretty);
 			if (i < array.size() - 1)
 				os << ",";
 			os << newline;
@@ -103,7 +103,7 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 			os << "\"" << key << "\":";
 			if (pretty)
 				os << " ";
-			write_json(os, *value, indent + 2, pretty);
+			write_json(os, value, indent + 2, pretty);
 			if (i < object.size() - 1)
 				os << ",";
 			os << newline;
