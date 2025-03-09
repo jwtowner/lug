@@ -8,12 +8,14 @@ on:
     paths:
       - "include/**"
       - "CMakeLists.txt"
+      - ".clangtidy"
       - "Makefile"
   pull_request:
     branches: [ "master", "develop" ]
     paths:
       - "include/**"
       - "CMakeLists.txt"
+      - ".clangtidy"
       - "Makefile"
 
 jobs:
