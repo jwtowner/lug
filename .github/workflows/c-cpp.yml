@@ -60,7 +60,7 @@ jobs:
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make CI_BUILD=1
+      run: make -j$(nproc) CI_BUILD=1
     - name: make check
       if: runner.os == 'Linux'
       env:
