@@ -39,7 +39,8 @@ void print_usage()
 }
 
 // Parses command line arguments
-options parse_args(int argc, char* argv[]) {
+options parse_options(int argc, char* argv[])
+{
 	options opts;
 	for (int i = 1; i < argc; ++i) {
 		std::string_view const arg{argv[i]};
@@ -59,7 +60,7 @@ options parse_args(int argc, char* argv[]) {
 
 int main(int argc, char* argv[])
 try {
-	auto const opts = parse_args(argc, argv);
+	auto const opts = parse_options(argc, argv);
 	auto const matched = [&] {
 		if (opts.filename == "-")
 			return json_matcher{}.match_cin();

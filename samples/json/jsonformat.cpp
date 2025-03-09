@@ -41,7 +41,8 @@ void print_usage()
 }
 
 // Parses command line arguments
-options parse_args(int argc, char* argv[]) {
+options parse_options(int argc, char* argv[])
+{
 	options opts;
 	for (int i = 1; i < argc; ++i) {
 		std::string_view const arg{argv[i]};
@@ -72,7 +73,6 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 {
 	std::string const indentation(static_cast<std::size_t>(pretty ? indent : 0), ' ');
 	std::string_view const newline{pretty ? "\n" : ""};
-
 	if (node.is_null()) {
 		os << "null";
 	} else if (node.is_bool()) {
@@ -115,7 +115,7 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 
 int main(int argc, char* argv[])
 try {
-	auto const opts = parse_args(argc, argv);
+	auto const opts = parse_options(argc, argv);
 	auto const json = [&] {
 		if (opts.filename == "-")
 			return json_parser{}.parse_cin();

@@ -70,7 +70,7 @@ public:
 		rule Boolean        = lexeme[ "true"_sx | "false" ] < MakeBool;
 		rule Null           = lexeme[ "null" ] < MakeNull;
 		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
-		rule Escape         = lexeme[ '\\' > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
+		rule Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
 		rule KeyOrString    = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeKeyOrString;
 		rule String         = synthesize_unique<json_node, std::string>[ KeyOrString ];
 		rule Array          = '[' > synthesize_unique<json_node, json_array>[ collect<json_array>[ JSON >> ',' ] ] > ']';
@@ -80,7 +80,7 @@ public:
 	}
 
 	template <typename T>
-	json_node_ptr parse(T&& t)
+	json_node_ptr parse(T&& t) const
 	{
 		lug::environment environment;
 		if (lug::parse(std::forward<T>(t), grammar_, environment))
@@ -88,7 +88,7 @@ public:
 		return nullptr;
 	}
 
-	json_node_ptr parse_cin()
+	json_node_ptr parse_cin() const
 	{
 		lug::environment environment;
 		if (lug::parse(grammar_, environment))

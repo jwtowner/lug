@@ -2,8 +2,8 @@
 // Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#ifndef LUG_SAMPLES_JSON_MATCHER_HPP
-#define LUG_SAMPLES_JSON_MATCHER_HPP
+#ifndef LUG_SAMPLES_JSON_JSON_MATCHER_HPP
+#define LUG_SAMPLES_JSON_JSON_MATCHER_HPP
 
 #include <lug/lug.hpp>
 
@@ -22,7 +22,7 @@ public:
 		rule Boolean        = lexeme[ "true"_sx | "false" ];
 		rule Null           = lexeme[ "null" ];
 		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
-		rule Escape         = lexeme[ '\\' > ("[/\\bfnrt]"_rx | UnicodeEscape) ];
+		rule Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
 		rule String         = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ];
 		rule Array          = '[' > JSON > *(',' > JSON) > ']';
 		rule Object         = '{' > String > ':' > JSON > *(',' > String > ':' > JSON) > '}';
@@ -45,4 +45,4 @@ private:
 	lug::grammar grammar_;
 };
 
-#endif // LUG_SAMPLES_JSON_MATCHER_HPP
+#endif // LUG_SAMPLES_JSON_JSON_MATCHER_HPP
