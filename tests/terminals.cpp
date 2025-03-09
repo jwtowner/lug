@@ -154,6 +154,18 @@ void test_regular_expression()
 	assert(!lug::parse("καλημέρα κόσμε!", G2));
 	assert(!lug::parse("hello world", G2));
 	assert(!lug::parse("h", G2));
+
+	// Unicode negated regular expression with escape sequences
+	rule S3 = noskip[ +"[^\"\\\u0000-\u001F\U0001F315]"_rx > eoi ];
+	grammar G3 = start(S3);
+	assert(lug::parse("Hello, world!🌍", G3));
+	assert(lug::parse("Hello, 世界!🌍", G3));
+	assert(!lug::parse("Hello, moon!🌕", G3));
+	assert(!lug::parse("Hello, 月!🌕", G3));
+	assert(!lug::parse("\"hello world\"", G3));
+	assert(!lug::parse("\\hello world", G3));
+	assert(!lug::parse("\u0000hello world", G3));
+	assert(!lug::parse("\u001Fhello world", G3));
 }
 
 int main()

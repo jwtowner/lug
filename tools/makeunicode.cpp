@@ -1483,8 +1483,10 @@ public:
 		}
 		if (char32_t const back = runes.intervals.back().second; back < U'\xFFFFFFFF')
 			negated_runes.intervals.emplace_back(back + 1, U'\xFFFFFFFF');
-		negated_runes.intervals.shrink_to_fit();
+	} else {
+		negated_runes.intervals.emplace_back(rune_set::ascii_limit, U'\xFFFFFFFF');
 	}
+	negated_runes.intervals.shrink_to_fit();
 	negated_runes.ascii = ~runes.ascii;
 	return negated_runes;
 }
