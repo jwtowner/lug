@@ -6,8 +6,7 @@
 
 # Usage: runtests.sh <program1> [<program2> ...]
 
-# Print usage if no arguments are provided
-if [ $# -eq 0 ]; then
+usage() {
 	printf "Usage: runtests.sh <program1> [<program2> ...]\n\n"
 	printf "Runs the specified test programs and reports their results.\n"
 	printf "Each program is executed and its output is captured.\n"
@@ -15,6 +14,10 @@ if [ $# -eq 0 ]; then
 	printf "Programs that exit with non-zero codes are marked as FAIL.\n\n"
 	printf "Example:\n"
 	printf "  ./runtests.sh tests/terminals tests/nonterminals\n"
+}
+
+if [ $# -eq 0 ]; then
+	usage
 	exit 1
 fi
 
@@ -24,6 +27,10 @@ printf "running tests\n"
 printf "=============================================\n"
 
 while [ $# -gt 0 ]; do
+	if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+		usage
+		exit 1
+	fi
 	output=$($1 2>&1)
 	ret=$?
 	if [ $ret -eq 0 ]; then

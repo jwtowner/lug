@@ -7,7 +7,7 @@
 # Usage: runsamples.sh <testplan1> [<testplan2> ...]
 
 # Print usage if no arguments are provided
-if [ $# -eq 0 ]; then
+usage() {
 	printf "Usage: runsamples.sh <testplan1> [<testplan2> ...]\n\n"
 	printf "Runs the given sample testplan files. Each testplan file\n"
 	printf "should contain test groups and commands in the format:\n\n"
@@ -40,8 +40,7 @@ if [ $# -eq 0 ]; then
 	printf "    3. Compare exit status codes of commands with expected value\n"
 	printf "    4. Compare output against files matching \"demo-tests.*.(out|formatted)\"\n"
 	printf "    5. Print results to the console\n"
-	exit 1
-fi
+}
 
 # Trim leading and trailing whitespace from a string
 trim() {
@@ -96,6 +95,11 @@ run_test_command() {
 	return 0
 }
 
+if [ $# -eq 0 ]; then
+	usage
+	exit 1
+fi
+
 run_status=0
 
 printf "running samples\n"
@@ -103,6 +107,12 @@ printf "=============================================\n"
 
 # Run each testplan file
 for testplan_file in "$@"; do
+	# Print usage if help flag is provided
+	if [ "$testplan_file" = "-h" ] || [ "$testplan_file" = "--help" ]; then
+		usage
+		exit 1
+	fi
+
 	# Skip if file does not exist
 	if [ ! -f "$testplan_file" ]; then
 		printf "Error: Test file '%s' not found\n" "$testplan_file"
