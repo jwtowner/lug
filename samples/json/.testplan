@@ -7,26 +7,26 @@
 
 # jsoncheck will test json_matcher class
 [jsoncheck]
-jsoncheck %test*.json% <0> @.%.out
-jsoncheck - <%test*.json% <0> @.%.out
-jsoncheck %bad*.json% <1> @.%.out
-jsoncheck - <%bad*.json% <1> @.%.out
+jsoncheck %test*.json% <0> testplan/@.%.out
+jsoncheck - <%test*.json% <0> testplan/@.%.out
+jsoncheck %bad*.json% <1> testplan/@.%.out
+jsoncheck - <%bad*.json% <1> testplan/@.%.out
 
 [jsoncheck.quiet]
-jsoncheck -q %test*.json% <0> @.%.out
-jsoncheck -q - <%test*.json% <0> @.%.out
-jsoncheck -q %bad*.json% <1> @.%.out
-jsoncheck -q - <%bad*.json% <1> @.%.out
+jsoncheck -q %test*.json% <0> testplan/@.%.out
+jsoncheck -q - <%test*.json% <0> testplan/@.%.out
+jsoncheck -q %bad*.json% <1> testplan/@.%.out
+jsoncheck -q - <%bad*.json% <1> testplan/@.%.out
 
 # jsonformat will test json_parser class
 [jsonformat]
-jsonformat %test*.json% <0> @.%.out
-jsonformat - <%test*.json% <0> @.%.out
-jsonformat %bad*.json% <1> @.%.out
-jsonformat - <%bad*.json% <1> @.%.out
+jsonformat %test*.json% <0> testplan/@.%.out
+jsonformat - <%test*.json% <0> testplan/@.%.out
+jsonformat %bad*.json% <1> testplan/@.%.out
+jsonformat - <%bad*.json% <1> testplan/@.%.out
 
 [jsonformat.compact]
-jsonformat -c %test*.json% <0> @.%.out
-jsonformat -c - <%test*.json% <0> @.%.out
-jsonformat -c %bad*.json% <1> @.%.out
-jsonformat -c - <%bad*.json% <1> @.%.out
+jsonformat -c %test*.json% <0> testplan/@.%.out
+jsonformat -c - <%test*.json% <0> testplan/@.%.out
+jsonformat -c %bad*.json% <1> testplan/@.%.out
+jsonformat -c - <%bad*.json% <1> testplan/@.%.out
