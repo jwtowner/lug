@@ -18,13 +18,13 @@ CLANGTIDY = clang-tidy
 UCD_VERSION = 16.0.0
 
 # samples
-SAMPLES = basic/basic calc/calc demo/demo json/json_matcher json/json_parser xml/xml
+SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xml
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # samples tests
-SAMPLES_TESTS = json/json
-SAMPLES_TESTS_FILES = $(SAMPLES_TESTS:%=samples/%.tests)
+SAMPLES_TESTS_DIRS = json/
+SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%.testplan)
 
 # tests
 TESTS = acceptcut attributes captures conditions errorhandling leftrecursion nonterminals parser predicates symbols terminals
@@ -64,9 +64,10 @@ $(TESTS_BIN): $(TESTS_OBJ)
 
 tests: $(TESTS_BIN)
 
-check: tests samples $(SAMPLES_TESTS_FILES)
+check: tests samples $(SAMPLES_TESTPLANS)
 	@sh runtests.sh $(TESTS_BIN)
-	@sh runsamples.sh $(SAMPLES_TESTS_FILES)
+	@printf "\n"
+	@sh runsamples.sh $(SAMPLES_TESTPLANS)
 
 lint:
 	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)

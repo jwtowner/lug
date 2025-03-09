@@ -2,6 +2,9 @@
 // Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
+#ifndef LUG_SAMPLES_JSON_MATCHER_HPP
+#define LUG_SAMPLES_JSON_MATCHER_HPP
+
 #include <lug/lug.hpp>
 
 // Matcher for JSON Data Interchange Standard (RFC7159)
@@ -27,7 +30,13 @@ public:
 		grammar_            = start(JSON > eoi);
 	}
 
-	bool parse_cin()
+	template <typename T>
+	bool match(T&& t) const
+	{
+		return lug::parse(std::forward<T>(t), grammar_);
+	}
+
+	bool match_cin() const
 	{
 		return lug::parse(grammar_);
 	}
@@ -36,20 +45,4 @@ private:
 	lug::grammar grammar_;
 };
 
-int main()
-{
-	try {
-		json_matcher matcher;
-		if (!matcher.parse_cin()) {
-			std::cout << "Invalid JSON!\n";
-			return -1;
-		}
-	} catch (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "UNKNOWN ERROR\n";
-		return -1;
-	}
-	return 0;
-}
+#endif // LUG_SAMPLES_JSON_MATCHER_HPP

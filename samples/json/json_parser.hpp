@@ -2,9 +2,11 @@
 // Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
+#ifndef LUG_SAMPLES_JSON_JSON_PARSER_HPP
+#define LUG_SAMPLES_JSON_JSON_PARSER_HPP
+
 #include <lug/lug.hpp>
 
-#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
@@ -77,81 +79,25 @@ public:
 		grammar_            = start(JSON > eoi);
 	}
 
-	bool parse_cin()
+	template <typename T>
+	json_node_ptr parse(T&& t)
 	{
-		return lug::parse(grammar_, environment_);
+		lug::environment environment;
+		if (lug::parse(std::forward<T>(t), grammar_, environment))
+			return environment.pop_attribute<json_node_ptr>();
+		return nullptr;
 	}
 
-	json_node_ptr const& value() const
+	json_node_ptr parse_cin()
 	{
-		return environment_.top_attribute<json_node_ptr>();
+		lug::environment environment;
+		if (lug::parse(grammar_, environment))
+			return environment.pop_attribute<json_node_ptr>();
+		return nullptr;
 	}
 
 private:
 	lug::grammar grammar_;
-	lug::environment environment_;
 };
 
-// Recursively writes a JSON node tree to an output stream
-void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pretty = true)
-{
-	std::string const indentation(static_cast<std::size_t>(pretty ? indent : 0), ' ');
-	std::string_view const newline{pretty ? "\n" : ""};
-
-	if (node.is_null()) {
-		os << "null";
-	} else if (node.is_bool()) {
-		os << (node.as_bool() ? "true" : "false");
-	} else if (node.is_number()) {
-		os << node.as_number();
-	} else if (node.is_string()) {
-		os << "\"" << node.as_string() << "\"";
-	} else if (node.is_array()) {
-		os << "[" << newline;
-		auto const& array = node.as_array();
-		for (std::size_t i = 0; i < array.size(); ++i) {
-			if (pretty)
-				os << indentation << "  ";
-			write_json(os, *array[i], indent + 2, pretty);
-			if (i < array.size() - 1)
-				os << ",";
-			os << newline;
-		}
-		os << indentation << "]";
-	} else if (node.is_object()) {
-		os << "{" << newline;
-		auto const& object = node.as_object();
-		std::size_t i = 0;
-		for (auto const& [key, value] : object) {
-			if (pretty)
-				os << indentation << "  ";
-			os << "\"" << key << "\": ";
-			write_json(os, *value, indent + 2, pretty);
-			if (i < object.size() - 1)
-				os << ",";
-			os << newline;
-			++i;
-		}
-		os << indentation << "}";
-	}
-}
-
-int main()
-{
-	try {
-		json_parser reader;
-		if (!reader.parse_cin()) {
-			std::cout << "Invalid JSON!\n";
-			return -1;
-		}
-		write_json(std::cout, *reader.value());
-		std::cout << std::endl;
-	} catch (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "UNKNOWN ERROR\n";
-		return -1;
-	}
-	return 0;
-}
+#endif // LUG_SAMPLES_JSON_JSON_PARSER_HPP
