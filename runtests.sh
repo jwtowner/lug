@@ -4,13 +4,15 @@
 # Copyright (c) 2017-2025 Jesse W. Towner
 # See LICENSE.md file for license details
 
-printf "running %s\n" "$1"
+# Usage: runtests.sh <program1> [<program2> ...]
+
+printf "running tests\n"
 printf "=============================================\n"
 
-shift
 while [ $# -gt 0 ]; do
 	output=$($1 2>&1)
-	if [ $? -eq 0 ]; then
+	ret=$?
+	if [ $ret -eq 0 ]; then
 		printf "[PASS] "
 	else
 		printf "[FAIL] "

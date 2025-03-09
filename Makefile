@@ -22,6 +22,10 @@ SAMPLES = basic/basic calc/calc demo/demo json/json_matcher json/json_parser xml
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
+# samples tests
+SAMPLES_TESTS = json/json
+SAMPLES_TESTS_FILES = $(SAMPLES_TESTS:%=samples/%.tests)
+
 # tests
 TESTS = acceptcut attributes captures conditions errorhandling leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
@@ -36,7 +40,7 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 HEADERS = include/lug/detail.hpp include/lug/error.hpp include/lug/unicode.hpp include/lug/utf8.hpp include/lug/lug.hpp
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
 
 all: options samples tests
 
@@ -60,8 +64,9 @@ $(TESTS_BIN): $(TESTS_OBJ)
 
 tests: $(TESTS_BIN)
 
-check: tests
-	@sh runtests.sh "tests" $(TESTS_BIN)
+check: tests samples $(SAMPLES_TESTS_FILES)
+	@sh runtests.sh $(TESTS_BIN)
+	@sh runsamples.sh $(SAMPLES_TESTS_FILES)
 
 lint:
 	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
