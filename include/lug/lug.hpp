@@ -2086,23 +2086,12 @@ protected:
 	bool success_{false};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
-	template <opcode Opcode>
-	void commit(std::ptrdiff_t off)
+	template <class T>
+	T& top_stack_frame()
 	{
 		if (stack_frames_.empty())
 			throw bad_stack{};
-		auto& backtrack = std::get<backtrack_frame>(stack_frames_.back());
-		if constexpr (Opcode == opcode::commit_partial) {
-			backtrack.sr = registers_.sr;
-			backtrack.rc = registers_.rc;
-		} else {
-			if constexpr (Opcode == opcode::commit_back) {
-				registers_.sr = backtrack.sr;
-				registers_.ri = backtrack.ri;
-			}
-			stack_frames_.pop_back();
-		}
-		registers_.pc += off;
+		return std::get<T>(stack_frames_.back());
 	}
 
 	void pop_responses_after(std::size_t n)
@@ -2642,13 +2631,23 @@ public:
 					registers_.ri = (stack_frames_.size() & predicate_frame_mask) | (registers_.ri & ~predicate_frame_mask) | predicate_inhibited_flag;
 				} break;
 				case opcode::commit: {
-					commit<opcode::commit>(instr.offset32);
+					if (stack_frames_.empty())
+						throw bad_stack{};
+					stack_frames_.pop_back();
+					registers_.pc += instr.offset32;
 				} break;
 				case opcode::commit_back: {
-					commit<opcode::commit_back>(instr.offset32);
+					auto const& backtrack = top_stack_frame<backtrack_frame>();
+					registers_.sr = backtrack.sr;
+					registers_.ri = backtrack.ri;
+					stack_frames_.pop_back();
+					registers_.pc += instr.offset32;
 				} break;
 				case opcode::commit_partial: {
-					commit<opcode::commit_partial>(instr.offset32);
+					auto const& backtrack = top_stack_frame<backtrack_frame>();
+					backtrack.sr = registers_.sr;
+					backtrack.rc = registers_.rc;
+					registers_.pc += instr.offset32;
 				} break;
 				case opcode::accept: {
 					registers_.ci |= static_cast<std::size_t>(instr.immediate8) << lug::registers::ignore_errors_shift;
@@ -2671,9 +2670,7 @@ public:
 				case opcode::raise: {
 					std::ptrdiff_t const recovery_handler{registers_.rh};
 					if (instr.immediate8 != 0) {
-						if (stack_frames_.empty())
-							throw bad_stack{};
-						registers_.rh = std::get<recover_frame>(stack_frames_.back()).rh;
+						registers_.rh = top_stack_frame<recover_frame>().rh;
 						stack_frames_.pop_back();
 					}
 					if ((registers_.ri & lug::registers::inhibited_flag) != 0) {
@@ -2697,9 +2694,7 @@ public:
 					registers_.rh = registers_.pc + instr.offset32;
 				} break;
 				case opcode::recover_pop: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					registers_.rh = std::get<recover_frame>(stack_frames_.back()).rh;
+					registers_.rh = top_stack_frame<recover_frame>().rh;
 					stack_frames_.pop_back();
 				} break;
 				case opcode::report_push: {
@@ -2710,9 +2705,7 @@ public:
 					registers_.rr = static_cast<error_response>(instr.immediate8);
 				} break;
 				case opcode::report_pop: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					registers_.eh = std::get<report_frame>(stack_frames_.back()).eh;
+					registers_.eh = top_stack_frame<report_frame>().eh;
 					stack_frames_.pop_back();
 				} break;
 				case opcode::predicate: {
@@ -2730,9 +2723,7 @@ public:
 					++registers_.ci;
 				} break;
 				case opcode::capture_end: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					auto const sr0 = std::get<capture_frame>(stack_frames_.back()).sr;
+					auto const sr0 = top_stack_frame<capture_frame>().sr;
 					auto const sr1 = registers_.sr;
 					stack_frames_.pop_back();
 					--registers_.ci;
@@ -2786,9 +2777,7 @@ public:
 					stack_frames_.emplace_back(std::in_place_type<condition_frame>, str, environment_->set_condition(str, instr.immediate8 != 0));
 				} break;
 				case opcode::condition_pop: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					auto const& condition = std::get<condition_frame>(stack_frames_.back());
+					auto const& condition = top_stack_frame<condition_frame>();
 					environment_->set_condition(condition.name, condition.value);
 					stack_frames_.pop_back();
 				} break;
@@ -2823,9 +2812,7 @@ public:
 					stack_frames_.emplace_back(std::in_place_type<symbol_frame>, str, registers_.sr);
 				} break;
 				case opcode::symbol_end: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					auto const& symbol = std::get<symbol_frame>(stack_frames_.back());
+					auto const& symbol = top_stack_frame<symbol_frame>();
 					auto const sr0 = static_cast<std::size_t>(symbol.sr);
 					auto const sr1 = registers_.sr;
 					auto const name = symbol.name;
@@ -2844,9 +2831,7 @@ public:
 						environment_->symbols_.clear();
 				} break;
 				case opcode::symbol_pop: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
-					environment_->symbols_.swap(std::get<symbol_table_frame>(stack_frames_.back()));
+					environment_->symbols_.swap(top_stack_frame<symbol_table_frame>());
 					stack_frames_.pop_back();
 				} break;
 				default: throw bad_opcode{};
