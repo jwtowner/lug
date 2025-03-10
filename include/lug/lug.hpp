@@ -2087,7 +2087,7 @@ protected:
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
 	template <class T>
-	T& top_stack_frame()
+	[[nodiscard]] T& top_stack_frame()
 	{
 		if (stack_frames_.empty())
 			throw bad_stack{};
