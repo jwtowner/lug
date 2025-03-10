@@ -15,18 +15,18 @@ public:
 	{
 		using namespace lug::language;
 		rule JSON;
-		rule ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
-		rule FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
-		rule IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
-		rule Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ];
-		rule Boolean        = lexeme[ "true"_sx | "false" ];
-		rule Null           = lexeme[ "null" ];
-		rule UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
-		rule Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
+		auto ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
+		auto FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
+		auto IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
+		auto Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ];
+		auto Boolean        = lexeme[ "true"_sx | "false" ];
+		auto Null           = lexeme[ "null" ];
+		auto UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
+		auto Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
 		rule String         = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ];
-		rule Array          = '[' > JSON > *(',' > JSON) > ']';
-		rule Object         = '{' > String > ':' > JSON > *(',' > String > ':' > JSON) > '}';
-		JSON                = Null | Boolean | Number | String | Array | Object;
+		auto Array          = '[' > JSON > *(',' > JSON) > ']';
+		auto Object         = '{' > String > ':' > JSON > *(',' > String > ':' > JSON) > '}';
+		JSON                = Object | Array | String | Number | Boolean | Null;
 		grammar_            = start(JSON > eoi);
 	}
 
