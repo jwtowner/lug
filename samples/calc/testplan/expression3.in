@@ -1,0 +1,17 @@
+A = 5                  ; assign 5 to A
+B = A * 2              ; B becomes 10
+C = (A + B) / 2        ; average of A and B
+X = 10                 ; new variable X
+Y = X * (A + 1)        ; use X and A in computation
+Z = (X + Y) / A        ; combine multiple variables
+B = B + 1              ; increment B
+A = A * (B - C)        ; complex reassignment
+D = (A + B) * (X - Y)  ; multiple groupings with vars
+E = D / (A + 1)        ; use previous result
+F = (A + B + C) / 3    ; average of three vars
+G = F * (D - E)        ; use multiple previous results
+H = (G + A) * (B + C)  ; nested vars with grouping
+A = (A + B) / 2        ; modify A using B
+M = (X * Y) / (A + B)  ; division with grouped vars
+N = M * (A + B + C)    ; use many variables
+QUIT

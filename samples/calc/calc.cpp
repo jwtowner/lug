@@ -20,7 +20,7 @@ extern rule Expr;
 implicit_space_rule BLANK = lexeme[ *"[ \t]"_rx ];
 
 rule EOL    = lexeme[ "[\n\r;]"_rx ];
-rule ID     = lexeme[ "[a-z]"_rx     <[](syntax m) -> int { return m.str().at(0) - 'a'; } ];
+rule ID     = lexeme[ "[a-zA-Z]"_rx  <[](syntax m) -> int { return static_cast<int>(lug::unicode::tolower(static_cast<char32_t>(m.str().at(0))) - U'a'); } ];
 rule NUMBER = lexeme[ ( ~"[-+]"_rx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx) )
                                      <[](syntax m) -> double { return std::stod(std::string{m}); } ];
 rule Value  = n%NUMBER               <[]{ return n; }
