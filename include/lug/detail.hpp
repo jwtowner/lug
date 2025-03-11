@@ -19,28 +19,6 @@
 #include <utility>
 #include <vector>
 
-#ifndef LUG_NO_ISATTY
-#ifdef _MSC_VER
-#ifndef LUG_HAS_ISATTY_MSVC
-#define LUG_HAS_ISATTY_MSVC
-#endif
-#else
-#ifndef LUG_HAS_ISATTY_POSIX
-#ifdef __has_include
-#if __has_include(<unistd.h>)
-#define LUG_HAS_ISATTY_POSIX
-#endif
-#endif
-#endif
-#endif
-#endif // LUG_NO_ISATTY
-
-#if defined LUG_HAS_ISATTY_MSVC
-#include <io.h>
-#elif defined LUG_HAS_ISATTY_POSIX
-#include <unistd.h>
-#endif
-
 #ifndef LUG_NO_RTTI
 #if defined __GNUC__
 #ifndef __GXX_RTTI
@@ -76,17 +54,6 @@ _Pragma("GCC diagnostic pop")
 namespace lug {
 
 class bad_move_only_any_cast : public std::bad_cast { public: [[nodiscard]] char const* what() const noexcept override { return "bad move_only_any cast"; } };
-
-[[nodiscard]] inline bool stdin_isatty() noexcept
-{
-#if defined LUG_HAS_ISATTY_MSVC
-	return _isatty(_fileno(stdin)) != 0;
-#elif defined LUG_HAS_ISATTY_POSIX
-	return isatty(fileno(stdin)) != 0;
-#else
-	return false;
-#endif
-}
 
 inline namespace bitfield_ops {
 

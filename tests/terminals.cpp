@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <iostream>
 
 #undef NDEBUG
 #include <cassert>
@@ -169,20 +170,18 @@ void test_regular_expression()
 }
 
 int main()
-{
-	try {
-		test_empty();
-		test_any();
-		test_char();
-		test_char_range();
-		test_string();
-		test_regular_expression();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_empty();
+	test_any();
+	test_char();
+	test_char_range();
+	test_string();
+	test_regular_expression();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

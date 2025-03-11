@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <iostream>
 
 #undef NDEBUG
 #include <cassert>
@@ -158,24 +159,22 @@ void test_list()
 }
 
 int main()
-{
-	try {
-		test_sequence();
-		test_choice();
-		test_zero_or_one();
-		test_zero_or_many();
-		test_one_or_many();
-		test_repeat_count();
-		test_repeat_min_max();
-		test_not();
-		test_predicate();
-		test_list();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_sequence();
+	test_choice();
+	test_zero_or_one();
+	test_zero_or_many();
+	test_one_or_many();
+	test_repeat_count();
+	test_repeat_min_max();
+	test_not();
+	test_predicate();
+	test_list();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

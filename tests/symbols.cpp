@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <iostream>
 
 #undef NDEBUG
 #include <cassert>
@@ -369,24 +370,22 @@ void test_symbol_definition_and_match_caseless()
 }
 
 int main()
-{
-	try {
-		test_symbol_exists();
-		test_symbol_match();
-		test_symbol_definition_and_match();
-		test_symbol_definition_and_match_2();
-		test_symbol_definition_and_match_3();
-		test_symbol_definition_and_match_any();
-		test_symbol_definition_and_match_all();
-		test_symbol_nested_definition_and_match();
-		test_symbol_match_caseless();
-		test_symbol_definition_and_match_caseless();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_symbol_exists();
+	test_symbol_match();
+	test_symbol_definition_and_match();
+	test_symbol_definition_and_match_2();
+	test_symbol_definition_and_match_3();
+	test_symbol_definition_and_match_any();
+	test_symbol_definition_and_match_all();
+	test_symbol_nested_definition_and_match();
+	test_symbol_match_caseless();
+	test_symbol_definition_and_match_caseless();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

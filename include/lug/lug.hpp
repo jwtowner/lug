@@ -8,7 +8,6 @@
 #include <lug/error.hpp>
 #include <lug/utf8.hpp>
 
-#include <iostream>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -1977,7 +1976,7 @@ template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::
 template <typename T, typename = void> struct input_source_has_options : std::false_type {};
 template <typename T> struct input_source_has_options<T, std::enable_if_t<std::is_same_v<source_options, decltype(std::declval<T const&>().options())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
-template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T>().fill_buffer())>>> : std::true_type {};
+template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T&>().fill_buffer(std::declval<std::size_t>()))>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
@@ -1988,7 +1987,7 @@ template <typename T, class InputFunc> struct input_source_has_push_source<T, In
 class multi_input_source
 {
 	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::string&, source_options)>, source_options>> sources_;
+	std::vector<std::pair<std::function<bool(std::back_insert_iterator<std::string>, source_options)>, source_options>> sources_;
 	bool reading_{false};
 
 public:
@@ -1996,21 +1995,16 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
-	[[nodiscard]] bool fill_buffer()
+	[[nodiscard]] bool fill_buffer(std::size_t sn)
 	{
 		if (sources_.empty())
 			return false;
-		std::string text;
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
-		while (!sources_.empty() && text.empty()) {
-			text.clear();
-			auto const& [func, opt] = sources_.back();
-			bool const more = func(text, opt);
-			buffer_.insert(buffer_.end(), text.begin(), text.end());
-			if (!more)
+		std::size_t const min_size = buffer_.size() + sn;
+		while (!sources_.empty() && (buffer_.size() < min_size))
+			if (auto const& [func, opt] = sources_.back(); !func(std::back_inserter(buffer_), opt))
 				sources_.pop_back();
-		}
-		return !text.empty();
+		return buffer_.size() >= min_size;
 	}
 
 	template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
@@ -2025,7 +2019,7 @@ public:
 		enqueue(rng.begin(), rng.end());
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::string&, source_options>>>
+	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
@@ -2280,17 +2274,26 @@ class basic_parser : public parser_base
 {
 	InputSource input_source_;
 
+	[[nodiscard]] bool interactive() const noexcept
+	{
+		if constexpr (detail::input_source_has_options<InputSource>::value)
+			return (input_source_.options() & source_options::interactive) != source_options::none;
+		else
+			return false;
+	}
+
 	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			do {
+			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
 				if ((sr <= buffer_size) && (sn <= (buffer_size - sr)))
 					return true;
-				if (sr < buffer_size)
+				if ((sr < buffer_size) && interactive())
 					return false;
-			} while (input_source_.fill_buffer());
-			return false;
+				if (!input_source_.fill_buffer(sn - (buffer_size - sr)))
+					return false;
+			}
 		} else {
 			std::size_t const buffer_size = input_source_.buffer().size();
 			return (sr <= buffer_size) && (sn <= (buffer_size - sr));
@@ -2644,7 +2647,7 @@ public:
 					registers_.pc += instr.offset32;
 				} break;
 				case opcode::commit_partial: {
-					auto const& backtrack = top_stack_frame<backtrack_frame>();
+					auto& backtrack = top_stack_frame<backtrack_frame>();
 					backtrack.sr = registers_.sr;
 					backtrack.rc = registers_.rc;
 					registers_.pc += instr.offset32;
@@ -2892,39 +2895,6 @@ inline bool parse(std::string_view input, grammar const& grmr)
 inline bool parse(std::string_view input, grammar const& grmr, environment& envr)
 {
 	return parse(input.cbegin(), input.cend(), grmr, envr);
-}
-
-inline bool parse(std::istream& input, grammar const& grmr, environment& envr, source_options options = source_options::none)
-{
-	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input](std::string& output, source_options opt) {
-		if (!input)
-			return false;
-		if ((opt & source_options::interactive) != source_options::none) {
-			if (!std::getline(input, output))
-				return false;
-			output.push_back('\n');
-			return true;
-		}
-		input.clear();
-		output.append(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-		return input.bad();
-	}, options).parse();
-}
-
-inline bool parse(std::istream& input, grammar const& grmr, source_options opt = source_options::none)
-{
-	environment envr;
-	return parse(input, grmr, envr, opt);
-}
-
-inline bool parse(grammar const& grmr, environment& envr)
-{
-	return parse(std::cin, grmr, envr, stdin_isatty() ? source_options::interactive : source_options::none);
-}
-
-inline bool parse(grammar const& grmr)
-{
-	return parse(std::cin, grmr, stdin_isatty() ? source_options::interactive : source_options::none);
 }
 
 LUG_DIAGNOSTIC_PUSH_AND_IGNORE

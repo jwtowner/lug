@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 // Matcher for Extensible Markup Language Standard 1.0
 class xml_matcher
@@ -47,19 +48,17 @@ private:
 };
 
 int main()
-{
-	try {
-		xml_matcher matcher;
-		if (!matcher.parse_cin()) {
-			std::cout << "Invalid XML!\n";
-			return -1;
-		}
-	} catch (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "UNKNOWN ERROR\n";
-		return -1;
+try {
+	xml_matcher matcher;
+	if (!matcher.parse_cin()) {
+		std::cout << "Invalid XML!\n";
+		return 1;
 	}
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "ERROR: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "UNKNOWN ERROR\n";
+	return 1;
 }

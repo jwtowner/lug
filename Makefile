@@ -23,7 +23,7 @@ SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # samples tests
-SAMPLES_TESTS_DIRS = json/
+SAMPLES_TESTS_DIRS = calc/ json/
 SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%.testplan)
 
 # tests
@@ -37,10 +37,12 @@ TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # header dependencies
-HEADERS = include/lug/detail.hpp include/lug/error.hpp include/lug/unicode.hpp include/lug/utf8.hpp include/lug/lug.hpp
+HEADER_NAMES = detail error iostream unicode utf8 lug
+HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore \
+			.github/ doc/ include/ samples/ tests/ tools/
 
 all: options samples tests
 
@@ -118,6 +120,8 @@ install: all
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
 	@cp -f include/lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/error.hpp
+	@cp -f include/lug/iostream.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
 	@cp -f include/lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@cp -f include/lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
@@ -128,6 +132,7 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/error.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug

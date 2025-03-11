@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 #include <sstream>
 
 #undef NDEBUG
@@ -247,19 +248,17 @@ void test_capture_arithmetic_expressions()
 }
 
 int main()
-{
-	try {
-		test_capture_email_syntax();
-		test_capture_url_syntax();
-		test_capture_comma_delimited_list();
-		test_capture_nested_calls();
-		test_capture_arithmetic_expressions();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_capture_email_syntax();
+	test_capture_url_syntax();
+	test_capture_comma_delimited_list();
+	test_capture_nested_calls();
+	test_capture_arithmetic_expressions();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

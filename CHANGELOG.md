@@ -3,9 +3,16 @@
 ## Release v0.5.0 (Under Development)
 
 * Implemented collection and object attribute directives. The new `collect<C>[e]` directive synthesizes a sequence or associative container type `C` consisting of elements gathered from the inherited or synthesized attributes in expression `e`. Likewise, there also new `synthesize<C,A...>[e]`, `synthesize_shared<C,A...>[e]` and `synthesize_unique<C,A...>[e]` directives for synthesizing objects, shared pointers and unique pointers respectively, constructed from the component attributes in expression `e`.
+* Added `lug::recursive_wrapper` template class for handling circular dependencies in abstract syntax trees, particularily those making use of `std::variant`.
 * Updated to Unicode Standard Version 16.0.0 and added support for building tools to CMakeLists.txt.
-* Optimized character range and rune set matching for ASCII characters.
-* Moved lug/ include directory to include/lug/ so that files in the project root are not in the include path.
+* Optimized character range and rune set matching for ASCII characters, resulting in significant performance improvements for common text processing operations. Added specialized fast paths for ASCII-only inputs that bypass the more expensive Unicode handling code.
+* Enhanced input source handling with improved buffering and error reporting for std::istream sources, and added robust interactive mode support that properly handles line-by-line input for terminal sessions.
+* Moved std::istream support into its own `<lug/iostream.hpp>` header file, removing the dependency on `<iostream>` from the main `<lug/lug.hpp>` header. This reduces compilation times and minimizes header dependencies for projects that don't require stream I/O functionality.
+* Refactored parser commit logic by inlining instructions in `basic_parser` to better align with the stack frame architecture changes introduced in v0.4.0, improving code organization and performance.
+* Restructured include directory hierarchy by moving lug/ to include/lug/, ensuring cleaner include paths and better organization of header files.
+* Added support for additional compilers (GCC 9/10/11/12, Clang 14/15/16/17) in the C/C++ CI workflow to ensure broader compatibility.
+* Added clang-tidy integration to CI workflow to enforce code quality standards and catch potential issues early in the development process.
+* Removed Ubuntu 20.04 from the GitHub workflows as it has reached end-of-life and is no longer supported.
 
 ## Release v0.4.0 (March 4, 2025)
 

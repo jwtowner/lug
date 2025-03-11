@@ -6,6 +6,7 @@
 #define LUG_SAMPLES_JSON_JSON_PARSER_HPP
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 #include <map>
 #include <string>

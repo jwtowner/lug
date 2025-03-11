@@ -60,6 +60,9 @@ The following example demonstrates an arithmetic expression evaluator supporting
 // Include the lug library header file
 #include <lug/lug.hpp>
 
+// Needed for std::cout
+#include <iostream>
+
 int main()
 {
     // Import the namespace containing the embedded DSL operators and types
@@ -87,12 +90,14 @@ int main()
     // Create grammar that matches an arithmetic expression followed by end-of-input
     auto grammar = start(Expr > eoi);
 
-    // Parse and evaluate the sample input
+    // Sample input string to parse
     std::string input = "2 * (3 + 4)";
+
+    // Parse and evaluate the sample input
     lug::environment env;
     if (!lug::parse(input, grammar, env)) {
         std::cout << "parse failed\n";
-        return -1;
+        return 1;
     }
 
     // Pop the result from the environment and display it to the console

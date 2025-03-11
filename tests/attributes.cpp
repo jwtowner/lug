@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 #include <sstream>
 
 #undef NDEBUG
@@ -82,16 +83,14 @@ void test_nested_arithmetic_with_attributes()
 }
 
 int main()
-{
-	try {
-		test_addition_with_attributes();
-		test_nested_arithmetic_with_attributes();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_addition_with_attributes();
+	test_nested_arithmetic_with_attributes();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

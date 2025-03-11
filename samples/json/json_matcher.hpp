@@ -6,6 +6,7 @@
 #define LUG_SAMPLES_JSON_JSON_MATCHER_HPP
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 // Matcher for JSON Data Interchange Standard (RFC7159)
 class json_matcher

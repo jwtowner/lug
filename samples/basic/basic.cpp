@@ -7,6 +7,7 @@
 // https://www.dartmouth.edu/basicfifty/commands.html
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 #include <cmath>
 #include <cstring>
@@ -151,19 +152,20 @@ public:
 	void repl()
 	{
 		lug::parser parser{grammar_, environment_};
-		parser.push_source([this](std::string& out, lug::source_options opt) {
+		parser.push_source([this](std::back_insert_iterator<std::string> out, lug::source_options opt) {
 			if (quit_)
 				return false;
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
-				out = lastline_->second;
+				(void)std::copy(lastline_->second.begin(), lastline_->second.end(), out);
 				return true;
 			}
 			if ((opt & lug::source_options::interactive) != lug::source_options::none)
 				std::cout << "> " << std::flush;
-			if (!std::getline(std::cin >> std::ws, out))
+			std::string line;
+			if (!std::getline(std::cin >> std::ws, line))
 				return false;
-			out.push_back('\n');
+			*std::copy(line.begin(), line.end(), out) = '\n';
 			return true;
 		}, stdin_tty_ ? lug::source_options::interactive : lug::source_options::none);
 		std::cout.precision(10);
@@ -443,18 +445,16 @@ private:
 };
 
 int main(int argc, char** argv)
-{
-	try {
-		basic_interpreter interpreter;
-		for (int i = 1; i < argc; ++i)
-			interpreter.load(argv[1]);
-		interpreter.repl();
-	} catch (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "UNKNOWN ERROR\n";
-		return -1;
-	}
+try {
+	basic_interpreter interpreter;
+	for (int i = 1; i < argc; ++i)
+		interpreter.load(argv[1]);
+	interpreter.repl();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "ERROR: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "UNKNOWN ERROR\n";
+	return 1;
 }

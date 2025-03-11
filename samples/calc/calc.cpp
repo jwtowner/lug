@@ -3,9 +3,9 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 #include <cstdlib>
-#include <iostream>
 
 namespace samples::calc {
 
@@ -47,15 +47,13 @@ grammar Grammar = start(Stmt > eoi);
 } // namespace samples::calc
 
 int main()
-{
-    try {
-        while (lug::parse(samples::calc::Grammar)) ;
-    } catch (std::exception const& e) {
-        std::cerr << "ERROR: " << e.what() << "\n";
-        return -1;
-    } catch (...) {
-        std::cerr << "UNKNOWN ERROR\n";
-        return -1;
-    }
+try {
+    while (lug::parse(samples::calc::Grammar, lug::source_options::interactive)) ;
     return 0;
+} catch (std::exception const& e) {
+    std::cerr << "ERROR: " << e.what() << "\n";
+    return 1;
+} catch (...) {
+    std::cerr << "UNKNOWN ERROR\n";
+    return 1;
 }
