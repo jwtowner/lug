@@ -170,6 +170,12 @@ for testplan_file in "$@"; do
 			resolved_outfile=$(echo "$outfile" | sed "s/@/${current_group}/g")
 			run_test_command "$testplan_dir" "$command" "$status" "$resolved_outfile" || run_status=1
 		else
+			# Extract directory part from input pattern and transform for use in sed
+			pattern_dir=$(trim $(dirname "$pattern"))
+			if [ ! -z "$pattern_dir" ]; then
+				pattern_dir=$(echo "$pattern_dir/" | sed 's/\//\\\//g')
+			fi
+
 			# Process each matching input file
 			for infile in "$testplan_dir"/$pattern; do
 				[ -f "$infile" ] || continue
@@ -178,8 +184,8 @@ for testplan_file in "$@"; do
 				infile_base=$(basename "$infile")
 				infile_base_no_ext=$(echo "$infile_base" | sed 's/\.[^.]*$//')
 
-				# Replace the input pattern in the command with the actual input file path
-				resolved_command=$(echo "$command" | sed -E "s/%[^%]+%/${infile_base}/g")
+				# Replace the input pattern in the command with the actual input file path relative to the testplan directory
+				resolved_command=$(echo "$command" | sed -E "s/%[^%]+%/${pattern_dir}${infile_base}/g")
 
 				# Replace special tokens in output file path
 				resolved_outfile=$(echo "$outfile" | sed -e "s/@/${current_group}/g" -e "s/%/${infile_base_no_ext}/g")
