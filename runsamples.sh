@@ -16,7 +16,7 @@ usage() {
 	printf "Where:\n"
 	printf "  * [GROUP-NAME]    Defines a named group of related tests\n"
 	printf "  * COMMAND         The shell command to execute, may contain an input file pattern\n"
-	printf "  * <S>             Expected exit status code of the command, 0 for success\n"
+	printf "  * <S>             Expected exit status code (<0> for success) in angle brackets\n"
 	printf "  * OUTPUT-FILE     Path of file containing expected program output\n\n"
 	printf "Special Patterns:\n"
 	printf "  * %%PATTERN%%       Input file pattern (e.g. %%*.json%%) in shell command\n"
@@ -32,13 +32,14 @@ usage() {
 	printf "  # samples/demo/.testplan\n"
 	printf "  [demo-tests]\n"
 	printf "  demo --verbose %%*.txt%% <0> @.%%.out\n"
+	printf "  demo --verbose %%bad-tests/*.txt%% <1> bad-tests/@.%%.out\n"
 	printf "  demo --format --verbose %%*.txt%% <0> @.%%.formatted\n\n"
 	printf "  $ ./runsamples.sh samples/demo/.testplan\n\n"
 	printf "  This will:\n"
 	printf "    1. Find all .txt files in the testplan directory\n"
 	printf "    2. Run each command replacing the input pattern with matching files\n"
 	printf "    3. Compare exit status codes of commands with expected value\n"
-	printf "    4. Compare output against files matching \"demo-tests.*.(out|formatted)\"\n"
+	printf "    4. Compare output against files matching \"(bad-tests/)?demo-tests.*.(out|formatted)\"\n"
 	printf "    5. Print results to the console\n"
 }
 
@@ -149,7 +150,7 @@ for testplan_file in "$@"; do
 		if [ "$command" = "$line" ] || [ "$status" = "$line" ] || [ "$outfile" = "$line" ]; then
 			printf "Error: Invalid test command: %s\n" "$line"
 			run_status=1
-			continue;
+			continue
 		fi
 
 		# Strip leading and trailing whitespace from command and outfile
