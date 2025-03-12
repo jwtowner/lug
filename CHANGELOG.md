@@ -6,9 +6,11 @@
 * Added `lug::recursive_wrapper` template class for handling circular dependencies in abstract syntax trees, particularily those making use of `std::variant`.
 * Updated to Unicode Standard Version 16.0.0 and added support for building tools to CMakeLists.txt.
 * Optimized character range and rune set matching for ASCII characters, resulting in significant performance improvements for common text processing operations. Added specialized fast paths for ASCII-only inputs that bypass the more expensive Unicode handling code.
-* Enhanced input source handling with improved buffering and error reporting for std::istream sources, and added robust interactive mode support that properly handles line-by-line input for terminal sessions.
-* Moved std::istream support into its own `<lug/iostream.hpp>` header file, removing the dependency on `<iostream>` from the main `<lug/lug.hpp>` header. This reduces compilation times and minimizes header dependencies for projects that don't require stream I/O functionality.
-* Refactored parser commit logic by inlining instructions in `basic_parser` to better align with the stack frame architecture changes introduced in v0.4.0, improving code organization and performance.
+* Enhanced input source handling with improved buffering and error reporting for `std::istream` sources, and improved the interactive mode support that properly handles line-by-line input for terminal sessions or for line-oriented grammars.
+* Moved `std::istream` support into its own `<lug/iostream.hpp>` header file, removing the dependency on `<iostream>` from the main `<lug/lug.hpp>` header. This reduces compilation times and minimizes header dependencies for projects that don't require stream I/O functionality.
+* Refactored parser commit logic by inlining instructions in `lug::basic_parser` to better align with the stack frame architecture changes introduced in v0.4.0, improving code organization and performance.
+* Fixed issue in the BASIC sample where user-defined functions (e.g. FNA(X)) were crashing during evaluation. This was caused by v0.4.0 changes that reset `lug::environment` during nested parsing operations. Added new `lug::environment::should_reset_on_parse` member function to provide fine-grained control over this behavior, allowing environments to persist across nested parse operations when needed.
+* Added comprehensive test infrastructure for the sample programs, including automated test plans and verification scripts to ensure sample functionality remains correct across changes.
 * Restructured include directory hierarchy by moving lug/ to include/lug/, ensuring cleaner include paths and better organization of header files.
 * Added support for additional compilers (GCC 9/10/11/12, Clang 14/15/16/17) in the C/C++ CI workflow to ensure broader compatibility.
 * Added clang-tidy integration to CI workflow to enforce code quality standards and catch potential issues early in the development process.
