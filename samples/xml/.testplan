@@ -1,0 +1,19 @@
+# lug - Embedded DSL for PE grammar parser combinators in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
+# See LICENSE.md file for license details
+
+# Run this testplan with:
+#   $ ./runsamples.sh samples/xml/.testplan
+
+# xmlcheck tests the xml_matcher class
+[xmlcheck]
+xmlcheck %test*.xml% <0> testplan/@.%.out
+xmlcheck - <%test*.xml% <0> testplan/@.%.out
+xmlcheck %invalid*.xml% <1> testplan/@.%.out
+xmlcheck - <%invalid*.xml% <1> testplan/@.%.out
+
+[xmlcheck.quiet]
+xmlcheck -q %test*.xml% <0> testplan/@.%.out
+xmlcheck -q - <%test*.xml% <0> testplan/@.%.out
+xmlcheck -q %invalid*.xml% <1> testplan/@.%.out
+xmlcheck -q - <%invalid*.xml% <1> testplan/@.%.out

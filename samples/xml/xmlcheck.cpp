@@ -2,7 +2,7 @@
 // Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
-#include "json_matcher.hpp"
+#include "xml_matcher.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -31,7 +31,7 @@ struct verbose_cout
 // Prints usage information
 void print_usage()
 {
-	std::cout << "Usage: jsoncheck [options] [file|-]\n"
+	std::cout << "Usage: xmlcheck [options] [file|-]\n"
 	          << "Options:\n"
 	          << "  -q, --quiet       Only set exit code\n"
 	          << "  -h, --help        Show this help\n"
@@ -63,18 +63,18 @@ try {
 	auto const opts = parse_options(argc, argv);
 	auto const matched = [&] {
 		if (opts.filename == "-")
-			return json_matcher{}.match_cin();
+			return xml_matcher{}.match_cin();
 		std::ifstream input_file;
 		input_file.open(opts.filename);
 		if (!input_file.is_open())
 			throw std::runtime_error("Failed to open file: " + opts.filename);
-		return json_matcher{}.match(input_file);
+		return xml_matcher{}.match(input_file);
 	}();
 	if (!matched) {
-		verbose_cout{opts} << "Invalid JSON\n";
+		verbose_cout{opts} << "Invalid XML\n";
 		return 1;
 	}
-	verbose_cout{opts} << "Valid JSON\n";
+	verbose_cout{opts} << "Valid XML\n";
 	return 0;
 } catch (std::exception const& e) {
 	std::cerr << "ERROR: " << e.what() << "\n";

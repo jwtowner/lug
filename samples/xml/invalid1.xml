@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <person>
+    <name>John Doe</name
+    <age>thirty</age>
+    <city>New York
+  </person>
+  <unclosed>This tag never ends
+  <person>
+    <name>Jane Smith</name>
+    <age>25</age>
+    <city>Los Angeles</city>
+  </person>
+  <overlap1><overlap2>Overlapping tags</overlap1></overlap2>
+  <invalid@tag>Invalid character in tag name</invalid@tag>
+</root> 

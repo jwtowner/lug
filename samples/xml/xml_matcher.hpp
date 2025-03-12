@@ -2,6 +2,9 @@
 // Copyright (c) 2017-2025 Jesse W. Towner
 // See LICENSE.md file for license details
 
+#ifndef LUG_SAMPLES_XML_XML_MATCHER_HPP
+#define LUG_SAMPLES_XML_XML_MATCHER_HPP
+
 #include <lug/lug.hpp>
 #include <lug/iostream.hpp>
 
@@ -12,6 +15,7 @@ public:
 	xml_matcher()
 	{
 		using namespace lug::language;
+		namespace lang = lug::language;
 
 		implicit_space_rule SP = *"[ \t\r\n]"_rx;
 
@@ -26,7 +30,7 @@ public:
 		rule Xml;
 		rule Content = Xml | CDataSec | Text;
 		rule Comment = "<!--" > *(!str("-->") > any) > "-->";
-		Xml = local['<' > symbol("tag")[Name] > *Attribute > ("/>" | ('>' > *(Content | Comment) > "</" > match("tag") > '>'))];
+		Xml = local['<' > symbol("tag")[Name] > *Attribute > ("/>" | ('>' > *(Content | Comment) > "</"_sx > lang::match("tag") > '>'))];
 
 		rule DTD = "<!" > *bre("[^>]") > '>';
 		rule SDDecl = str("standalone") > '=' > ("\"yes\""_sx | "'yes'"_sx | "\"no\""_sx | "'no'"_sx);
@@ -38,7 +42,13 @@ public:
 		grammar_ = start(File > eoi);
 	}
 
-	bool parse_cin()
+	template <typename T>
+	bool match(T&& t) const
+	{
+		return lug::parse(std::forward<T>(t), grammar_);
+	}
+
+	bool match_cin() const
 	{
 		return lug::parse(grammar_);
 	}
@@ -47,18 +57,4 @@ private:
 	lug::grammar grammar_;
 };
 
-int main()
-try {
-	xml_matcher matcher;
-	if (!matcher.parse_cin()) {
-		std::cout << "Invalid XML!\n";
-		return 1;
-	}
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "ERROR: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "UNKNOWN ERROR\n";
-	return 1;
-}
+#endif // LUG_SAMPLES_XML_XML_MATCHER_HPP

@@ -2627,9 +2627,9 @@ public:
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
 		if (program_->instructions.empty() || program_->data.empty())
 			throw bad_grammar{};
+		reset();
 		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
 		std::ptrdiff_t fail_count{0};
-		reset();
 		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < program_->instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
 			instruction const instr{program_->instructions[instr_index]};
 			std::string_view const str{program_->data.data() + instr.offset32, instr.immediate16};

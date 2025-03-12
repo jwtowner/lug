@@ -18,12 +18,12 @@ CLANGTIDY = clang-tidy
 UCD_VERSION = 16.0.0
 
 # samples
-SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xml
+SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xmlcheck
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
 # sample tests
-SAMPLES_TESTS_DIRS = basic calc demo json
+SAMPLES_TESTS_DIRS = basic calc demo json xml
 SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%/.testplan)
 
 # unit tests
