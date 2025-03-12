@@ -40,7 +40,7 @@ rule Stmt   = ( (   "exit"_isx
                   | "quit"_isx )     <[]{ std::exit(EXIT_SUCCESS); }
                 | e%Expr             <[]{ std::cout << e << "\n"; }
             ) > EOL
-            | *( !EOL > any ) > EOL  <[]{ std::cerr << "SYNTAX ERROR\n"; };
+            | *( !EOL > any ) > EOL  <[]{ std::cout << "SYNTAX ERROR\n"; };
 
 grammar Grammar = start(Stmt > eoi);
 

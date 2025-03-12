@@ -1,0 +1,9 @@
+# lug - Embedded DSL for PE grammar parser combinators in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
+# See LICENSE.md file for license details
+
+# Run this testplan with:
+#   $ ./runsamples.sh samples/demo/.testplan
+
+[demo]
+demo <0> demo.out

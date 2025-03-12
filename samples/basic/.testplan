@@ -1,0 +1,36 @@
+# lug - Embedded DSL for PE grammar parser combinators in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
+# See LICENSE.md file for license details
+
+# Run this testplan with:
+#   $ ./runsamples.sh samples/basic/.testplan
+
+[basic.curve]
+basic curve.bas <testplan/run.in <0> testplan/curve.out
+
+[basic.factorial]
+basic factorial.bas <%testplan/factorial*.in% <0> testplan/%.out
+
+[basic.guess]
+basic --seed 2323 guess.bas <testplan/guess1.in <0> testplan/guess1.out
+basic --seed 999999 guess.bas <testplan/guess2.in <0> testplan/guess2.out
+
+[basic.haunted]
+basic --seed 13666 haunted.bas <testplan/haunted1.in <0> testplan/haunted1.out
+basic --seed 1428 haunted.bas <testplan/haunted2.in <0> testplan/haunted2.out
+
+[basic.hello]
+basic <testplan/hello.in <0> testplan/hello.out
+basic hello.bas <testplan/run.in <0> testplan/hello.out
+
+[basic.launch]
+basic launch.bas <%testplan/launch*.in% <0> testplan/%.out
+
+[basic.nbody]
+basic nbody.bas <%testplan/nbody*.in% <0> testplan/%.out
+
+[basic.pi]
+basic --seed 31337 pi.bas <%testplan/pi*.in% <0> testplan/%.out
+
+[basic.spring]
+basic --seed 5423 spring.bas <%testplan/spring*.in% <0> testplan/%.out

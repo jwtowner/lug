@@ -1,0 +1,28 @@
+a = 2 ; initialize variables
+b = 3
+c = 5
+d = 7
+e = 11
+f = 13
+g = 17
+h = 19
+i = 23
+j = 29
+k = 31
+((A * (B + C)) * (D / (E + F))) / ((G * H) + (I / (J + K)))     ; uses primes and small numbers
+(((X + Y) * (Z + A)) / (B + C)) * (((D * E) / F) + (G * H))     ; mix of initialized and new vars
+A = (B * (C + (D * (E + (F * (G + H)))))) / (I + J)             ; deep nesting with known values
+((((A + B) * C) + D) * (((E + F) * G) + H)) / (I + (J * K))     ; all initialized vars
+(A + (B * (C + D))) * ((E / (F + G)) * (H + (I * (J + K))))     ; complex with known values
+X = ((A * B) + (C * D)) / ((E * F) + (G * (H + (I * (J + K))))) ; mix of new and initialized
+((A + (B * C)) / (D + (E * F))) * ((G + (H * I)) / (J + K))     ; nested with all known values
+(A * (B + (C * (D + E)))) * (F / (G + (H * (I + (J * K)))))     ; deep mult with initialized
+A = (B + C) * ((D + (E * F)) / (G + (H * (I + (J * K)))))       ; reassign A using others
+((((A * B) + C) * ((D * E) + F)) * G) / (H + (I * (J + K)))     ; complex with initialized
+(A + (B * (C + D))) * (E + (F * (G + (H * (I + (J * K))))))     ; right heavy with known vals
+((((((A + B) * C) + D) * E) + F) * G) / (H + (I * (J + K)))     ; left heavy initialized
+A = (B * (C + D) * (E + (F * G))) / (H + (I * (J + (K * A))))   ; using A's original value
+((A + (B * C)) * (D + (E * F))) / ((G + (H * I)) * (J + K))     ; balanced with known vals
+(A * (B + (C * (D + E)))) * ((F + G) / (H + (I * (J + K))))     ; all initialized vars used
+quit
+(A * (B + C)) / (K - (D * E + F))                               ; should not be evaluated

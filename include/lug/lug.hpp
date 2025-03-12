@@ -261,6 +261,7 @@ class environment
 	syntax_position origin_{1, 1};
 	std::uint_least32_t tab_width_{default_tab_width};
 	std::uint_least32_t tab_alignment_{default_tab_alignment};
+	bool should_reset_on_parse_{true};
 
 	virtual void on_reset() {}
 	virtual void on_drain() {}
@@ -269,14 +270,16 @@ class environment
 
 	void reset(std::string_view sub)
 	{
-		call_depth_ = 0;
-		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
-		origin_ = position_at(match_.size());
-		set_match_and_subject(sub.substr(0, 0), sub);
-		attribute_frame_stack_.clear();
-		attribute_result_stack_.clear();
-		attribute_collection_stack_.clear();
-		on_reset();
+		if (should_reset_on_parse_) {
+			call_depth_ = 0;
+			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
+			origin_ = position_at(match_.size());
+			set_match_and_subject(sub.substr(0, 0), sub);
+			attribute_frame_stack_.clear();
+			attribute_result_stack_.clear();
+			attribute_collection_stack_.clear();
+			on_reset();
+		}
 	}
 
 	void drain(std::string_view sub)
@@ -325,6 +328,8 @@ public:
 	environment& operator=(environment const&) = delete;
 	environment& operator=(environment&&) noexcept = default;
 	virtual ~environment() = default;
+	[[nodiscard]] bool should_reset_on_parse() const noexcept { return should_reset_on_parse_; }
+	void should_reset_on_parse(bool should_reset) noexcept { should_reset_on_parse_ = should_reset; }
 	[[nodiscard]] std::uint_least32_t tab_width() const noexcept { return tab_width_; }
 	void tab_width(std::uint_least32_t w) noexcept { tab_width_ = w; }
 	[[nodiscard]] std::uint_least32_t tab_alignment() const noexcept { return tab_alignment_; }
@@ -2019,12 +2024,17 @@ public:
 		enqueue(rng.begin(), rng.end());
 	}
 
-	template <class InputFunc, class = std::enable_if_t<std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>>>
+	template <class InputFunc, class = std::enable_if_t<
+			std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>>
+			|| std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
 		if (reading_)
 			throw reenterant_read_error{};
-		sources_.emplace_back(std::forward<InputFunc>(func), opt);
+		if constexpr (std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>)
+			sources_.emplace_back(std::forward<InputFunc>(func), opt);
+		else
+			sources_.emplace_back([func = std::forward<InputFunc>(func)](std::back_insert_iterator<std::string> out, source_options /*opt*/) -> bool { return func(out); }, opt);
 	}
 };
 

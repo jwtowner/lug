@@ -22,11 +22,11 @@ SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xml
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
-# samples tests
-SAMPLES_TESTS_DIRS = calc/ json/
-SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%.testplan)
+# sample tests
+SAMPLES_TESTS_DIRS = basic calc demo json
+SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%/.testplan)
 
-# tests
+# unit tests
 TESTS = acceptcut attributes captures conditions errorhandling leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
@@ -41,8 +41,8 @@ HEADER_NAMES = detail error iostream unicode utf8 lug
 HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore \
-			.github/ doc/ include/ samples/ tests/ tools/
+DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig \
+			.gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
 
 all: options samples tests
 

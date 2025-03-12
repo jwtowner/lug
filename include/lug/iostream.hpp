@@ -76,7 +76,7 @@ inline std::basic_istream<CharT, Traits>& readsource(std::basic_istream<CharT, T
 
 inline bool parse(std::istream& input, grammar const& grmr, environment& envr, char delim, source_options options = source_options::none)
 {
-	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input, delim](auto output, source_options opt) {
+	return basic_parser<multi_input_source>{grmr, envr}.push_source([&input, delim](auto output, source_options opt) -> bool {
 		return static_cast<bool>(lug::readsource(input, output, delim, opt));
 	}, options).parse();
 }
