@@ -95,10 +95,9 @@ endfunction()
 # Adds a test to the build that runs a command and compares the output to an
 # expected output file. The test will fail if the command does not return the
 # expected status or if the output does not match the expected output file.
-function(add_testplan_test)
+function(add_sample_testplan_test)
   cmake_parse_arguments(PARSE_ARGV 0 ARG "" 
     "TEST_NAME;TEST_DIR;COMMAND_EXECUTABLE;EXPECTED_STATUS;EXPECTED_OUTPUT" "COMMAND_ARGS")
-  
   set(input_file "")
   if(ARG_COMMAND_ARGS MATCHES ".*<[ \t]*([^ \t><]+).*")
     set(input_file "${CMAKE_MATCH_1}")
@@ -114,16 +113,16 @@ function(add_testplan_test)
       $<$<BOOL:${input_file}>:-DTEST_INPUT=${ARG_TEST_DIR}/${input_file}>
       -DEXPECTED_STATUS=${ARG_EXPECTED_STATUS}
       -DEXPECTED_OUTPUT=${ARG_TEST_DIR}/${ARG_EXPECTED_OUTPUT}
-      -P "${CMAKE_BINARY_DIR}/run_testplan.cmake")
+      -P "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
 endfunction()
 
-# Processes a testplan file. This function parses and executes test commands
-# from a testplan file. See runsamples.sh for the original shell script
-# implementation that this function mimics.
+# Processes a sample testplan file. This function parses and executes test
+# commands from a testplan file. See runsamples.sh for the original shell
+# script implementation that this function mimics.
 # Format: [group] followed by "command <status> outfile"
 #   - command can include %pattern% for input file substitution
 #   - outfile can use @ for group name and % for input filename (without extension)
-function(process_testplan_file testplan)
+function(process_sample_testplan testplan)
   get_filename_component(testplan_dir "${testplan}" DIRECTORY)
   get_filename_component(testplan_full_dir "${testplan_dir}" ABSOLUTE)
   string(REPLACE "/" "_" test_prefix "${testplan_dir}")
@@ -194,7 +193,7 @@ function(process_testplan_file testplan)
         string(REPLACE "%" "${infile_base_no_ext}" resolved_outfile "${resolved_outfile}")
         math(EXPR group_counter "${group_counter} + 1")
         set(test_name "${test_prefix}_${current_group_prefix}${group_counter}_${infile_base_no_ext}")
-        add_testplan_test(
+        add_sample_testplan_test(
           TEST_NAME ${test_name}
           TEST_DIR ${testplan_full_dir}
           COMMAND_EXECUTABLE ${command_target_file}
@@ -207,7 +206,7 @@ function(process_testplan_file testplan)
       string(REPLACE "@" "${current_group}" resolved_outfile "${outfile}")
       math(EXPR group_counter "${group_counter} + 1")
       set(test_name "${test_prefix}_${current_group_prefix}${group_counter}")
-      add_testplan_test(
+      add_sample_testplan_test(
         TEST_NAME ${test_name}
         TEST_DIR ${testplan_full_dir}
         COMMAND_EXECUTABLE ${command_target_file}
@@ -220,15 +219,15 @@ endfunction()
 
 # Generates a testplan runner script that can be used to run
 # test commands from a testplan file.
-function(generate_testplan_runner)
-  if(NOT EXISTS "${CMAKE_BINARY_DIR}/run_testplan.cmake")
-    file(WRITE "${CMAKE_BINARY_DIR}/run_testplan.cmake" [[
-      message(STATUS "TEST_NAME: ${TEST_NAME}")
+function(generate_sample_testplan_runner)
+  if(NOT EXISTS "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
+    file(WRITE "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake" [[
+      message(STATUS "TEST NAME: ${TEST_NAME}")
       message(STATUS "COMMAND: ${TEST_EXECUTABLE} ${TEST_ARGS}")
-      message(STATUS "WORKING_DIRECTORY: ${TEST_DIR}")
-      message(STATUS "INPUT_FILE: ${TEST_INPUT}")
-      message(STATUS "EXPECTED_STATUS: ${EXPECTED_STATUS}")
-      message(STATUS "EXPECTED_OUTPUT: ${EXPECTED_OUTPUT}")
+      message(STATUS "WORKING DIRECTORY: ${TEST_DIR}")
+      message(STATUS "INPUT FILE: ${TEST_INPUT}")
+      message(STATUS "EXPECTED OUTPUT FILE: ${EXPECTED_OUTPUT}")
+      message(STATUS "EXPECTED EXIT STATUS: ${EXPECTED_STATUS}")
 
       separate_arguments(TEST_ARGS_LIST NATIVE_COMMAND "${TEST_ARGS}")
 
@@ -240,8 +239,7 @@ function(generate_testplan_runner)
           OUTPUT_VARIABLE out
           ERROR_VARIABLE out
           RESULT_VARIABLE status
-          ENCODING UTF-8
-        )
+          ENCODING UTF-8)
       else()
         execute_process(
           COMMAND ${TEST_EXECUTABLE} ${TEST_ARGS_LIST}
@@ -249,12 +247,11 @@ function(generate_testplan_runner)
           OUTPUT_VARIABLE out
           ERROR_VARIABLE out
           RESULT_VARIABLE status
-          ENCODING UTF-8
-        )
+          ENCODING UTF-8)
       endif()
 
       if(NOT status EQUAL EXPECTED_STATUS)
-        message(FATAL_ERROR "[FAIL] EXIT STATUS: ${status} EXPECTED: ${EXPECTED_STATUS}")
+        message(FATAL_ERROR "[FAIL] ACTUAL EXIT STATUS: ${status} EXPECTED EXIT STATUS: ${EXPECTED_STATUS}")
       endif()
 
       string(REPLACE "\r\n" "\n" out "${out}")
@@ -298,11 +295,11 @@ if(BUILD_SAMPLES)
       setup_executable_target(${sample_name})
     endforeach()
   endforeach()
-  file(GLOB TESTPLAN_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "samples/*/*.testplan")
+  file(GLOB TESTPLAN_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*/*.testplan)
   if(TESTPLAN_FILES)
-    generate_testplan_runner()
+    generate_sample_testplan_runner()
     foreach(testplan_file ${TESTPLAN_FILES})
-      process_testplan_file(${testplan_file})
+      process_sample_testplan(${testplan_file})
     endforeach()
   endif()
 endif()

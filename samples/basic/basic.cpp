@@ -146,7 +146,7 @@ public:
 		rule Init   = when("fnev") > FnEval
 		            | unless("fnev") > Line;
 
-		grammar_ = start(Init > eoi);
+		grammar_    = start(Init > eoi);
 	}
 
 	void repl()
@@ -244,7 +244,7 @@ private:
 		line_ = haltline_;
 		haltline_ = lines_.end();
 		if (line_ == haltline_)
-			print_error("CAN'T CONTINUE");
+			print_error("CANNOT CONTINUE");
 	}
 
 	void list(std::ostream& out)
@@ -303,7 +303,7 @@ private:
 		if (lastline_ != lines_.end()) {
 			double& v = vars_[id];
 			v += step;
-			if (for_stack_.empty() || id != for_stack_.back().first) {
+			if (for_stack_.empty() || (id != for_stack_.back().first)) {
 				for_stack_.emplace_back(id, lastline_);
 				v = from;
 			}
@@ -326,7 +326,7 @@ private:
 
 	void next(std::string const& id)
 	{
-		if ((lastline_ != lines_.end()) && !for_stack_.empty() && (for_stack_.back().first == id)) {
+		if ((lastline_ != lines_.end()) && !for_stack_.empty() && (id == for_stack_.back().first)) {
 			lastline_ = line_;
 			line_ = for_stack_.back().second;
 		} else {
@@ -342,17 +342,17 @@ private:
 			read_itr_ = data_.cbegin();
 	}
 
-	void read(double& ref)
+	void read(double& value)
 	{
 		if (read_itr_ != data_.cend())
-			ref = *(read_itr_++);
+			value = *(read_itr_++);
 		else
 			print_error("NO DATA");
 	}
 
-	void input(double& ref)
+	void input(double& value)
 	{
-		std::cin >> ref;
+		std::cin >> value;
 		if (std::cin.fail()) {
 			std::cin.clear();
 			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), std::cin.widen('\n'));
