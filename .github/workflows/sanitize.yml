@@ -43,6 +43,9 @@ jobs:
       run: |
         sudo apt-get update -yq
         sudo apt-get install -yq ninja-build
+    - if: ${{ matrix.toolchain.cxx }} == 'clang++'
+      name: Install libc++ & libc++abi
+      run: sudo apt-get install -yq libc++1 libc++abi1 libc++-dev libc++abi-dev
     - name: Generating buildsystem with -fsanitize=${{ matrix.toolchain.sanitize }}
       run: cmake -S "${{ github.workspace }}" -B build -G Ninja -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.toolchain.sanitize }}"
     - name: Building project with -fsanitize=${{ matrix.toolchain.sanitize }}
