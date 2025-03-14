@@ -33,6 +33,63 @@ void test_any()
 	assert(!lug::parse("aa", G));
 	assert(!lug::parse("", G));
 	assert(!lug::parse(" a", G));
+	assert(!lug::parse("a ", G));
+	assert(!lug::parse("αa", G)); // U+03B1 GREEK SMALL LETTER ALPHA, FOLLOWED BY LETTER A
+}
+
+void test_eol()
+{
+	using namespace lug::language;
+	rule S = noskip[ eol > eoi ];
+	grammar G = start(S);
+
+	// Test eol with different line endings
+	assert(lug::parse("\n", G));
+	assert(lug::parse("\r\n", G));
+	assert(lug::parse("\r", G));
+	assert(lug::parse("\f", G));
+	assert(lug::parse("\v", G));
+	assert(!lug::parse("\t", G));
+	assert(!lug::parse("\b", G));
+	assert(lug::parse("\u0085", G)); // U+0085 NEL Next Line
+	assert(lug::parse("\u2028", G)); // U+2028 LS Line Separator
+	assert(lug::parse("\u2029", G)); // U+2029 PS Paragraph Separator
+
+	// Test token before eol
+	assert(!lug::parse("a\n", G));
+	assert(!lug::parse("a\r\n", G));
+	assert(!lug::parse("a\r", G));
+	assert(!lug::parse("a\f", G));
+	assert(!lug::parse("a\v", G));
+	assert(!lug::parse("a\t", G));
+	assert(!lug::parse("a\b", G));
+	assert(!lug::parse("a\u0085", G)); // U+0085 NEL Next Line
+	assert(!lug::parse("a\u2028", G)); // U+2028 LS Line Separator
+	assert(!lug::parse("a\u2029", G)); // U+2029 PS Paragraph Separator
+
+	// Test space token before eol
+	assert(!lug::parse(" \n", G));
+	assert(!lug::parse(" \r\n", G));
+	assert(!lug::parse(" \r", G));
+	assert(!lug::parse(" \f", G));
+	assert(!lug::parse(" \v", G));
+	assert(!lug::parse(" \t", G));
+	assert(!lug::parse(" \b", G));
+	assert(!lug::parse(" \u0085", G)); // U+0085 NEL Next Line
+	assert(!lug::parse(" \u2028", G)); // U+2028 LS Line Separator
+	assert(!lug::parse(" \u2029", G)); // U+2029 PS Paragraph Separator
+
+	// Test space token after eol
+	assert(!lug::parse("\n ", G));
+	assert(!lug::parse("\r\n ", G));
+	assert(!lug::parse("\r ", G));
+	assert(!lug::parse("\f ", G));
+	assert(!lug::parse("\v ", G));
+	assert(!lug::parse("\t ", G));
+	assert(!lug::parse("\b ", G));
+	assert(!lug::parse("\u0085 ", G)); // U+0085 NEL Next Line
+	assert(!lug::parse("\u2028 ", G)); // U+2028 LS Line Separator
+	assert(!lug::parse("\u2029 ", G)); // U+2029 PS Paragraph Separator
 }
 
 void test_char()
@@ -133,7 +190,7 @@ void test_string()
 	assert(!lug::parse("h", G2));
 }
 
-void test_regular_expression()
+void test_regex_simple()
 {
 	using namespace lug::language;
 
@@ -157,26 +214,156 @@ void test_regular_expression()
 	assert(!lug::parse("h", G2));
 
 	// Unicode negated regular expression with escape sequences
-	rule S3 = noskip[ +"[^\"\\\u0000-\u001F\U0001F315]"_rx > eoi ];
+	rule S3 = noskip[ +"[^\"\\\u0000-\u001F]"_rx > eoi ];
 	grammar G3 = start(S3);
 	assert(lug::parse("Hello, world!🌍", G3));
 	assert(lug::parse("Hello, 世界!🌍", G3));
-	assert(!lug::parse("Hello, moon!🌕", G3));
-	assert(!lug::parse("Hello, 月!🌕", G3));
+	assert(lug::parse("Hello, moon!🌕", G3));
+	assert(lug::parse("Hello, 月!🌕", G3));
 	assert(!lug::parse("\"hello world\"", G3));
 	assert(!lug::parse("\\hello world", G3));
 	assert(!lug::parse("\u0000hello world", G3));
 	assert(!lug::parse("\u001Fhello world", G3));
+
+	rule S4 = noskip[ +"[^\"\\\u0000-\u001F\U0001F315]"_rx > eoi ];
+	grammar G4 = start(S4);
+	assert(lug::parse("Hello, world!🌍", G4));
+	assert(lug::parse("Hello, 世界!🌍", G4));
+	assert(!lug::parse("Hello, moon!🌕", G4));
+	assert(!lug::parse("Hello, 月!🌕", G4));
+	assert(!lug::parse("\"hello world\"", G4));
+	assert(!lug::parse("\\hello world", G4));
+	assert(!lug::parse("\u0000hello world", G4));
+	assert(!lug::parse("\u001Fhello world", G4));
+}
+
+/* TODO: Implement full BRE support
+void test_regex_complex()
+{
+	using namespace lug::language;
+	
+	// Test nested groups and quantifiers
+	rule S1 = noskip[ bre("(abb*c?)*") > eoi ];
+	grammar G1 = start(S1);
+	assert(lug::parse("", G1));
+	assert(lug::parse("ab", G1));
+	assert(lug::parse("abbc", G1));
+	assert(lug::parse("ababc", G1));
+	assert(!lug::parse("ac", G1));
+}*/
+
+void test_regex_unicode_categories()
+{
+	using namespace lug::language;
+	
+	// Test unicode letter category
+	rule S1 = noskip[ bre("[[:alpha:]]") > eoi ];
+	grammar G1 = start(S1);
+	assert(lug::parse("a", G1));
+	assert(lug::parse("α", G1));  // Greek alpha
+	assert(!lug::parse("1", G1));
+	assert(!lug::parse("", G1));
+	
+	// Test unicode number category
+	rule S2 = noskip[ bre("[[:digit:]]") > eoi ];
+	grammar G2 = start(S2);
+	assert(lug::parse("1", G2));
+	assert(lug::parse("٣", G2));  // Arabic-Indic digit three
+	assert(!lug::parse("a", G2));
+	assert(!lug::parse("", G2));
+}
+
+void test_character_classes()
+{
+	using namespace lug::language;
+	
+	// Test digit character class
+	rule S1 = noskip[ digit > eoi ];
+	grammar G1 = start(S1);
+	assert(lug::parse("0", G1));
+	assert(lug::parse("9", G1));
+	assert(!lug::parse("a", G1));
+	assert(!lug::parse("", G1));
+	
+	// Test alpha character class
+	rule S2 = noskip[ alpha > eoi ];
+	grammar G2 = start(S2);
+	assert(lug::parse("a", G2));
+	assert(lug::parse("Z", G2));
+	assert(!lug::parse("1", G2));
+	assert(!lug::parse("", G2));
+	
+	// Test alnum character class
+	rule S3 = noskip[ alnum > eoi ];
+	grammar G3 = start(S3);
+	assert(lug::parse("a", G3));
+	assert(lug::parse("Z", G3));
+	assert(lug::parse("1", G3));
+	assert(!lug::parse("@", G3));
+	
+	// Test space character class
+	rule S4 = noskip[ space > eoi ];
+	grammar G4 = start(S4);
+	assert(lug::parse(" ", G4));
+	assert(lug::parse("\t", G4));
+	assert(!lug::parse("a", G4));
+
+	// Test xdigit character class
+	rule S5 = noskip[ xdigit > eoi ];
+	grammar G5 = start(S5);
+	assert(lug::parse("0", G5));
+	assert(lug::parse("9", G5));
+	assert(lug::parse("a", G5));
+	assert(lug::parse("F", G5));
+	assert(!lug::parse("g", G5));
+	assert(!lug::parse("G", G5));
+	assert(!lug::parse("", G5));
+	
+	// Test punct character class
+	rule S6 = noskip[ punct > eoi ];
+	grammar G6 = start(S6);
+	assert(lug::parse(".", G6));
+	assert(lug::parse(",", G6));
+	assert(lug::parse("!", G6));
+	assert(lug::parse("?", G6));
+	assert(!lug::parse("a", G6));
+	assert(!lug::parse("1", G6));
+	assert(!lug::parse(" ", G6));
+	assert(!lug::parse("", G6));
+	
+	// Test graph character class
+	rule S7 = noskip[ graph > eoi ];
+	grammar G7 = start(S7);
+	assert(lug::parse("a", G7));
+	assert(lug::parse("1", G7));
+	assert(lug::parse("!", G7));
+	assert(!lug::parse(" ", G7));
+	assert(!lug::parse("\t", G7));
+	assert(!lug::parse("", G7));
+	
+	// Test print character class
+	rule S8 = noskip[ print > eoi ];
+	grammar G8 = start(S8);
+	assert(lug::parse("a", G8));
+	assert(lug::parse("1", G8));
+	assert(lug::parse("!", G8));
+	assert(lug::parse(" ", G8));
+	assert(!lug::parse("\t", G8));
+	assert(!lug::parse("", G8));
 }
 
 int main()
 try {
 	test_empty();
 	test_any();
+	test_eol();
 	test_char();
 	test_char_range();
 	test_string();
-	test_regular_expression();
+	test_regex_simple();
+	/*test_regex_complex();*/
+	test_regex_unicode_categories();
+	test_character_classes();
 	return 0;
 } catch (std::exception const& e) {
 	std::cerr << "Error: " << e.what() << "\n";

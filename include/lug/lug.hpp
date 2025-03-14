@@ -72,10 +72,10 @@ struct registers
 	std::size_t cd{0}; // call depth counter
 	std::size_t ci{0}; // accept/cut inhibited register
 	std::size_t ri{0}; // raise inhibited register
+	std::ptrdiff_t pc{-1}; // program counter
 	std::ptrdiff_t eh{-1}; // error handler register
 	std::ptrdiff_t rh{-1}; // recovery handler register
 	error_response rr{error_response::resume}; // recovery response latch register
-	std::ptrdiff_t pc{-1}; // program counter
 };
 
 enum class opcode : std::uint_least8_t
@@ -84,7 +84,9 @@ enum class opcode : std::uint_least8_t
 	accept,         call,           ret,            fail,           recover_push,
 	recover_pop,    recover_resp,   report_push,    report_pop,     predicate,
 	action,         capture_start,  capture_end,    condition_pop,  symbol_end,
-	symbol_pop,     match_any,      match_set,      match_eol,
+	symbol_pop,     match_any,      match_set,      match_eol,      match_octet,
+	match_octet_cf, test_any,       test_set,       test_eol,       test_octet,
+	test_octet_cf,
 	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
 	condition_test, condition_push, symbol_exists,  symbol_all,     symbol_all_cf,
 	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
@@ -733,8 +735,20 @@ public:
 	std::ptrdiff_t match(std::string_view subject)
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
-		if ((mode() & directives::caseless) != directives::none)
+		if ((mode() & directives::caseless) != directives::none) {
+			if (subject.size() == 1) {
+				auto const rune = static_cast<char32_t>(static_cast<unsigned char>(subject.front()));
+				if (auto const properties = unicode::query(rune).properties(); (properties & unicode::ptype::Ascii) != unicode::ptype::None) {
+					if ((properties & unicode::ptype::Alphabetic) != unicode::ptype::None)
+						return encode(opcode::match_octet_cf, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(unicode::tocasefold(rune)));
+					else
+						return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(rune));
+				}
+			}
 			return encode(opcode::match_cf, utf8::tocasefold(subject));
+		}
+		if (subject.size() == 1)
+			return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(subject.front())));
 		return encode(opcode::match, subject);
 	}
 
@@ -1177,7 +1191,7 @@ struct cut_expression : terminal_encoder_expression_interface<cut_expression> { 
 struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
 struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 1, 0); d.encode(opcode::fail, 0, 2); return m; } };
-struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol); return m; } };
+struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip(directives::lexeme).encode(opcode::match_eol); return m; } };
 
 template <opcode Op>
 struct match_class_combinator
@@ -2253,10 +2267,10 @@ protected:
 		registers_.cd = 0;
 		registers_.ci = 0;
 		registers_.ri = 0;
+		registers_.pc = 0;
 		registers_.eh = -1;
 		registers_.rh = -1;
 		registers_.rr = error_response::resume;
-		registers_.pc = 0;
 		casefolded_subjects_.clear();
 		responses_.clear();
 		stack_frames_.clear();
@@ -2292,21 +2306,20 @@ class basic_parser : public parser_base
 			return false;
 	}
 
-	[[nodiscard]] bool available(std::size_t sr, std::size_t sn)
+	[[nodiscard]] bool available(std::size_t sr, std::size_t sn, std::size_t fill_hint = 0)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			auto const desired_units = (std::max)(fill_hint, sn);
 			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
-				if ((sr <= buffer_size) && (sn <= (buffer_size - sr)))
+				if ((sr < buffer_size) && (sn <= (buffer_size - sr)))
 					return true;
-				if ((sr < buffer_size) && interactive())
-					return false;
-				if (!input_source_.fill_buffer(sn - (buffer_size - sr)))
+				if (((sr < buffer_size) && interactive()) || !input_source_.fill_buffer(desired_units - (buffer_size - sr)))
 					return false;
 			}
 		} else {
 			std::size_t const buffer_size = input_source_.buffer().size();
-			return (sr <= buffer_size) && (sn <= (buffer_size - sr));
+			return (sr < buffer_size) && (sn <= (buffer_size - sr));
 		}
 	}
 
@@ -2323,38 +2336,90 @@ class basic_parser : public parser_base
 		return subject.compare(0, sn, str) == 0;
 	}
 
-	template <class Compare>
-	[[nodiscard]] std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr, [[maybe_unused]] std::uint_least16_t flags)
 	{
-		if (std::size_t const sn = str.size(); !sn || (available(sr, sn) && comp(*this, sr, sn, str))) {
-			sr += sn;
+		if constexpr (detail::input_source_has_options<InputSource>::value)
+			if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
+				return 1;
+		if (std::size_t i = sr; available(i, 1)) {
+			auto const buffer = input_source_.buffer();
+			auto const size = buffer.size();
+			for (++i; i < size; ++i)
+				if (utf8::is_lead_or_ascii(buffer[i]))
+					break;
+			sr = i;
 			return 0;
 		}
 		return 1;
 	}
 
-	template <class Match>
-	[[nodiscard]] std::ptrdiff_t match_single(std::size_t& sr, Match const& match)
+	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr)
 	{
-		if (!available(sr, 1))
-			return 1;
-		auto const buffer = input_source_.buffer();
-		auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(sr);
-		auto const last = buffer.cend();
-		auto [next, rune] = utf8::decode_rune(curr, last);
-		bool matched = false;
-		if constexpr (std::is_invocable_v<Match, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
-			matched = match(curr, last, next, rune);
-		} else if constexpr(std::is_invocable_v<Match, unicode::record const&>) {
-			matched = match(unicode::query(rune));
-		} else if constexpr(std::is_invocable_v<Match, char32_t>) {
-			matched = match(rune);
-		} else {
-			matched = match();
-			std::ignore = rune;
+		static constexpr std::size_t max_eol_units = 3;
+		if (std::size_t const i = sr; available(i, 1, max_eol_units)) {
+			auto const buffer = input_source_.buffer();
+			auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(i);
+			auto const next = utf8::match_eol(curr, buffer.cend());
+			if (next != curr) {
+				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				return 0;
+			}
 		}
-		if (matched) {
-			sr += static_cast<std::size_t>(std::distance(curr, next));
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
+	{
+		if (std::size_t const i = sr; available(i, 1) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
+			sr = i + 1;
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_octet_cf(std::size_t& sr, std::uint_least8_t value)
+	{
+		if (std::size_t const i = sr; available(i, 1)) {
+			char const c = input_source_.buffer()[i];
+			if (utf8::is_ascii(c) && (unicode::tocasefold(static_cast<char32_t>(static_cast<unsigned char>(c)) == static_cast<char32_t>(value)))) {
+				sr = i + 1;
+				return 0;
+			}
+		}
+		return 1;
+	}	
+
+	template <class Match>
+	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, Match const& match)
+	{
+		if (std::size_t const i = sr; available(i, 1)) {
+			auto const buffer = input_source_.buffer();
+			auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(i);
+			auto const last = buffer.cend();
+			auto [next, rune] = utf8::decode_rune(curr, last);
+			bool matched = false;
+			if constexpr (std::is_invocable_v<Match const&, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
+				matched = match(curr, last, next, rune);
+			} else if constexpr(std::is_invocable_v<Match const&, unicode::record const&>) {
+				matched = match(unicode::query(rune));
+			} else if constexpr(std::is_invocable_v<Match const&, char32_t>) {
+				matched = match(rune);
+			} else {
+				static_assert(detail::always_false_v<Match>, "unsupported Match operation");
+			}
+			if (matched) {
+				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	template <class Compare>
+	[[nodiscard]] std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	{
+		if (std::size_t const i = sr, n = str.size(); !n || (available(i, n) && comp(*this, i, n, str))) {
+			sr = i + n;
 			return 0;
 		}
 		return 1;
@@ -2394,20 +2459,21 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
 	{
-		if (!available(sr, 1))
-			return 1;
-		for (;;) {
-			auto const buffer = input_source_.buffer();
-			auto const next_space = buffer.find_first_of(" \t\n\r\f\v", sr);
-			if (next_space != std::string::npos) {
-				sr = next_space;
-				break;
+		if (std::size_t i = sr; available(i, 1)) {
+			do {
+				auto const buffer = input_source_.buffer();
+				if (auto const n = buffer.find_first_of(" \t\n\r\f\v", i); n != std::string::npos) {
+					i = n;
+					break;
+				}
+				i = buffer.size();
+			} while (available(i, 1));
+			if (i > sr) {
+				sr = i;
+				return 0;
 			}
-			sr = buffer.size();
-			if (!available(sr, 1))
-				break;
 		}
-		return 0;
+		return 1;
 	}
 
 	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
@@ -2754,37 +2820,46 @@ public:
 					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: {
-					if constexpr (detail::input_source_has_options<InputSource>::value) {
-						if ((instr.immediate16 != 0) && ((input_source_.options() & source_options::interactive) != source_options::none)) {
-							fail_count = 1;
-							break;
-						}
-					}
-					fail_count = match_single(registers_.sr, []{ return true; });
+					fail_count = match_any(registers_.sr, instr.immediate16);
+				} break;
+				case opcode::test_any: {
+					registers_.pc += (match_any(registers_.sr, instr.immediate16) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_any_of: {
-					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
+					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
 				} break;
 				case opcode::match_all_of: {
-					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
+					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
 				} break;
 				case opcode::match_none_of: {
-					fail_count = match_single(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
+					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
 				} break;
 				case opcode::match_set: {
-					fail_count = match_single(registers_.sr, [&runeset = program_->runesets[instr.immediate16]](char32_t rune) { return runeset.contains(rune); });
+					fail_count = match_rune(registers_.sr, [&rs = program_->runesets[instr.immediate16]](char32_t rune) { return rs.contains(rune); });
+				} break;
+				case opcode::test_set: {
+					registers_.pc += (match_rune(registers_.sr, [&rs = program_->runesets[instr.immediate16]](char32_t rune) { return rs.contains(rune); }) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_eol: {
-					fail_count = match_single(registers_.sr, [](auto curr, auto last, auto& next, char32_t rune) {
-							if ((curr == next) || ((unicode::query(rune).properties() & unicode::ptype::Line_Ending) == unicode::ptype::None))
-								return false;
-							if (U'\r' == rune)
-								if (auto const [next2, rune2] = utf8::decode_rune(next, last); (next2 != next) && (rune2 == U'\n'))
-									next = next2;
-							return true; });
+					fail_count = match_eol(registers_.sr);
+				} break;
+				case opcode::test_eol: {
+					registers_.pc += (match_eol(registers_.sr) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_octet: {
+					fail_count = match_octet(registers_.sr, instr.immediate8);
+				} break;
+				case opcode::test_octet: {
+					registers_.pc += (match_octet(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_octet_cf: {
+					fail_count = match_octet_cf(registers_.sr, instr.immediate8);
+				} break;
+				case opcode::test_octet_cf: {
+					registers_.pc += (match_octet_cf(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::condition_test: {
-					fail_count = (environment_->has_condition(str) == (instr.immediate8 != 0)) ? 0 : 1;
+					fail_count = (environment_->has_condition(str) != (instr.immediate8 != 0)) ? 1 : 0;
 				} break;
 				case opcode::condition_push: {
 					stack_frames_.emplace_back(std::in_place_type<condition_frame>, str, environment_->set_condition(str, instr.immediate8 != 0));
@@ -2795,7 +2870,7 @@ public:
 					stack_frames_.pop_back();
 				} break;
 				case opcode::symbol_exists: {
-					fail_count = (environment_->has_symbol(str) == (instr.immediate8 != 0)) ? 0 : 1;
+					fail_count = (environment_->has_symbol(str) != (instr.immediate8 != 0)) ? 1 : 0;
 				} break;
 				case opcode::symbol_all: {
 					fail_count = match_symbol_all(registers_.sr, str, detail::identity{}, std::mem_fn(&basic_parser::compare));

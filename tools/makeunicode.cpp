@@ -1161,6 +1161,13 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 
 namespace lug::unicode {
 
+static constexpr char32_t ascii_limit = 0x80U;
+
+[[nodiscard]] constexpr bool is_ascii(char32_t r) noexcept
+{
+	return r < ascii_limit;
+}
+
 // NOLINTBEGIN(hicpp-signed-bitwise)
 )c++"
 << "\n"
@@ -1400,7 +1407,6 @@ class rune_set
 	friend rune_set negate(rune_set const& /*unused*/);
 	friend rune_set sort_and_optimize(rune_set /*unused*/);
 
-	static constexpr char32_t ascii_limit = 0x80U;
 	std::vector<std::pair<char32_t, char32_t>> intervals;
 	std::bitset<128> ascii;
 
@@ -1431,7 +1437,7 @@ public:
 
 	[[nodiscard]] bool contains(char32_t rune) const noexcept
 	{
-		if (rune < ascii_limit)
+		if (rune < unicode::ascii_limit)
 			return ascii[static_cast<std::size_t>(rune)];
 		auto const interval = std::lower_bound(intervals.begin(), intervals.end(), rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
 		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
@@ -1439,10 +1445,10 @@ public:
 
 	void push_range(char32_t start, char32_t end)
 	{
-		for (char32_t rn = start; rn <= end && rn < ascii_limit; ++rn)
+		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
 			ascii.set(static_cast<std::size_t>(rn));
-		if (end >= ascii_limit) {
-			intervals.emplace_back((std::max)(start, ascii_limit), end);
+		if (end >= unicode::ascii_limit) {
+			intervals.emplace_back((std::max)(start, unicode::ascii_limit), end);
 			std::push_heap(std::begin(intervals), std::end(intervals));
 		}
 	}
@@ -1468,8 +1474,8 @@ public:
 {
 	rune_set negated_runes;
 	if (!runes.intervals.empty()) {
-		if (char32_t const front = runes.intervals.front().first; rune_set::ascii_limit < front)
-			negated_runes.intervals.emplace_back(rune_set::ascii_limit, front - 1);
+		if (char32_t const front = runes.intervals.front().first; unicode::ascii_limit < front)
+			negated_runes.intervals.emplace_back(unicode::ascii_limit, front - 1);
 		if (runes.intervals.size() > 1) {
 			auto const last = std::cend(runes.intervals);
 			auto left = std::cbegin(runes.intervals);
@@ -1484,7 +1490,7 @@ public:
 		if (char32_t const back = runes.intervals.back().second; back < U'\xFFFFFFFF')
 			negated_runes.intervals.emplace_back(back + 1, U'\xFFFFFFFF');
 	} else {
-		negated_runes.intervals.emplace_back(rune_set::ascii_limit, U'\xFFFFFFFF');
+		negated_runes.intervals.emplace_back(unicode::ascii_limit, U'\xFFFFFFFF');
 	}
 	negated_runes.intervals.shrink_to_fit();
 	negated_runes.ascii = ~runes.ascii;
