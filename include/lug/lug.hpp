@@ -1995,7 +1995,7 @@ template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::
 template <typename T, typename = void> struct input_source_has_options : std::false_type {};
 template <typename T> struct input_source_has_options<T, std::enable_if_t<std::is_same_v<source_options, decltype(std::declval<T const&>().options())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
-template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T&>().fill_buffer(std::declval<std::size_t>()))>>> : std::true_type {};
+template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T&>().fill_buffer(std::declval<std::size_t>(), std::declval<std::size_t>()))>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
@@ -2014,13 +2014,14 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
-	[[nodiscard]] bool fill_buffer(std::size_t sn)
+	[[nodiscard]] bool fill_buffer(std::size_t fill_min, std::size_t fill_desired)
 	{
 		if (sources_.empty())
 			return false;
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
-		std::size_t const min_size = buffer_.size() + sn;
-		while (!sources_.empty() && (buffer_.size() < min_size))
+		std::size_t const min_size = buffer_.size() + fill_min;
+		std::size_t const desired_size = buffer_.size() + fill_desired;
+		while (!sources_.empty() && (buffer_.size() < desired_size))
 			if (auto const& [func, opt] = sources_.back(); !func(std::back_inserter(buffer_), opt))
 				sources_.pop_back();
 		return buffer_.size() >= min_size;
@@ -2298,23 +2299,21 @@ class basic_parser : public parser_base
 {
 	InputSource input_source_;
 
-	[[nodiscard]] bool interactive() const noexcept
-	{
-		if constexpr (detail::input_source_has_options<InputSource>::value)
-			return (input_source_.options() & source_options::interactive) != source_options::none;
-		else
-			return false;
-	}
-
-	[[nodiscard]] bool available(std::size_t sr, std::size_t sn, std::size_t fill_hint = 0)
+	[[nodiscard]] bool available(std::size_t sr, std::size_t sn, [[maybe_unused]] std::size_t fill_hint = 0)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			auto const desired_units = (std::max)(fill_hint, sn);
+			std::size_t const desired_size = (std::max)(fill_hint, sn);
 			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
-				if ((sr < buffer_size) && (sn <= (buffer_size - sr)))
-					return true;
-				if (((sr < buffer_size) && interactive()) || !input_source_.fill_buffer(desired_units - (buffer_size - sr)))
+				std::size_t const buffer_remaining = buffer_size - sr;
+				if (sr < buffer_size) {
+					if (sn <= buffer_remaining)
+						return true;
+					if constexpr (detail::input_source_has_options<InputSource>::value)
+						if ((input_source_.options() & source_options::interactive) != source_options::none)
+							return false;
+				}
+				if (!input_source_.fill_buffer(sn - buffer_remaining, desired_size - buffer_remaining))
 					return false;
 			}
 		} else {
