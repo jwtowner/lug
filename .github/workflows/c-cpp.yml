@@ -8,16 +8,14 @@ on:
     tags: [ "*" ]
     paths-ignore:
       - "doc/**"
-      - "CHANGELOG.md"
-      - "README.md"
+      - "*.md"
       - ".editorconfig"
       - ".gitignore"
   pull_request:
     branches: [ "*" ]
     paths-ignore:
       - "doc/**"
-      - "CHANGELOG.md"
-      - "README.md"
+      - "*.md"
       - ".editorconfig"
       - ".gitignore"
 

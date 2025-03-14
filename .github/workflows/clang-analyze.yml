@@ -8,16 +8,14 @@ on:
     tags: [ "v*" ]
     paths-ignore:
       - "doc/**"
-      - "CHANGELOG.md"
-      - "README.md"
+      - "*.md"
       - ".editorconfig"
       - ".gitignore"
   pull_request:
     branches: [ "master", "develop" ]
     paths-ignore:
       - "doc/**"
-      - "CHANGELOG.md"
-      - "README.md"
+      - "*.md"
       - ".editorconfig"
       - ".gitignore"
 
@@ -29,7 +27,7 @@ jobs:
     - name: Install clang-tidy
       run: |
         sudo apt-get update -yq
-        sudo apt-get install -yq clang-tidy
+        sudo apt-get install -yq clang-tools
     - name: Generating Buildsystem
       run: scan-build cmake -S "${{ github.workspace }}" -B build
     - name: Analyzing Project
