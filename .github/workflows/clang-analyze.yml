@@ -29,7 +29,7 @@ jobs:
         sudo apt-get update -yq
         sudo apt-get install -yq clang-tools
     - name: Generating Buildsystem
-      run: scan-build cmake -S "${{ github.workspace }}" -B build
+      run: scan-build cmake -S "${{ github.workspace }}" -B build -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
     - name: Analyzing Project
       working-directory: build/
-      run: scan-build cmake --build build -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+      run: scan-build cmake --build build
