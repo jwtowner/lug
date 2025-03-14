@@ -5,6 +5,7 @@ permissions:
 on:
   push:
     branches: [ "master", "develop" ]
+    tags: [ "v*" ]
     paths:
       - "include/**"
       - "CMakeLists.txt"

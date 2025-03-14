@@ -1,0 +1,37 @@
+name: clang-analyze
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "master", "develop" ]
+    tags: [ "v*" ]
+    paths-ignore:
+      - "doc/**"
+      - "CHANGELOG.md"
+      - "README.md"
+      - ".editorconfig"
+      - ".gitignore"
+  pull_request:
+    branches: [ "master", "develop" ]
+    paths-ignore:
+      - "doc/**"
+      - "CHANGELOG.md"
+      - "README.md"
+      - ".editorconfig"
+      - ".gitignore"
+
+jobs:
+  clang-analyze:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install clang-tidy
+      run: |
+        sudo apt-get update -yq
+        sudo apt-get install -yq clang-tidy
+    - name: Generating Buildsystem
+      run: scan-build cmake -S "${{ github.workspace }}" -B build
+    - name: Analyzing Project
+      working-directory: build/
+      run: scan-build cmake --build build -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON

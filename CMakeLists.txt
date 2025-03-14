@@ -2,7 +2,7 @@
 # Copyright (c) 2017-2025 Jesse W. Towner
 # See LICENSE.md file for license details
 
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.13)
 
 project(
   lug VERSION 0.5.0
