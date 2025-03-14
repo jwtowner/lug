@@ -2049,7 +2049,7 @@ public:
 		if constexpr (std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>)
 			sources_.emplace_back(std::forward<InputFunc>(func), opt);
 		else
-			sources_.emplace_back([func = std::forward<InputFunc>(func)](std::back_insert_iterator<std::string> out, source_options /*opt*/) -> bool { return func(out); }, opt);
+			sources_.emplace_back([srcfn = std::forward<InputFunc>(func)](std::back_insert_iterator<std::string> out, source_options /*opt*/) -> bool { return srcfn(out); }, opt);
 	}
 };
 
