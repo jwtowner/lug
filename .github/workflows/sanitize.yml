@@ -23,9 +23,17 @@ jobs:
       matrix:
         toolchain:
         - cxx: clang++
-          sanitizer: [address, memory, undefined]
+          sanitize: address
+        - cxx: clang++
+          sanitize: memory
+        - cxx: clang++
+          sanitize: undefined
         - cxx: g++
-          sanitizer: [address, leak, undefined]
+          sanitize: address
+        - cxx: g++
+          sanitize: leak
+        - cxx: g++
+          sanitize: undefined
     runs-on: ubuntu-latest
     env:
       CXX: ${{ matrix.toolchain.cxx }}
@@ -35,9 +43,9 @@ jobs:
       run: |
         sudo apt-get update -yq
         sudo apt-get install -yq ninja-build
-    - name: Generating buildsystem with -fsanitize=${{ matrix.toolchain.sanitizer }}
-      run: cmake -S "${{ github.workspace }}" -B build -G Ninja -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.toolchain.sanitizer }}"
-    - name: Building project with -fsanitize=${{ matrix.toolchain.sanitizer }}
+    - name: Generating buildsystem with -fsanitize=${{ matrix.toolchain.sanitize }}
+      run: cmake -S "${{ github.workspace }}" -B build -G Ninja -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.toolchain.sanitize }}"
+    - name: Building project with -fsanitize=${{ matrix.toolchain.sanitize }}
       run: cmake --build build
-    - name: Running tests with -fsanitize=${{ matrix.toolchain.sanitizer }}
+    - name: Running tests with -fsanitize=${{ matrix.toolchain.sanitize }}
       run: cd build && ctest --output-on-failure

@@ -220,7 +220,7 @@ endfunction()
 # Generates a testplan runner script that can be used to run
 # test commands from a testplan file.
 function(generate_sample_testplan_runner)
-  if(NOT EXISTS "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
+  #if(NOT EXISTS "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
     file(WRITE "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake" [[
       message(STATUS "TEST NAME: ${TEST_NAME}")
       message(STATUS "COMMAND: ${TEST_EXECUTABLE} ${TEST_ARGS}")
@@ -251,7 +251,7 @@ function(generate_sample_testplan_runner)
       endif()
 
       if(NOT status EQUAL EXPECTED_STATUS)
-        message(FATAL_ERROR "[FAIL] ACTUAL EXIT STATUS: ${status} EXPECTED EXIT STATUS: ${EXPECTED_STATUS}")
+        message(FATAL_ERROR "[FAIL] ACTUAL EXIT STATUS: ${status} EXPECTED EXIT STATUS: ${EXPECTED_STATUS}\nOutput:\n${out}")
       endif()
 
       string(REPLACE "\r\n" "\n" out "${out}")
@@ -266,7 +266,7 @@ function(generate_sample_testplan_runner)
 
       message(STATUS "[PASS] EXIT STATUS: ${status}")
     ]])
-  endif()
+  #endif()
 endfunction()
 
 if(BUILD_TOOLS)
