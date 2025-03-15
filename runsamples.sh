@@ -172,8 +172,9 @@ for testplan_file in "$@"; do
 			run_test_command "$testplan_dir" "$command" "$status" "$resolved_outfile" || run_status=1
 		else
 			# Extract directory part from input pattern and transform for use in sed
-			pattern_dir=$(trim $(dirname "$pattern"))
-			if [ ! -z "$pattern_dir" ]; then
+			pattern_dir=$(dirname "$pattern")
+			pattern_dir=$(trim "$pattern_dir")
+			if [ -n "$pattern_dir" ]; then
 				pattern_dir=$(echo "$pattern_dir/" | sed 's/\//\\\//g')
 			fi
 

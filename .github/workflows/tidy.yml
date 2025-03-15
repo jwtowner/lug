@@ -1,4 +1,4 @@
-name: clang-tidy
+name: Tidy
 permissions:
   contents: read
 
@@ -8,25 +8,39 @@ on:
     tags: [ "v*" ]
     paths:
       - "include/**"
+      - "tools/*.sh"
       - "CMakeLists.txt"
       - ".clangtidy"
       - "Makefile"
+      - "*.sh"
   pull_request:
     branches: [ "master", "develop" ]
     paths:
       - "include/**"
+      - "tools/*.sh"
       - "CMakeLists.txt"
       - ".clangtidy"
       - "Makefile"
+      - "*.sh"
 
 jobs:
   clang-tidy:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Install clang-tidy
+    - name: Install dependencies
       run: |
         sudo apt-get update -yq
         sudo apt-get install -yq clang-tidy
     - name: Run clang-tidy
-      run: make lint CI_BUILD=1
+      run: make tidy CI_BUILD=1
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -yq
+        sudo apt-get install -yq shellcheck
+    - name: Run shellcheck
+      run: make shellcheck

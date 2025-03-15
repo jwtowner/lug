@@ -47,3 +47,6 @@ ipch/
 *.[Cc]ache
 # but keep track of directories ending in .cache
 !*.[Cc]ache/
+
+# macOS Finder cache file
+.DS_Store
