@@ -1011,6 +1011,29 @@ public:
 	}
 };
 
+template <class T>
+class comma_printer
+{
+	T index_;
+	T count_;
+	std::string_view newline_;
+
+public:
+	comma_printer(T index, T count, std::string_view newline = "\n")
+		: index_{index}, count_{count}, newline_{newline} {}
+
+	friend std::ostream& operator<<(std::ostream& out, comma_printer const& p) {
+		if (p.index_ < (p.count_ - 1))
+			out << ',';
+		if (!p.newline_.empty())
+			out << p.newline_;
+		return out;
+	}
+};
+
+template <class T> comma_printer(T, T) -> comma_printer<T>;
+template <class T> comma_printer(T, T, std::string_view) -> comma_printer<T>;
+
 class enum_printer
 {
 	enum_type enum_type_;
@@ -1149,15 +1172,12 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #include <lug/detail.hpp>
 
 #include <cctype>
-#include <cstddef>
 #include <cstdint>
 
 #include <array>
 #include <bitset>
 #include <memory>
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace lug::unicode {
 
@@ -1176,7 +1196,7 @@ static constexpr char32_t ascii_limit = 0x80U;
 	auto const pad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
 	out << "\t" << std::left << std::setw(pad) << "none" << " = 0,\n";
 	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
+		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Binary properties", [](std::ostream& out) {
@@ -1184,7 +1204,7 @@ static constexpr char32_t ascii_limit = 0x80U;
 	auto const pad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
 	out << "\t" << std::left << std::setw(pad) << "None" << " = 0,\n";
 	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << normalize_property_identifier(pnames[i]) << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
+		out << "\t" << std::left << std::setw(pad) << normalize_property_identifier(pnames[i]) << " = UINT64_C(1) << " << std::right << std::setw(2) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "General categories", [](std::ostream& out) {
@@ -1193,26 +1213,29 @@ static constexpr char32_t ascii_limit = 0x80U;
 	out << "\t" << "None = 0,\n";
 	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
 		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    " << gclnames[i] << " = " << gcnames[i] << ",\n";
+	std::size_t const compound_count = compound_general_categories.size();
+	std::size_t compound_index = 0;
 	for (auto const& compound : compound_general_categories) {
 		out << "\t" << std::left << std::setw(2) << compound.first << " = ";
 		auto const& components = compound.second.second;
 		int padcount = 0;
-		for (std::size_t i = 0, n = components.size(); i < n; ++i) {
-			out << components[i];
-			padcount += static_cast<int>(components[i].size());
-			if (i < n - 1) {
+		for (std::size_t j = 0, m = components.size(); j < m; ++j) {
+			out << components[j];
+			padcount += static_cast<int>(components[j].size());
+			if (j < (m - 1)) {
 				out << "|";
 				++padcount;
 			}
 		}
-		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << ",\n";
+		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << comma_printer{compound_index, compound_count};
+		++compound_index;
 	}
 })
 << "\n// NOLINTEND(hicpp-signed-bitwise)\n\n"
 << enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Scripts", [](std::ostream& out) {
 	auto const pad = align_padding(max_element_size(script_names.cbegin(), script_names.cend()));
 	for (std::size_t i = 0, n = script_names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << script_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << script_names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "blktype", "std::uint_least16_t", "Blocks", [](std::ostream& out) {
@@ -1221,7 +1244,7 @@ static constexpr char32_t ascii_limit = 0x80U;
 	std::transform(std::cbegin(block_names), std::cend(block_names), std::back_inserter(names), normalize_property_identifier);
 	auto const pad = align_padding(max_element_size(std::begin(names), std::end(names)));
 	for (std::size_t i = 0, n = names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "agetype", "std::uint_least8_t", "Character Age", [](std::ostream& out) {
@@ -1229,13 +1252,13 @@ static constexpr char32_t ascii_limit = 0x80U;
 	std::transform(age_names.begin(), age_names.end(), std::back_inserter(age_enums), [](auto& name) { return make_version_identifier(name); });
 	auto const pad = align_padding(max_element_size(age_enums.cbegin(), age_enums.cend()));
 	for (std::size_t i = 0, n = age_enums.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << age_enums[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << age_enums[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "eawtype", "std::uint_least8_t", "East Asian Width", [](std::ostream& out) {
 	auto const pad = align_padding(max_element_size(eawidth_names.cbegin(), eawidth_names.cend()));
 	for (std::size_t i = 0, n = eawidth_names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << R"c++(
 // Property Traits
