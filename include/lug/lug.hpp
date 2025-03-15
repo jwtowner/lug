@@ -84,13 +84,16 @@ enum class opcode : std::uint_least8_t
 	accept,         call,           ret,            fail,           recover_push,
 	recover_pop,    recover_resp,   report_push,    report_pop,     predicate,
 	action,         capture_start,  capture_end,    condition_pop,  symbol_end,
-	symbol_pop,     match_any,      match_set,      match_eol,      match_octet,
-	match_octet_cf, test_any,       test_set,       test_eol,       test_octet,
-	test_octet_cf,
-	match,          match_cf,       match_any_of,   match_all_of,   match_none_of,
-	condition_test, condition_push, symbol_exists,  symbol_all,     symbol_all_cf,
-	symbol_any,     symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
-	symbol_tail_cf, symbol_start,   symbol_push,    raise
+	symbol_pop,     match_any,      match_eol,      match_octet,    match_octet_cf,
+	match_set,      match_all_of,   match_any_of,   match_none_of,
+
+	test_any,       test_eol,       test_octet,     test_octet_cf,  test_set,
+	test_all_of,    test_any_of,    test_none_of,
+
+	match,          match_cf,       condition_test, condition_push, symbol_exists,
+	symbol_all,     symbol_all_cf,  symbol_any,     symbol_any_cf,  symbol_head,
+	symbol_head_cf, symbol_tail,    symbol_tail_cf, symbol_start,   symbol_push,
+	raise
 };
 
 struct alignas(std::uint_least64_t) instruction
@@ -108,6 +111,7 @@ struct program
 {
 	std::vector<instruction> instructions;
 	std::vector<char> data;
+	std::vector<std::uint_least64_t> uniforms;
 	std::vector<unicode::rune_set> runesets;
 	std::vector<error_handler> handlers;
 	std::vector<syntactic_predicate> predicates;
@@ -118,6 +122,7 @@ struct program
 	void concatenate(program const& src)
 	{
 		std::size_t const data_offset = data.size();
+		std::size_t const uniforms_offset = uniforms.size();
 		std::size_t const runesets_offset = runesets.size();
 		std::size_t const handlers_offset = handlers.size();
 		std::size_t const predicates_offset = predicates.size();
@@ -129,6 +134,7 @@ struct program
 			if (new_instr.op < opcode::match) {
 				std::optional<std::size_t> object;
 				switch (new_instr.op) {
+					case opcode::match_any_of: case opcode::match_all_of: case opcode::match_none_of: object = instr.immediate16 + uniforms_offset; break;
 					case opcode::match_set: object = instr.immediate16 + runesets_offset; break;
 					case opcode::report_push: object = instr.immediate16 + handlers_offset; break;
 					case opcode::predicate: object = instr.immediate16 + predicates_offset; break;
@@ -145,6 +151,7 @@ struct program
 			instructions.push_back(new_instr);
 		}
 		data.insert(data.end(), src.data.begin(), src.data.end());
+		uniforms.insert(uniforms.end(), src.uniforms.begin(), src.uniforms.end());
 		runesets.insert(runesets.end(), src.runesets.begin(), src.runesets.end());
 		handlers.insert(handlers.end(), src.handlers.begin(), src.handlers.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
@@ -157,6 +164,7 @@ struct program
 	{
 		instructions.swap(p.instructions);
 		data.swap(p.data);
+		uniforms.swap(p.uniforms);
 		runesets.swap(p.runesets);
 		handlers.swap(p.handlers);
 		predicates.swap(p.predicates);
@@ -755,7 +763,7 @@ public:
 	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
 	std::ptrdiff_t match_class(T properties)
 	{
-		return skip().encode(Op, detail::string_pack(properties), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
+		return skip().encode(Op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
 	}
 
 	void dpsh(directives enable, directives disable)
@@ -2824,21 +2832,6 @@ public:
 				case opcode::test_any: {
 					registers_.pc += (match_any(registers_.sr, instr.immediate16) != 0) ? instr.offset32 : 0;
 				} break;
-				case opcode::match_any_of: {
-					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::any_of(r, pe, s); });
-				} break;
-				case opcode::match_all_of: {
-					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::all_of(r, pe, s); });
-				} break;
-				case opcode::match_none_of: {
-					fail_count = match_rune(registers_.sr, [pe = static_cast<unicode::property_enum>(instr.immediate8), s = str](auto const& r) { return unicode::none_of(r, pe, s); });
-				} break;
-				case opcode::match_set: {
-					fail_count = match_rune(registers_.sr, [&rs = program_->runesets[instr.immediate16]](char32_t rune) { return rs.contains(rune); });
-				} break;
-				case opcode::test_set: {
-					registers_.pc += (match_rune(registers_.sr, [&rs = program_->runesets[instr.immediate16]](char32_t rune) { return rs.contains(rune); }) != 0) ? instr.offset32 : 0;
-				} break;
 				case opcode::match_eol: {
 					fail_count = match_eol(registers_.sr);
 				} break;
@@ -2856,6 +2849,30 @@ public:
 				} break;
 				case opcode::test_octet_cf: {
 					registers_.pc += (match_octet_cf(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_set: {
+					fail_count = match_rune(registers_.sr, [this, imm16 = instr.immediate16](char32_t rune) { return program_->runesets[imm16].contains(rune); });
+				} break;
+				case opcode::test_set: {
+					registers_.pc += (match_rune(registers_.sr, [this, imm16 = instr.immediate16](char32_t rune) { return program_->runesets[imm16].contains(rune); }) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_all_of: {
+					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+				} break;
+				case opcode::test_all_of: {
+					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_any_of: {
+					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+				} break;
+				case opcode::test_any_of: {
+					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_none_of: {
+					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+				} break;
+				case opcode::test_none_of: {
+					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::condition_test: {
 					fail_count = (environment_->has_condition(str) != (instr.immediate8 != 0)) ? 1 : 0;

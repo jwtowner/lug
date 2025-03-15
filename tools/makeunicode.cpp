@@ -1323,49 +1323,49 @@ public:
 }
 
 // Checks if the rune matches all of the string-packed property classes
-[[nodiscard]] inline bool all_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool all_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
 {
 	switch (penum) {
 		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.all_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.all_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.all_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
+		case property_enum::ctype: return rec.all_of(static_cast<ctype>(pflags));
+		case property_enum::ptype: return rec.all_of(static_cast<ptype>(pflags));
+		case property_enum::gctype: return rec.all_of(static_cast<gctype>(pflags));
+		case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+		case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+		case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+		case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
 	}
 	return false;
 }
 
 // Checks if the rune matches any of the string-packed property classes
-[[nodiscard]] inline bool any_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool any_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
 {
 	switch (penum) {
 		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.any_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.any_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.any_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
+		case property_enum::ctype: return rec.any_of(static_cast<ctype>(pflags));
+		case property_enum::ptype: return rec.any_of(static_cast<ptype>(pflags));
+		case property_enum::gctype: return rec.any_of(static_cast<gctype>(pflags));
+		case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+		case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+		case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+		case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
 	}
 	return false;
 }
 
 // Checks if the rune matches none of the string-packed property classes
-[[nodiscard]] inline bool none_of(record const& rec, property_enum penum, std::string_view str)
+[[nodiscard]] inline bool none_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
 {
 	switch (penum) {
 		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.none_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.none_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.none_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() != lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() != lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() != lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() != lug::detail::string_unpack<eawtype>(str);
+		case property_enum::ctype: return rec.none_of(static_cast<ctype>(pflags));
+		case property_enum::ptype: return rec.none_of(static_cast<ptype>(pflags));
+		case property_enum::gctype: return rec.none_of(static_cast<gctype>(pflags));
+		case property_enum::sctype: return rec.script() != static_cast<sctype>(pflags);
+		case property_enum::blktype: return rec.block() != static_cast<blktype>(pflags);
+		case property_enum::agetype: return rec.age() != static_cast<agetype>(pflags);
+		case property_enum::eawtype: return rec.eawidth() != static_cast<eawtype>(pflags);
 	}
 	return false;
 }

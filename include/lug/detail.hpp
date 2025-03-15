@@ -397,18 +397,6 @@ template <class Error, class Sequence>
 	return detail::pop_back(s);
 }
 
-template <class Integral>
-[[nodiscard]] inline std::string string_pack(Integral n)
-{
-	return std::string{reinterpret_cast<char const*>(&n), sizeof(n)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-}
-
-template <class Integral>
-[[nodiscard]] inline Integral string_unpack(std::string_view s)
-{
-	return *reinterpret_cast<Integral const*>(s.data()); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-}
-
 template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
 [[nodiscard]] constexpr T sar(T x, unsigned int n) noexcept
 {

@@ -18,8 +18,8 @@ void test_addition_with_attributes()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		rule Number = lexeme[+"[0-9]"_rx] < [](std::string const& text) -> int { return std::stoi(text); };
-		rule Addition = (lhs % Number) > '+' > (rhs % Number) < [&]{ result = lhs + rhs; };
+		rule Number = lexeme[+"[0-9]"_rx] <[](std::string const& text) -> int { return std::stoi(text); };
+		rule Addition = (lhs % Number) > '+' > (rhs % Number) <[&]{ result = lhs + rhs; };
 		return start(Addition > eoi);
 	}();
 
