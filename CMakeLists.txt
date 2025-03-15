@@ -22,11 +22,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND (UNIX AND NOT APPLE))
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
-endif()
-
 add_library(lug INTERFACE)
 
 target_include_directories(lug INTERFACE
@@ -79,8 +74,8 @@ function(setup_executable_target target_name)
   endif()
   if (MSVC)
     target_compile_options(${target_name} PRIVATE
-      /bigobj /W4 /permissive- /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
-      /Zc:strictStrings /Zc:throwingNew /Zc:referenceBinding /Zc:wchar_t
+      /bigobj /W4 /permissive- /sdl /utf-8 /EHsc /GR /Za /Zc:__cplusplus /Zc:inline
+      /Zc:referenceBinding /Zc:rvalueCast /Zc:strictStrings /Zc:throwingNew /Zc:wchar_t
       $<$<BOOL:${CI_BUILD}>:/WX>)
     target_link_options(${target_name} PRIVATE
       $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/OPT:REF /OPT:ICF>)
@@ -99,7 +94,8 @@ function(add_sample_testplan_test)
     string(REGEX REPLACE "<[ \t]*[^ \t><]+" "" ARG_COMMAND_ARGS "${ARG_COMMAND_ARGS}")
     string(STRIP "${ARG_COMMAND_ARGS}" ARG_COMMAND_ARGS)
   endif()
-  add_test(NAME ${ARG_TEST_NAME}
+  add_test(
+    NAME ${ARG_TEST_NAME}
     COMMAND ${CMAKE_COMMAND}
       -DTEST_NAME=${ARG_TEST_NAME}
       -DTEST_EXECUTABLE=${ARG_COMMAND_EXECUTABLE}
@@ -271,8 +267,8 @@ endif()
 
 if(BUILD_TESTS)
   enable_testing()
-  file(GLOB TEST_SOURCES tests/*.cpp)
-  foreach(test_source ${TEST_SOURCES})
+  file(GLOB test_sources tests/*.cpp)
+  foreach(test_source ${test_sources})
     get_filename_component(test_name ${test_source} NAME_WE)
     add_executable(${test_name} ${test_source})
     setup_executable_target(${test_name})
@@ -281,19 +277,19 @@ if(BUILD_TESTS)
 endif()
 
 if(BUILD_SAMPLES)
-  file(GLOB SAMPLE_DIRS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*)
-  foreach(sample_dir ${SAMPLE_DIRS})
-    file(GLOB SAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/${sample_dir}/*.cpp)
-    foreach(sample_source ${SAMPLE_SOURCES})
+  file(GLOB sample_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*)
+  foreach(sample_dir ${sample_dirs})
+    file(GLOB sample_sources ${CMAKE_CURRENT_SOURCE_DIR}/${sample_dir}/*.cpp)
+    foreach(sample_source ${sample_sources})
       get_filename_component(sample_name ${sample_source} NAME_WE)
       add_executable(${sample_name} ${sample_source})
       setup_executable_target(${sample_name})
     endforeach()
   endforeach()
-  file(GLOB TESTPLAN_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*/*.testplan)
-  if(TESTPLAN_FILES)
+  file(GLOB testplan_files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} samples/*/*.testplan)
+  if(testplan_files)
     generate_sample_testplan_runner()
-    foreach(testplan_file ${TESTPLAN_FILES})
+    foreach(testplan_file ${testplan_files})
       process_sample_testplan(${testplan_file})
     endforeach()
   endif()
