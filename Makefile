@@ -1,13 +1,24 @@
 # lug - Embedded DSL for PE grammar parsers in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
 # See LICENSE file for copyright and license details
+
+# This is a POSIX.1-2014 compliant Makefile. It is known to work with GNU Make, NetBSD Make and PDP Make.
+# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html
+.POSIX:
+.PHONY: all clean dist install uninstall options test testsuite runtestsuite samples runsamples lint clangtidy shellcheck tools unicode
+.SUFFIXES: .cpp .o
 
 # distribution version
 VERSION = 0.5.0
+
+# unicode character database version
+UCD_VERSION = 16.0.0
 
 # paths
 PREFIX = /usr/local
 
 # toolchain
+CXX = c++
 CXXSTD = -std=c++17
 CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
 CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
@@ -39,9 +50,6 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 HEADER_NAMES = detail error iostream unicode utf8 lug
 HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
-# unicode character database version
-UCD_VERSION = 16.0.0
-
 # shell scripts
 SHELLSCRIPTS = runsamples.sh runtests.sh tools/fetchucd.sh
 
@@ -51,7 +59,7 @@ DISTDOCFILES = CHANGELOG.md LICENSE.md README.md
 DISTPROJFILES = CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore
 DISTFILES = $(DISTDOCFILES) $(DISTPROJFILES) $(DISTDIRS)
 
-all: options samples tests
+all: options testsuite samples
 
 .cpp.o:
 	@echo CXX $<
@@ -65,24 +73,29 @@ $(SAMPLES_BIN): $(SAMPLES_OBJ)
 
 samples: $(SAMPLES_BIN)
 
+runsamples: samples $(SAMPLES_TESTPLANS)
+	@sh runsamples.sh $(SAMPLES_TESTPLANS)
+
 $(TESTS_OBJ): $(HEADERS)
 
 $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
-tests: $(TESTS_BIN)
+testsuite: $(TESTS_BIN)
 
-check: tests samples $(SAMPLES_TESTPLANS)
+runtestsuite: testsuite
 	@sh runtests.sh $(TESTS_BIN)
-	@echo
-	@sh runsamples.sh $(SAMPLES_TESTPLANS)
+
+test: runtestsuite runsamples
+
+clangtidy:
+	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
 
 shellcheck:
 	@$(SHELLCHECK) -s sh $(SHELLSCRIPTS)
 
-tidy:
-	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
+lint: clangtidy shellcheck
 
 $(TOOLS_OBJ): $(HEADERS)
 
@@ -100,13 +113,16 @@ unicode: tools
 
 options:
 	@echo lug build options:
-	@echo "CXX         = $(CXX)"
-	@echo "CXXSTD      = $(CXXSTD)"
-	@echo "CXXFLAGS    = $(CXXFLAGS)"
-	@echo "LDFLAGS     = $(LDFLAGS)"
-	@echo "CLANGTIDY   = $(CLANGTIDY)"
-	@echo "PREFIX      = $(PREFIX)"
-	@echo "UCD_VERSION = $(UCD_VERSION)"
+	@echo "CXX          = $(CXX)"
+	@echo "CXXSTD       = $(CXXSTD)"
+	@echo "CXXWARNFLAGS = $(CXXWARNFLAGS)"
+	@echo "CXXOPTFLAGS  = $(CXXOPTFLAGS)"
+	@echo "CXXFLAGS     = $(CXXFLAGS)"
+	@echo "LDFLAGS      = $(LDFLAGS)"
+	@echo "CLANGTIDY    = $(CLANGTIDY)"
+	@echo "SHELLCHECK   = $(SHELLCHECK)"
+	@echo "PREFIX       = $(PREFIX)"
+	@echo "UCD_VERSION  = $(UCD_VERSION)"
 
 clean:
 	@echo cleaning
@@ -146,5 +162,3 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
-
-.PHONY: all samples tests check shellcheck tidy tools unicode options clean dist install uninstall
