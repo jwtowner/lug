@@ -37,7 +37,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Generating buildsystem
-      run: scan-build cmake -S "${{ github.workspace }}" -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+      run: cmake -S "${{ github.workspace }}" -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
     - name: Run MSVC Code Analysis
       uses: microsoft/msvc-code-analysis-action@v0.1.1
       id: run-msvc-analysis
