@@ -9,13 +9,12 @@ PREFIX = /usr/local
 
 # toolchain
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses \
-			-Os -ffunction-sections -fdata-sections -Iinclude
+CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
+CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
+CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) -Iinclude
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
-
-# unicode character database version
-UCD_VERSION = 16.0.0
+SHELLCHECK = shellcheck
 
 # samples
 SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xmlcheck
@@ -40,9 +39,17 @@ TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 HEADER_NAMES = detail error iostream unicode utf8 lug
 HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
+# unicode character database version
+UCD_VERSION = 16.0.0
+
+# shell scripts
+SHELLSCRIPTS = runsamples.sh runtests.sh tools/fetchucd.sh
+
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig \
-			.gitattributes .gitignore .github/ doc/ include/ samples/ tests/ tools/
+DISTDIRS = .github/ doc/ include/ samples/ tests/ tools/
+DISTDOCFILES = CHANGELOG.md LICENSE.md README.md
+DISTPROJFILES = CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore
+DISTFILES = $(DISTDOCFILES) $(DISTPROJFILES) $(DISTDIRS)
 
 all: options samples tests
 
@@ -71,7 +78,10 @@ check: tests samples $(SAMPLES_TESTPLANS)
 	@echo
 	@sh runsamples.sh $(SAMPLES_TESTPLANS)
 
-lint:
+shellcheck:
+	@$(SHELLCHECK) -s sh $(SHELLSCRIPTS)
+
+tidy:
 	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
 
 $(TOOLS_OBJ): $(HEADERS)
@@ -137,4 +147,4 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
 
-.PHONY: all samples tests check lint tools unicode options clean dist install uninstall
+.PHONY: all samples tests check shellcheck tidy tools unicode options clean dist install uninstall

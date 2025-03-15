@@ -75,16 +75,11 @@ function(setup_executable_target target_name)
     endif()
   endif()
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${target_name} PRIVATE -stdlib=libc++ -Wextra-semi-stmt -Wshadow-all)
-    target_link_options(${target_name} PRIVATE -stdlib=libc++)
-    if (UNIX AND NOT APPLE)
-      target_link_libraries(${target_name} PRIVATE c++ c++abi m)
-      target_link_options(${target_name} PRIVATE -fuse-ld=lld)
-    endif()
+    target_compile_options(${target_name} PRIVATE -Wextra-semi-stmt -Wshadow-all)
   endif()
   if (MSVC)
     target_compile_options(${target_name} PRIVATE
-      /bigobj /W4 /permissive /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
+      /bigobj /W4 /permissive- /sdl /utf-8 /Za /Zc:__cplusplus /Zc:rvalueCast /Zc:inline
       /Zc:strictStrings /Zc:throwingNew /Zc:referenceBinding /Zc:wchar_t
       $<$<BOOL:${CI_BUILD}>:/WX>)
     target_link_options(${target_name} PRIVATE
@@ -220,7 +215,7 @@ endfunction()
 # Generates a testplan runner script that can be used to run
 # test commands from a testplan file.
 function(generate_sample_testplan_runner)
-  #if(NOT EXISTS "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
+  if(NOT EXISTS "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
     file(WRITE "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake" [[
       message(STATUS "TEST NAME: ${TEST_NAME}")
       message(STATUS "COMMAND: ${TEST_EXECUTABLE} ${TEST_ARGS}")
@@ -266,7 +261,7 @@ function(generate_sample_testplan_runner)
 
       message(STATUS "[PASS] EXIT STATUS: ${status}")
     ]])
-  #endif()
+  endif()
 endfunction()
 
 if(BUILD_TOOLS)
