@@ -47,7 +47,7 @@ namespace lug {
 template <class CharT, class Traits, class OutputIt>
 std::basic_istream<CharT, Traits>& readsource(std::basic_istream<CharT, Traits>& input, OutputIt output, CharT delim, source_options options = source_options::none)
 {
-	typename std::basic_istream<CharT, Traits>::sentry sentry{input, true};
+	typename std::basic_istream<CharT, Traits>::sentry const sentry{input, true};
 	if (!sentry)
 		return input;
 	std::streamsize count = 0;

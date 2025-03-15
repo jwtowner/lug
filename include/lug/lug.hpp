@@ -494,24 +494,23 @@ public:
 }
 
 template <class T>
-class recursive_wrapper
+class recursive_wrapper // NOLINT(cppcoreguidelines-special-member-functions,hicpp-special-member-functions)
 {
+	static_assert(std::is_move_constructible_v<T>, "T must be move constructible");
 	std::unique_ptr<T> ptr;
 public:
 	using type = T;
+	template <class U = T, class = std::enable_if_t<std::is_default_constructible_v<U>>>
 	recursive_wrapper() : ptr{std::make_unique<T>()} {}
-	recursive_wrapper(recursive_wrapper const& other) : ptr{std::make_unique<T>(*other.ptr)} {}
+	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
+	recursive_wrapper(U&& x) : ptr{std::make_unique<T>(std::forward<U>(x))} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	template <class U = T, class = std::enable_if_t<!std::is_constructible_v<T, std::unique_ptr<U>&&>>>
+	explicit recursive_wrapper(std::unique_ptr<U>&& p) noexcept : ptr{std::move(p)} {}
+	template <class U = T, class = std::enable_if_t<std::is_copy_constructible_v<U>>>
+	recursive_wrapper(recursive_wrapper const& other) : ptr{std::make_unique<T>(*other.ptr)} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	recursive_wrapper(recursive_wrapper&&) noexcept = default;
 	recursive_wrapper& operator=(recursive_wrapper&&) noexcept = default;
 	~recursive_wrapper() = default;
-
-	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
-	recursive_wrapper(U&& x) noexcept
-		: ptr{std::make_unique<T>(std::forward<U>(x))} {}
-
-	template <class U = T, class = std::enable_if_t<!std::is_constructible_v<T, std::unique_ptr<U>&&>>>
-	explicit recursive_wrapper(std::unique_ptr<U>&& p) noexcept
-		: ptr{std::move(p)} {}
 
 	recursive_wrapper& operator=(recursive_wrapper const& other)
 	{
@@ -534,8 +533,8 @@ public:
 	}
 
 	void swap(recursive_wrapper& other) noexcept { ptr.swap(other.ptr); }
-	operator T&() noexcept { return *ptr; }
-	operator T const&() const noexcept { return *ptr; }
+	operator T&() noexcept { return *ptr; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	operator T const&() const noexcept { return *ptr; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	T& get() noexcept { return *ptr; }
 	T const & get() const noexcept { return *ptr; }
 	T* get_pointer() noexcept { return ptr.get(); }
@@ -751,8 +750,7 @@ public:
 				if (auto const properties = unicode::query(rune).properties(); (properties & unicode::ptype::Ascii) != unicode::ptype::None) {
 					if ((properties & unicode::ptype::Alphabetic) != unicode::ptype::None)
 						return encode(opcode::match_octet_cf, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(unicode::tocasefold(rune)));
-					else
-						return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(rune));
+					return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(rune));
 				}
 			}
 			return encode(opcode::match_cf, utf8::tocasefold(subject));
@@ -2390,10 +2388,13 @@ class basic_parser : public parser_base
 	[[nodiscard]] std::ptrdiff_t match_octet_cf(std::size_t& sr, std::uint_least8_t value)
 	{
 		if (std::size_t const i = sr; available(i, 1)) {
-			char const c = input_source_.buffer()[i];
-			if (utf8::is_ascii(c) && (unicode::tocasefold(static_cast<char32_t>(static_cast<unsigned char>(c)) == static_cast<char32_t>(value)))) {
-				sr = i + 1;
-				return 0;
+			if (char const c = input_source_.buffer()[i]; utf8::is_ascii(c)) {
+				auto const c32 = static_cast<char32_t>(static_cast<unsigned char>(c));
+				auto const v32 = static_cast<char32_t>(value);
+				if (unicode::tocasefold(c32) == v32) {
+					sr = i + 1;
+					return 0;
+				}
 			}
 		}
 		return 1;

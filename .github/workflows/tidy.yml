@@ -9,8 +9,8 @@ on:
     paths:
       - "include/**"
       - "tools/*.sh"
+      - ".clang-tidy"
       - "CMakeLists.txt"
-      - ".clangtidy"
       - "Makefile"
       - "*.sh"
   pull_request:
@@ -18,8 +18,8 @@ on:
     paths:
       - "include/**"
       - "tools/*.sh"
+      - ".clang-tidy"
       - "CMakeLists.txt"
-      - ".clangtidy"
       - "Makefile"
       - "*.sh"
 

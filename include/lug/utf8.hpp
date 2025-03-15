@@ -164,18 +164,20 @@ struct match_eol_unicode_fn
 		if (first == last)
 			return first;
 		auto next = first;
-		auto const c = *next;
+		auto const c1 = *next;
 		++next;
-		if (('\n' <= c) && (c <= '\f')) {
+		if (('\n' <= c1) && (c1 <= '\f'))
 			return next;
-		} else if (c == '\r') {
+		if (c1 == '\r') {
 			if ((next != last) && (*next == '\n'))
 				++next;
 			return next;
-		} else if ((c == nel0) && (((next != last) && (*next == nel1)))) {
+		}
+		if ((c1 == nel0) && (((next != last) && (*next == nel1)))) {
 			++next;
 			return next;
-		} else if ((c == lsps0) && ((next != last) && (*next == lsps1))) {
+		}
+		if ((c1 == lsps0) && ((next != last) && (*next == lsps1))) {
 			++next;
 			if (next != last) {
 				if (char const c3 =*next; (c3 == ls2) || (c3 == ps2)) {
@@ -188,7 +190,7 @@ struct match_eol_unicode_fn
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> decltype(std::begin(rng))
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		return (*this)(std::begin(rng), std::end(rng));
 	}
