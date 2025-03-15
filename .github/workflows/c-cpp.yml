@@ -58,11 +58,11 @@ jobs:
       env:
         CXX: ${{ matrix.compiler }}
       run: make -j$(nproc) CI_BUILD=1
-    - name: make check
+    - name: make test
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make check CI_BUILD=1
+      run: make test CI_BUILD=1
     - name: CMake Build (Windows)
       if: runner.os == 'Windows'
       run: |

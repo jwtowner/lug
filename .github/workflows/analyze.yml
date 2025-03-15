@@ -4,7 +4,8 @@ permissions:
 
 on:
   push:
-    branches: [ "master", "develop" ]
+    branches: [ "master" ]
+    tags: [ "v*" ]
     paths-ignore:
       - "doc/**"
       - "*.md"

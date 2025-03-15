@@ -33,7 +33,7 @@ jobs:
         sudo apt-get update -yq
         sudo apt-get install -yq clang-tidy
     - name: Run clang-tidy
-      run: make tidy CI_BUILD=1
+      run: make clangtidy CI_BUILD=1
   shellcheck:
     runs-on: ubuntu-latest
     steps:
