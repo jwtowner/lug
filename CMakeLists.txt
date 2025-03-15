@@ -88,23 +88,23 @@ endfunction()
 function(add_sample_testplan_test)
   cmake_parse_arguments(PARSE_ARGV 0 ARG "" 
     "TEST_NAME;TEST_DIR;COMMAND_EXECUTABLE;EXPECTED_STATUS;EXPECTED_OUTPUT" "COMMAND_ARGS")
-  set(input_file "")
+  set(INPUT_FILE "")
   if(ARG_COMMAND_ARGS MATCHES ".*<[ \t]*([^ \t><]+).*")
-    set(input_file "${CMAKE_MATCH_1}")
+    set(INPUT_FILE "${CMAKE_MATCH_1}")
     string(REGEX REPLACE "<[ \t]*[^ \t><]+" "" ARG_COMMAND_ARGS "${ARG_COMMAND_ARGS}")
     string(STRIP "${ARG_COMMAND_ARGS}" ARG_COMMAND_ARGS)
   endif()
-  add_test(
-    NAME ${ARG_TEST_NAME}
-    COMMAND ${CMAKE_COMMAND}
-      -DTEST_NAME=${ARG_TEST_NAME}
-      -DTEST_EXECUTABLE=${ARG_COMMAND_EXECUTABLE}
-      -DTEST_ARGS=${ARG_COMMAND_ARGS}
-      -DTEST_DIR=${ARG_TEST_DIR}
-      $<$<BOOL:${input_file}>:-DTEST_INPUT=${ARG_TEST_DIR}/${input_file}>
-      -DEXPECTED_STATUS=${ARG_EXPECTED_STATUS}
-      -DEXPECTED_OUTPUT=${ARG_TEST_DIR}/${ARG_EXPECTED_OUTPUT}
-      -P "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
+  set(TEST_OPTIONS
+    "-DTEST_NAME=${ARG_TEST_NAME}"
+    "-DTEST_EXECUTABLE=${ARG_COMMAND_EXECUTABLE}"
+    "-DTEST_ARGS=${ARG_COMMAND_ARGS}"
+    "-DTEST_DIR=${ARG_TEST_DIR}"
+    "-DEXPECTED_STATUS=${ARG_EXPECTED_STATUS}"
+    "-DEXPECTED_OUTPUT=${ARG_TEST_DIR}/${ARG_EXPECTED_OUTPUT}")
+  if(DEFINED INPUT_FILE AND NOT "${INPUT_FILE}" STREQUAL "")
+    list(APPEND TEST_OPTIONS "-DTEST_INPUT=${ARG_TEST_DIR}/${INPUT_FILE}")
+  endif()
+  add_test(NAME ${ARG_TEST_NAME} COMMAND ${CMAKE_COMMAND} ${TEST_OPTIONS} -P "${CMAKE_BINARY_DIR}/sample_testplan_runner.cmake")
 endfunction()
 
 # Processes a sample testplan file. This function parses and executes test
@@ -221,24 +221,10 @@ function(generate_sample_testplan_runner)
       message(STATUS "EXPECTED EXIT STATUS: ${EXPECTED_STATUS}")
 
       separate_arguments(TEST_ARGS_LIST NATIVE_COMMAND "${TEST_ARGS}")
-
       if(DEFINED TEST_INPUT)
-        execute_process(
-          COMMAND ${TEST_EXECUTABLE} ${TEST_ARGS_LIST}
-          WORKING_DIRECTORY ${TEST_DIR}
-          INPUT_FILE ${TEST_INPUT}
-          OUTPUT_VARIABLE out
-          ERROR_VARIABLE out
-          RESULT_VARIABLE status
-          ENCODING UTF-8)
+        execute_process(COMMAND ${TEST_EXECUTABLE} ${TEST_ARGS_LIST} WORKING_DIRECTORY ${TEST_DIR} INPUT_FILE ${TEST_INPUT} OUTPUT_VARIABLE out ERROR_VARIABLE out RESULT_VARIABLE status ENCODING UTF-8)
       else()
-        execute_process(
-          COMMAND ${TEST_EXECUTABLE} ${TEST_ARGS_LIST}
-          WORKING_DIRECTORY ${TEST_DIR}
-          OUTPUT_VARIABLE out
-          ERROR_VARIABLE out
-          RESULT_VARIABLE status
-          ENCODING UTF-8)
+        execute_process(COMMAND ${TEST_EXECUTABLE} ${TEST_ARGS_LIST} WORKING_DIRECTORY ${TEST_DIR} OUTPUT_VARIABLE out ERROR_VARIABLE out RESULT_VARIABLE status ENCODING UTF-8)
       endif()
 
       if(NOT status EQUAL EXPECTED_STATUS)
