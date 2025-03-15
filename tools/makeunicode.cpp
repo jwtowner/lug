@@ -1026,15 +1026,14 @@ public:
 		out << "// " << p.comment_ << "\n";
 		out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
 		p.body_(out);
-		if (p.enum_type_ == enum_type::bitfield)
-			out << "\tis_bitfield_enum\n";
 		return out << "};\n";
 	}
 };
 
 class enum_parser_printer
 {
-	std::string_view name_, abbr_;
+	std::string_view name_;
+	std::string_view abbr_;
 	std::size_t maxcolwidth_{120};
 	std::function<std::vector<std::pair<std::string, std::string>>()> label_source_;
 
@@ -1130,6 +1129,7 @@ public:
 
 void print_unicode_header()
 {
+
 double log2_block_size = std::ceil(std::log2(static_cast<double>(recordstagetable.block_size)));
 std::size_t const block_shift = static_cast<std::size_t>(std::lrint(log2_block_size));
 std::size_t const block_mask = (std::size_t{1} << block_shift) - 1;
@@ -1261,6 +1261,14 @@ template <> inline constexpr property_enum to_property_enum_v<agetype> = propert
 template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
 template <class T> inline constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
+
+} // namespace lug::unicode
+
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ctype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ptype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::gctype> = true;
+
+namespace lug::unicode {
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
@@ -1673,7 +1681,8 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 #endif
 )c++";
-}
+
+} // void print_unicode_header()
 
 int main(int, char**)
 {

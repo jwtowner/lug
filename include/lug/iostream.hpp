@@ -6,6 +6,7 @@
 #define LUG_INCLUDE_LUG_IOSTREAM_HPP
 
 #include <lug/lug.hpp>
+
 #include <iostream>
 
 #ifndef LUG_NO_ISATTY

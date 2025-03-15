@@ -7,6 +7,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 
 namespace lug {
 
@@ -24,6 +25,7 @@ class bad_character_range : public bad_string_expression { public: bad_character
 class bad_grammar : public lug_error { public: bad_grammar() : lug_error{"invalid or empty grammar"} {} };
 class bad_opcode : public lug_error { public: bad_opcode() : lug_error{"invalid opcode"} {} };
 class bad_stack : public lug_error{ public: bad_stack() : lug_error{"empty or invalid parser stack error"} {} };
+class bad_move_only_any_cast : public std::bad_cast { public: [[nodiscard]] char const* what() const noexcept override { return "bad move_only_any cast"; } };
 
 } // namespace lug
 

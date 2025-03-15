@@ -12,15 +12,12 @@
 #include <lug/detail.hpp>
 
 #include <cctype>
-#include <cstddef>
 #include <cstdint>
 
 #include <array>
 #include <bitset>
 #include <memory>
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace lug::unicode {
 
@@ -49,8 +46,7 @@ enum class ctype : std::uint_least16_t
 	cntrl    = UINT16_C(1) <<  9,
 	graph    = UINT16_C(1) << 10,
 	print    = UINT16_C(1) << 11,
-	word     = UINT16_C(1) << 12,
-	is_bitfield_enum
+	word     = UINT16_C(1) << 12
 };
 
 // Binary properties
@@ -120,8 +116,7 @@ enum class ptype : std::uint_least64_t
 	InCB_Linker                          = UINT64_C(1) << 60,
 	InCB_Consonant                       = UINT64_C(1) << 61,
 	InCB_Extend                          = UINT64_C(1) << 62,
-	Bidi_Mirrored                        = UINT64_C(1) << 63,
-	is_bitfield_enum
+	Bidi_Mirrored                        = UINT64_C(1) << 63
 };
 
 // General categories
@@ -165,8 +160,7 @@ enum class gctype : std::uint_least32_t
 	N  = Nd|Nl|No,             Number = N,
 	P  = Pc|Pd|Pe|Pf|Pi|Po|Ps, Punctuation = P,
 	S  = Sc|Sm|Sk|So,          Symbol = S,
-	Z  = Zl|Zp|Zs,             Separator = Z,
-	is_bitfield_enum
+	Z  = Zl|Zp|Zs,             Separator = Z
 };
 
 // NOLINTEND(hicpp-signed-bitwise)
@@ -758,6 +752,14 @@ template <> inline constexpr property_enum to_property_enum_v<agetype> = propert
 template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
 template <class T> inline constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
+
+} // namespace lug::unicode
+
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ctype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ptype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::gctype> = true;
+
+namespace lug::unicode {
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 

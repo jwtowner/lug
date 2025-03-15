@@ -5,7 +5,6 @@
 #ifndef LUG_INCLUDE_LUG_LUG_HPP
 #define LUG_INCLUDE_LUG_LUG_HPP
 
-#include <lug/error.hpp>
 #include <lug/utf8.hpp>
 
 #include <memory>
@@ -36,14 +35,12 @@ template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
 template <class> class recursive_wrapper;
-enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32, is_bitfield_enum };
 enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
 using error_handler = std::function<error_response(error_context&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
 using parser = basic_parser<multi_input_source>;
-using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct encoder_expression_trait_tag {};
 template <class E, class = void> struct is_encoder_expression : std::false_type {};
@@ -106,6 +103,11 @@ struct alignas(std::uint_least64_t) instruction
 
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
 static_assert(alignof(instruction) == alignof(std::uint_least64_t), "expected instruction alignment to be same size as std::uint_least64_t");
+
+enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
+template <> inline constexpr bool is_flag_enum_v<directives> = true;
+
+using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 
 struct program
 {
@@ -1994,7 +1996,8 @@ public:
 	return grammar{std::move(grprogram)};
 }
 
-enum class source_options : std::uint_least8_t { none = 0, interactive = 1, is_bitfield_enum };
+enum class source_options : std::uint_least8_t { none = 0, interactive = 1 };
+template <> inline constexpr bool is_flag_enum_v<source_options> = true;
 
 namespace detail {
 

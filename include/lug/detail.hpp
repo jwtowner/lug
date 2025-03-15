@@ -5,16 +5,17 @@
 #ifndef LUG_INCLUDE_LUG_DETAIL_HPP
 #define LUG_INCLUDE_LUG_DETAIL_HPP
 
-#include <algorithm>
+#include <lug/error.hpp>
+
 #include <cstddef>
-#include <exception>
+
+#include <algorithm>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <typeinfo>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -53,53 +54,53 @@ _Pragma("GCC diagnostic pop")
 
 namespace lug {
 
-class bad_move_only_any_cast : public std::bad_cast { public: [[nodiscard]] char const* what() const noexcept override { return "bad move_only_any cast"; } };
+template <class T> inline constexpr bool is_flag_enum_v = false;
 
-inline namespace bitfield_ops {
+inline namespace flag_enum_ops {
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 [[nodiscard]] constexpr T operator~(T x) noexcept
 {
 	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x));
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 [[nodiscard]] constexpr T operator&(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 [[nodiscard]] constexpr T operator|(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y));
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 [[nodiscard]] constexpr T operator^(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y));
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 constexpr T& operator&=(T& x, T y) noexcept
 {
 	return (x = x & y);
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 constexpr T& operator|=(T& x, T y) noexcept
 {
 	return (x = x | y);
 }
 
-template <class T, class = std::void_t<decltype(T::is_bitfield_enum)>>
+template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
 constexpr T& operator^=(T& x, T y) noexcept
 {
 	return (x = x ^ y);
 }
 
-} // namespace bitfield_ops
+} // namespace flag_enum_ops
 
 namespace detail {
 
