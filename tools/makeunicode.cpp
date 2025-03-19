@@ -1476,6 +1476,13 @@ public:
 	rune_set& operator=(rune_set const&) = default;
 	rune_set& operator=(rune_set&&) = default;
 	~rune_set() = default;
+
+	rune_set(std::initializer_list<char32_t> list)
+	{
+		for (char32_t r : list)
+			push_range(r, r);
+	}
+
 	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept { return (ascii == rhs.ascii) && (intervals == rhs.intervals); }
 	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept { return !(*this == rhs); }
 	[[nodiscard]] bool empty() const noexcept { return intervals.empty() && ascii.none(); }
@@ -1489,8 +1496,20 @@ public:
 		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
 	}
 
+	void push_rune(char32_t rune)
+	{
+		if (rune < unicode::ascii_limit) {
+			ascii.set(static_cast<std::size_t>(rune));
+		} else {
+			intervals.emplace_back(rune, rune);
+			std::push_heap(std::begin(intervals), std::end(intervals));
+		}
+	}
+
 	void push_range(char32_t start, char32_t end)
 	{
+		if (start > end)
+			throw bad_character_range{};
 		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
 			ascii.set(static_cast<std::size_t>(rn));
 		if (end >= unicode::ascii_limit) {
@@ -1501,6 +1520,8 @@ public:
 
 	void push_casefolded_range(char32_t start, char32_t end)
 	{
+		if (start > end)
+			throw bad_character_range{};
 		ptype p = query(start).properties();
 		char32_t r1 = start;
 		char32_t r2 = start;
@@ -1545,6 +1566,8 @@ public:
 
 [[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
 {
+	if (runes.intervals.empty())
+		return runes;
 	std::vector<std::pair<char32_t, char32_t>> optimized_intervals;
 	auto out = optimized_intervals.end();
 	std::sort_heap(std::begin(runes.intervals), std::end(runes.intervals));
