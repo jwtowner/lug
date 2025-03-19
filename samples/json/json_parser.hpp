@@ -77,8 +77,8 @@ public:
 		auto Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
 		rule KeyOrString    = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeKeyOrString;
 		auto String         = synthesize<json_node, std::string>[ KeyOrString ];
-		auto Array          = '[' > synthesize<json_node, json_array>[ collect<json_array>[ JSON >> ',' ] ] > ']';
-		auto Object         = '{' > synthesize<json_node, json_object>[ collect<json_object, std::string, json_node>[ ( KeyOrString > ':' > JSON ) >> ',' ] ] > '}';
+		auto Array          = '[' > synthesize_collect<json_node, json_array>[ JSON >> ',' ] > ']';
+		auto Object         = '{' > synthesize_collect<json_node, json_object, std::string, json_node>[ ( KeyOrString > ':' > JSON ) >> ',' ] > '}';
 		JSON                = Object | Array | String | Number | True | False | Null;
 		grammar_            = start(JSON > eoi);
 	}

@@ -1688,6 +1688,19 @@ struct synthesize_combinator
 	}
 };
 
+template <class Factory, class T, class Container, class... ElementArgs>
+struct synthesize_collect_combinator
+{
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+	{
+		if constexpr (sizeof...(ElementArgs) == 0)
+			return synthesize_expression{collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<typename Container::value_type>}, std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>};
+		else
+			return synthesize_expression{collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<ElementArgs>...}, std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>};
+	}
+};
+
 struct synthesize_factory
 {
 	template <class T, class... Args>
@@ -1745,6 +1758,9 @@ template <class Container, class... ElementArgs> inline constexpr collect_combin
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_factory, T, Args...> synthesize{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_shared_factory, T, Args...> synthesize_shared{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_unique_factory, T, Args...> synthesize_unique{};
+template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_factory, T, Container, ElementArgs...> synthesize_collect{};
+template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_shared_factory, T, Container, ElementArgs...> synthesize_collect_shared{};
+template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_unique_factory, T, Container, ElementArgs...> synthesize_collect_unique{};
 
 inline constexpr struct
 {
