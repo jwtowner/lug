@@ -15,6 +15,8 @@
 * Added comprehensive test infrastructure for the sample programs, including automated test plans and verification scripts to ensure sample functionality remains correct across changes.
 * Restructured include directory hierarchy by moving `lug/` to `include/lug/`, ensuring cleaner include paths and better organization of header files.
 * Added support for additional compilers (GCC 9/10/11/12, Clang 14/15/16/17) in the C/C++ CI workflow to ensure broader compatibility.
+* Added static analyzer CI workflow for Clang and MSVC to detect potential bugs, memory leaks, and undefined behavior during the build process.
+* Added compiler sanitizer CI workflow with Address Sanitizer (ASan), Undefined Behavior Sanitizer (UBSan), and Memory Sanitizer (MSan) to detect memory errors, undefined behavior, and other runtime issues early in the development process.
 * Added clang-tidy integration to CI workflow to enforce code quality standards and catch potential issues early in the development process.
 * Removed Ubuntu 20.04 from the GitHub workflows as it has reached end-of-life and is no longer supported.
 
