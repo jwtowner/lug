@@ -821,53 +821,68 @@ public:
 	return record{&table->records[index]};
 }
 
-// Checks if the rune matches all of the string-packed property classes
-[[nodiscard]] inline bool all_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
+struct all_of_fn
 {
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.all_of(static_cast<ctype>(pflags));
-		case property_enum::ptype: return rec.all_of(static_cast<ptype>(pflags));
-		case property_enum::gctype: return rec.all_of(static_cast<gctype>(pflags));
-		case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
-		case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
-		case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
-		case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.all_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.all_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.all_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
 	}
-	return false;
-}
+};
+
+// Checks if the rune matches all of the string-packed property classes
+inline constexpr all_of_fn all_of{};
+
+struct any_of_fn
+{
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.any_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.any_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.any_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
+	}
+};
 
 // Checks if the rune matches any of the string-packed property classes
-[[nodiscard]] inline bool any_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
+inline constexpr any_of_fn any_of{};
+
+struct none_of_fn
 {
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.any_of(static_cast<ctype>(pflags));
-		case property_enum::ptype: return rec.any_of(static_cast<ptype>(pflags));
-		case property_enum::gctype: return rec.any_of(static_cast<gctype>(pflags));
-		case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
-		case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
-		case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
-		case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.none_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.none_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.none_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() != static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() != static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() != static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() != static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
 	}
-	return false;
-}
+};
 
 // Checks if the rune matches none of the string-packed property classes
-[[nodiscard]] inline bool none_of(record const& rec, property_enum penum, std::uint_least64_t pflags)
-{
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.none_of(static_cast<ctype>(pflags));
-		case property_enum::ptype: return rec.none_of(static_cast<ptype>(pflags));
-		case property_enum::gctype: return rec.none_of(static_cast<gctype>(pflags));
-		case property_enum::sctype: return rec.script() != static_cast<sctype>(pflags);
-		case property_enum::blktype: return rec.block() != static_cast<blktype>(pflags);
-		case property_enum::agetype: return rec.age() != static_cast<agetype>(pflags);
-		case property_enum::eawtype: return rec.eawidth() != static_cast<eawtype>(pflags);
-	}
-	return false;
-}
+inline constexpr none_of_fn none_of{};
 
 // Column width (-1 = non-displayable, 0 = non-spacing, 1 = normal, 2 = wide)
 [[nodiscard]] inline int cwidth(char32_t r)
@@ -929,6 +944,13 @@ public:
 	rune_set& operator=(rune_set const&) = default;
 	rune_set& operator=(rune_set&&) = default;
 	~rune_set() = default;
+
+	rune_set(std::initializer_list<char32_t> list)
+	{
+		for (char32_t r : list)
+			push_range(r, r);
+	}
+
 	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept { return (ascii == rhs.ascii) && (intervals == rhs.intervals); }
 	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept { return !(*this == rhs); }
 	[[nodiscard]] bool empty() const noexcept { return intervals.empty() && ascii.none(); }
@@ -942,8 +964,20 @@ public:
 		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
 	}
 
+	void push_rune(char32_t rune)
+	{
+		if (rune < unicode::ascii_limit) {
+			ascii.set(static_cast<std::size_t>(rune));
+		} else {
+			intervals.emplace_back(rune, rune);
+			std::push_heap(std::begin(intervals), std::end(intervals));
+		}
+	}
+
 	void push_range(char32_t start, char32_t end)
 	{
+		if (start > end)
+			throw bad_character_range{};
 		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
 			ascii.set(static_cast<std::size_t>(rn));
 		if (end >= unicode::ascii_limit) {
@@ -954,6 +988,8 @@ public:
 
 	void push_casefolded_range(char32_t start, char32_t end)
 	{
+		if (start > end)
+			throw bad_character_range{};
 		ptype p = query(start).properties();
 		char32_t r1 = start;
 		char32_t r2 = start;
@@ -998,6 +1034,8 @@ public:
 
 [[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
 {
+	if (runes.intervals.empty())
+		return runes;
 	std::vector<std::pair<char32_t, char32_t>> optimized_intervals;
 	auto out = optimized_intervals.end();
 	std::sort_heap(std::begin(runes.intervals), std::end(runes.intervals));

@@ -79,20 +79,35 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 } // namespace detail
 
-[[nodiscard]] constexpr bool is_ascii(char octet) noexcept
+struct is_ascii_fn
 {
-	return (static_cast<unsigned char>(octet) & 0x80U) == 0x00U;
-}
+	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	{
+		return (static_cast<unsigned char>(octet) & 0x80U) == 0x00U;
+	}
+};
 
-[[nodiscard]] constexpr bool is_lead(char octet) noexcept
-{
-	return (static_cast<unsigned char>(octet) & 0xc0U) == 0xc0U;
-}
+inline constexpr is_ascii_fn is_ascii{};
 
-[[nodiscard]] constexpr bool is_lead_or_ascii(char octet) noexcept
+struct is_lead_fn
 {
-	return (static_cast<unsigned char>(octet) & 0xc0U) != 0x80U;
-}
+	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	{
+		return (static_cast<unsigned char>(octet) & 0xc0U) == 0xc0U;
+	}
+};
+
+inline constexpr is_lead_fn is_lead{};
+
+struct is_lead_or_ascii_fn
+{
+	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	{
+		return (static_cast<unsigned char>(octet) & 0xc0U) != 0x80U;
+	}
+};
+
+inline constexpr is_lead_or_ascii_fn is_lead_or_ascii{};
 
 template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
@@ -147,8 +162,6 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return result;
 }
 
-namespace niebloids {
-
 struct match_eol_unicode_fn
 {
 	static constexpr char nel0 = static_cast<char>(0xc2);
@@ -161,28 +174,28 @@ struct match_eol_unicode_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] constexpr InputIt operator()(InputIt first, InputIt last) const
 	{
-		if (first == last)
-			return first;
-		auto next = first;
-		auto const c1 = *next;
-		++next;
-		if (('\n' <= c1) && (c1 <= '\f'))
-			return next;
-		if (c1 == '\r') {
-			if ((next != last) && (*next == '\n'))
-				++next;
-			return next;
-		}
-		if ((c1 == nel0) && (((next != last) && (*next == nel1)))) {
+		if (first != last) {
+			auto next = first;
+			auto const c1 = *next;
 			++next;
-			return next;
-		}
-		if ((c1 == lsps0) && ((next != last) && (*next == lsps1))) {
-			++next;
-			if (next != last) {
-				if (char const c3 =*next; (c3 == ls2) || (c3 == ps2)) {
+			if (('\n' <= c1) && (c1 <= '\f'))
+				return next;
+			if (c1 == '\r') {
+				if ((next != last) && (*next == '\n'))
 					++next;
-					return next;
+				return next;
+			}
+			if ((c1 == nel0) && (((next != last) && (*next == nel1)))) {
+				++next;
+				return next;
+			}
+			if ((c1 == lsps0) && ((next != last) && (*next == lsps1))) {
+				++next;
+				if (next != last) {
+					if (char const c3 =*next; (c3 == ls2) || (c3 == ps2)) {
+						++next;
+						return next;
+					}
 				}
 			}
 		}
@@ -195,6 +208,37 @@ struct match_eol_unicode_fn
 		return (*this)(std::begin(rng), std::end(rng));
 	}
 };
+
+inline constexpr match_eol_unicode_fn match_eol{};
+
+struct match_space_unicode_fn
+{
+	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	[[nodiscard]] InputIt operator()(InputIt first, InputIt last) const
+	{
+		if (first != last) {
+			auto const c = *first;
+			if ((('\t' <= c) && (c <= '\r')) || (c == ' ')) {
+				++first;
+				return first;
+			}
+			if (utf8::is_lead(c)) {
+				auto const [next, rune] = utf8::decode_rune(first, last);
+				if ((unicode::query(rune).compatibility() & unicode::ctype::space) != unicode::ctype::none)
+					return next;
+			}
+		}
+		return first;
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng));
+	}
+};
+
+inline constexpr match_space_unicode_fn match_space{};
 
 struct tocasefold_unicode_fn
 {
@@ -218,6 +262,8 @@ struct tocasefold_unicode_fn
 	}
 };
 
+inline constexpr tocasefold_unicode_fn tocasefold{};
+
 struct tolower_unicode_fn
 {
 	template <class InputIt, class OutputIt>
@@ -239,6 +285,8 @@ struct tolower_unicode_fn
 		return result;
 	}
 };
+
+inline constexpr tolower_unicode_fn tolower{};
 
 struct toupper_unicode_fn
 {
@@ -262,12 +310,7 @@ struct toupper_unicode_fn
 	}
 };
 
-} // namespace niebloids
-
-inline constexpr niebloids::match_eol_unicode_fn match_eol{};
-inline constexpr niebloids::tocasefold_unicode_fn tocasefold{};
-inline constexpr niebloids::tolower_unicode_fn tolower{};
-inline constexpr niebloids::toupper_unicode_fn toupper{};
+inline constexpr toupper_unicode_fn toupper{};
 
 } // namespace lug::utf8
 

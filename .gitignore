@@ -20,6 +20,9 @@ x86/
 [Oo]bj/
 [Ll]og/
 
+# macOS Finder cache file
+.DS_Store
+
 # Editor cache/options directories
 .cursor/
 .vscode/
@@ -47,6 +50,3 @@ ipch/
 *.[Cc]ache
 # but keep track of directories ending in .cache
 !*.[Cc]ache/
-
-# macOS Finder cache file
-.DS_Store

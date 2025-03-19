@@ -77,20 +77,22 @@ struct registers
 
 enum class opcode : std::uint_least8_t
 {
-	jump,           choice,         commit,         commit_back,    commit_partial,
-	accept,         call,           ret,            fail,           recover_push,
-	recover_pop,    recover_resp,   report_push,    report_pop,     predicate,
-	action,         capture_start,  capture_end,    condition_pop,  symbol_end,
-	symbol_pop,     match_any,      match_eol,      match_octet,    match_octet_cf,
+	jump,           choice,         commit,         commit_back,
+	commit_partial, accept,         call,           ret,
+	fail,           recover_push,   recover_pop,    recover_resp,
+	report_push,    report_pop,     predicate,      action,
+	capture_start,  capture_end,    condition_pop,  symbol_end,
+	symbol_pop,     skip_space,
+	match_any,      match_eol,      match_space,    match_octet,
 	match_set,      match_all_of,   match_any_of,   match_none_of,
-
-	test_any,       test_eol,       test_octet,     test_octet_cf,  test_set,
-	test_all_of,    test_any_of,    test_none_of,
-
-	match,          match_cf,       condition_test, condition_push, symbol_exists,
-	symbol_all,     symbol_all_cf,  symbol_any,     symbol_any_cf,  symbol_head,
-	symbol_head_cf, symbol_tail,    symbol_tail_cf, symbol_start,   symbol_push,
-	raise
+	repeat_any,     repeat_eol,     repeat_space,   repeat_octet,
+	repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
+	test_any,       test_eol,       test_space,     test_octet,
+	test_set,       test_all_of,    test_any_of,    test_none_of,
+	match,          match_cf,       condition_test, condition_push,
+	symbol_exists,  symbol_all,     symbol_all_cf,  symbol_any,
+	symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
+	symbol_tail_cf, symbol_start,   symbol_push,    raise
 };
 
 struct alignas(std::uint_least64_t) instruction
@@ -99,6 +101,16 @@ struct alignas(std::uint_least64_t) instruction
 	std::uint_least8_t immediate8;
 	std::uint_least16_t immediate16;
 	std::int_least32_t offset32;
+
+	[[nodiscard]] constexpr std::size_t unpackmin() const noexcept { return static_cast<std::uint_least32_t>(offset32) & 0x0000ffffU; }
+	[[nodiscard]] constexpr std::size_t unpackmax() const noexcept { return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) & 0xffff0000U) >> 16U) - 1U; }
+
+	[[nodiscard]] static constexpr std::int_least32_t packminmax(std::size_t nmin, std::size_t nmax)
+	{
+		auto const nmin16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmin, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
+		auto const nmax16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmax + 1U, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
+		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << 16U));
+	}
 };
 
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
@@ -749,7 +761,7 @@ public:
 				auto const rune = static_cast<char32_t>(static_cast<unsigned char>(subject.front()));
 				if (auto const properties = unicode::query(rune).properties(); (properties & unicode::ptype::Ascii) != unicode::ptype::None) {
 					if ((properties & unicode::ptype::Alphabetic) != unicode::ptype::None)
-						return encode(opcode::match_octet_cf, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(unicode::tocasefold(rune)));
+						return encode(opcode::match_set, add_item(program_->runesets, unicode::sort_and_optimize(unicode::rune_set{rune, unicode::tocasefold(rune)})), 0);
 					return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(rune));
 				}
 			}
@@ -768,29 +780,29 @@ public:
 
 	void dpsh(directives enable, directives disable)
 	{
-		directives const prev = mode_.back();
-		mode_.push_back((prev & ~disable) | enable);
+		directives const ancestor_mode = mode_.back();
+		mode_.push_back((ancestor_mode & ~disable) | enable);
 	}
 
 	void dpop(directives relay)
 	{
 		directives const prev = detail::pop_back(mode_);
-		directives& last_mode = mode_.back();
-		directives const next = (last_mode & ~relay) | (prev & relay);
+		directives& ancestor_mode = mode_.back();
+		directives const next = (ancestor_mode & ~relay) | (prev & relay);
 		if (((next & directives::postskip) == directives::none) && ((prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
-			do_skip(last_mode);
+			do_skip(ancestor_mode);
 		mode_.back() = next;
 	}
 
 	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
 	{
-		directives& last_mode = mode_.back();
-		directives const prev = last_mode;
-		directives const next = last_mode & ~(callee_mode & directives::eps);
+		directives& current_mode = mode_.back();
+		directives const prev = current_mode;
+		directives const next = current_mode & ~(callee_mode & directives::eps);
 		if (entry_mode_ == directives::none)
 			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
 		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
-			do_skip(last_mode);
+			do_skip(current_mode);
 		mode_.back() = next;
 		return *this;
 	}
@@ -1198,7 +1210,7 @@ struct accept_expression : terminal_encoder_expression_interface<accept_expressi
 struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
 struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 1, 0); d.encode(opcode::fail, 0, 2); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 0, 1); d.encode(opcode::fail, 0, 2); return m; } };
 struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip(directives::lexeme).encode(opcode::match_eol); return m; } };
 
 template <opcode Op>
@@ -2023,17 +2035,17 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
-	[[nodiscard]] bool fill_buffer(std::size_t fill_min, std::size_t fill_desired)
+	[[nodiscard]] bool fill_buffer(std::size_t fill_required, std::size_t fill_desired)
 	{
 		if (sources_.empty())
 			return false;
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
-		std::size_t const min_size = buffer_.size() + fill_min;
+		std::size_t const required_size = buffer_.size() + fill_required;
 		std::size_t const desired_size = buffer_.size() + fill_desired;
 		while (!sources_.empty() && (buffer_.size() < desired_size))
 			if (auto const& [func, opt] = sources_.back(); !func(std::back_inserter(buffer_), opt))
 				sources_.pop_back();
-		return buffer_.size() >= min_size;
+		return buffer_.size() >= required_size;
 	}
 
 	template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
@@ -2113,6 +2125,21 @@ protected:
 	bool parsing_{false};
 	bool success_{false};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
+
+	[[nodiscard]] auto make_rune_set_matcher(instruction const& instr) const noexcept
+	{
+		return [&set = program_->runesets[instr.immediate16]](char32_t rune) noexcept { return set.contains(rune); };
+	}
+
+	template <class Predicate>
+	[[nodiscard]] auto make_property_matcher(Predicate const& pred, instruction const& instr) const noexcept
+	{
+		return [&pred,
+				prop = static_cast<unicode::property_enum>(instr.immediate8),
+				mask = program_->uniforms[instr.immediate16]](unicode::record const& record) noexcept {
+			return pred(record, prop, mask);
+		};
+	}
 
 	template <class T>
 	[[nodiscard]] T& top_stack_frame()
@@ -2308,35 +2335,42 @@ class basic_parser : public parser_base
 {
 	InputSource input_source_;
 
-	[[nodiscard]] bool available(std::size_t sr, std::size_t sn, [[maybe_unused]] std::size_t fill_hint = 0)
+	[[nodiscard]] bool available(std::size_t sr, std::size_t nrequired, [[maybe_unused]] std::size_t ndesired = 0)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			std::size_t const desired_size = (std::max)(fill_hint, sn);
+			std::size_t const nmaxdesired = (std::max)(nrequired, ndesired);
 			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
 				std::size_t const buffer_remaining = buffer_size - sr;
 				if (sr < buffer_size) {
-					if (sn <= buffer_remaining)
-						return true;
+					if (nrequired <= buffer_remaining)
+						break;
 					if constexpr (detail::input_source_has_options<InputSource>::value)
 						if ((input_source_.options() & source_options::interactive) != source_options::none)
 							return false;
 				}
-				if (!input_source_.fill_buffer(sn - buffer_remaining, desired_size - buffer_remaining))
+				if (!input_source_.fill_buffer(nrequired - buffer_remaining, nmaxdesired - buffer_remaining))
 					return false;
 			}
+			return true;
 		} else {
 			std::size_t const buffer_size = input_source_.buffer().size();
-			return (sr < buffer_size) && (sn <= (buffer_size - sr));
+			return (sr < buffer_size) && (nrequired <= (buffer_size - sr));
 		}
 	}
 
-	[[nodiscard]] bool compare(std::size_t sr, std::size_t sn, std::string_view str)
+	[[nodiscard]] auto buffer_range(std::size_t position = 0) const noexcept
+	{
+		auto const buffer = input_source_.buffer();
+		return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+	}
+
+	[[nodiscard]] bool compare(std::size_t sr, std::size_t sn, std::string_view str) const noexcept
 	{
 		return input_source_.buffer().compare(sr, sn, str) == 0;
 	}
 
-	[[nodiscard]] bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str)
+	[[nodiscard]] bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) noexcept
 	{
 		std::string& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
@@ -2344,36 +2378,115 @@ class basic_parser : public parser_base
 		return subject.compare(0, sn, str) == 0;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr, [[maybe_unused]] std::uint_least16_t flags)
+	template <class MatchFn, class... ExtraArgs>
+	[[nodiscard]] std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
 	{
-		if constexpr (detail::input_source_has_options<InputSource>::value)
-			if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
-				return 1;
-		if (std::size_t i = sr; available(i, 1)) {
-			auto const buffer = input_source_.buffer();
-			auto const size = buffer.size();
-			for (++i; i < size; ++i)
-				if (utf8::is_lead_or_ascii(buffer[i]))
-					break;
+		std::size_t i = sr;
+		std::size_t n = 0;
+		for ( ; n <= nmax; ++n)
+			if (match(*this, i, extra_args...) != 0)
+				break;
+		if (n >= nmin) {
 			sr = i;
 			return 0;
 		}
 		return 1;
 	}
 
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	{
+		std::size_t const i = sr;
+		std::size_t n = 0;
+		auto const [first, last] = buffer_range(i);
+		auto curr = first;
+		for ( ; n <= nmax; ++n) {
+			auto const next = match(curr, last);
+			if (next == curr)
+				break;
+			curr = next;
+		}
+		if (n >= nmin) {
+			sr = i + static_cast<std::size_t>(std::distance(first, curr));
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr, [[maybe_unused]] std::uint_least8_t flags)
+	{
+		if constexpr (detail::input_source_has_options<InputSource>::value)
+			if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
+				return 1;
+		if (std::size_t const i = sr; available(i, 1)) {
+			auto const [curr, last] = buffer_range(i);
+			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
+			sr = i + static_cast<std::size_t>(std::distance(curr, next));
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax, [[maybe_unused]] std::uint_least8_t flags)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any), flags);
+		} else {
+			if constexpr (detail::input_source_has_options<InputSource>::value)
+				if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
+					return 1;
+			if ((nmin == 0) && (nmax == (std::numeric_limits<std::size_t>::max)())) {
+				sr = input_source_.buffer().size();
+				return 0;
+			}
+			return repeat_match_buffered(sr, nmin, nmax, [](auto first, auto last) {
+				if (first == last)
+					return first;
+				return std::find_if(std::next(first), last, utf8::is_lead_or_ascii);
+			});
+		}
+	}
+
 	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr)
 	{
-		static constexpr std::size_t max_eol_units = 3;
+		static constexpr std::size_t max_eol_units = 4;
 		if (std::size_t const i = sr; available(i, 1, max_eol_units)) {
-			auto const buffer = input_source_.buffer();
-			auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(i);
-			auto const next = utf8::match_eol(curr, buffer.cend());
-			if (next != curr) {
+			auto const [curr, last] = buffer_range(i);
+			if (auto const next = utf8::match_eol(curr, last); next != curr) {
 				sr = i + static_cast<std::size_t>(std::distance(curr, next));
 				return 0;
 			}
 		}
 		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t repeat_eol(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_eol));
+		else
+			return repeat_match_buffered(sr, nmin, nmax, utf8::match_eol);
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_space(std::size_t& sr)
+	{
+		static constexpr std::size_t max_space_units = 4;
+		if (std::size_t const i = sr; available(i, 1, max_space_units)) {
+			auto const [curr, last] = buffer_range(i);
+			if (auto const next = utf8::match_space(curr, last); next != curr) {
+				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
+		else
+			return repeat_match_buffered(sr, nmin, nmax, utf8::match_space);
 	}
 
 	[[nodiscard]] std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
@@ -2385,45 +2498,60 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_octet_cf(std::size_t& sr, std::uint_least8_t value)
+	[[nodiscard]] std::ptrdiff_t repeat_octet(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t octet)
 	{
-		if (std::size_t const i = sr; available(i, 1)) {
-			if (char const c = input_source_.buffer()[i]; utf8::is_ascii(c)) {
-				auto const c32 = static_cast<char32_t>(static_cast<unsigned char>(c));
-				auto const v32 = static_cast<char32_t>(value);
-				if (unicode::tocasefold(c32) == v32) {
-					sr = i + 1;
-					return 0;
-				}
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_octet), octet);
+		} else {
+			std::size_t const i = sr;
+			auto const [first, last] = buffer_range(i);
+			auto const last_nmax = (static_cast<std::size_t>(std::distance(first, last)) > nmax) ? (first + static_cast<std::ptrdiff_t>(nmax)) : last;
+			auto const next = std::find_if_not(first, last_nmax, [octet](auto const c) { return static_cast<unsigned char>(c) == octet; });
+			if (auto const count = static_cast<std::size_t>(std::distance(first, next)); count >= nmin) {
+				sr = i + count;
+				return 0;
 			}
+			return 1;
 		}
-		return 1;
-	}	
+	}
 
-	template <class Match>
-	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, Match const& match)
+	template <class InputIt, class MatchFn>
+	[[nodiscard]] static InputIt decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match)
+	{
+		auto const [next, rune] = utf8::decode_rune(first, last);
+		if (next == first)
+			return first;
+		bool matched = false;
+		if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
+			matched = match(unicode::query(rune));
+		} else if constexpr(std::is_invocable_v<MatchFn const&, char32_t>) {
+			matched = match(rune);
+		} else {
+			static_assert(detail::always_false_v<MatchFn>, "unsupported match operation");
+		}
+		return matched ? next : first;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
 	{
 		if (std::size_t const i = sr; available(i, 1)) {
-			auto const buffer = input_source_.buffer();
-			auto const curr = buffer.cbegin() + static_cast<std::ptrdiff_t>(i);
-			auto const last = buffer.cend();
-			auto [next, rune] = utf8::decode_rune(curr, last);
-			bool matched = false;
-			if constexpr (std::is_invocable_v<Match const&, decltype(curr), decltype(last), decltype(next)&, char32_t>) {
-				matched = match(curr, last, next, rune);
-			} else if constexpr(std::is_invocable_v<Match const&, unicode::record const&>) {
-				matched = match(unicode::query(rune));
-			} else if constexpr(std::is_invocable_v<Match const&, char32_t>) {
-				matched = match(rune);
-			} else {
-				static_assert(detail::always_false_v<Match>, "unsupported Match operation");
-			}
-			if (matched) {
+			auto const [curr, last] = buffer_range(i);
+			if (auto const next = decode_and_match_rune(curr, last, match); next != curr) {
 				sr = i + static_cast<std::size_t>(std::distance(curr, next));
 				return 0;
 			}
 		}
 		return 1;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
+		else
+			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last){ return decode_and_match_rune(first, last, match); });
 	}
 
 	template <class Compare>
@@ -2831,10 +2959,10 @@ public:
 					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: {
-					fail_count = match_any(registers_.sr, instr.immediate16);
+					fail_count = match_any(registers_.sr, instr.immediate8);
 				} break;
 				case opcode::test_any: {
-					registers_.pc += (match_any(registers_.sr, instr.immediate16) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_any(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_eol: {
 					fail_count = match_eol(registers_.sr);
@@ -2842,41 +2970,65 @@ public:
 				case opcode::test_eol: {
 					registers_.pc += (match_eol(registers_.sr) != 0) ? instr.offset32 : 0;
 				} break;
+				case opcode::match_space: {
+					fail_count = match_space(registers_.sr);
+				} break;
+				case opcode::test_space: {
+					registers_.pc += (match_space(registers_.sr) != 0) ? instr.offset32 : 0;
+				} break;
 				case opcode::match_octet: {
 					fail_count = match_octet(registers_.sr, instr.immediate8);
 				} break;
 				case opcode::test_octet: {
 					registers_.pc += (match_octet(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
 				} break;
-				case opcode::match_octet_cf: {
-					fail_count = match_octet_cf(registers_.sr, instr.immediate8);
-				} break;
-				case opcode::test_octet_cf: {
-					registers_.pc += (match_octet_cf(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
-				} break;
 				case opcode::match_set: {
-					fail_count = match_rune(registers_.sr, [this, imm16 = instr.immediate16](char32_t rune) { return program_->runesets[imm16].contains(rune); });
+					fail_count = match_rune(registers_.sr, make_rune_set_matcher(instr));
 				} break;
 				case opcode::test_set: {
-					registers_.pc += (match_rune(registers_.sr, [this, imm16 = instr.immediate16](char32_t rune) { return program_->runesets[imm16].contains(rune); }) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_rune(registers_.sr, make_rune_set_matcher(instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_all_of: {
-					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr));
 				} break;
 				case opcode::test_all_of: {
-					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::all_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_any_of: {
-					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::any_of, instr));
 				} break;
 				case opcode::test_any_of: {
-					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::any_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::any_of, instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_none_of: {
-					fail_count = match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); });
+					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr));
 				} break;
 				case opcode::test_none_of: {
-					registers_.pc += (match_rune(registers_.sr, [this, instr](auto const& r) { return unicode::none_of(r, static_cast<unicode::property_enum>(instr.immediate8), program_->uniforms[instr.immediate16]); }) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr)) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::repeat_any: {
+					fail_count = repeat_any(registers_.sr, instr.unpackmin(), instr.unpackmax(), instr.immediate8);
+				} break;
+				case opcode::repeat_eol: {
+					fail_count = repeat_eol(registers_.sr, instr.unpackmin(), instr.unpackmax());
+				} break;
+				case opcode::repeat_space: {
+					fail_count = repeat_space(registers_.sr, instr.unpackmin(), instr.unpackmax());
+				} break;
+				case opcode::repeat_octet: {
+					fail_count = repeat_octet(registers_.sr, instr.unpackmin(), instr.unpackmax(), instr.immediate8);
+				} break;
+				case opcode::repeat_set: {
+					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_rune_set_matcher(instr));
+				} break;
+				case opcode::repeat_all_of: {
+					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::all_of, instr));
+				} break;
+				case opcode::repeat_any_of: {
+					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::any_of, instr));
+				} break;
+				case opcode::repeat_none_of: {
+					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::none_of, instr));
 				} break;
 				case opcode::condition_test: {
 					fail_count = (environment_->has_condition(str) != (instr.immediate8 != 0)) ? 1 : 0;

@@ -19,7 +19,7 @@ usage() {
 	printf "  * <S>             Expected exit status code (<0> for success) in angle brackets\n"
 	printf "  * OUTPUT-FILE     Path of file containing expected program output\n\n"
 	printf "Special Patterns:\n"
-	printf "  * %%PATTERN%%       Input file pattern (e.g. %%*.json%%) in shell command\n"
+	printf "  * %%PATTERN%%       Input file pattern (e.g. %%*.txt%%) in shell command\n"
 	printf "  * @               Replaced by current group name in expected output paths\n"
 	printf "  * %%               Replaced by input file (without extension) in expected output paths\n\n"
 	printf "Rules:\n"
