@@ -947,7 +947,7 @@ public:
 
 	rune_set(std::initializer_list<char32_t> list)
 	{
-		for (char32_t r : list)
+		for (char32_t const r : list)
 			push_range(r, r);
 	}
 

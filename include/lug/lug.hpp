@@ -102,14 +102,25 @@ struct alignas(std::uint_least64_t) instruction
 	std::uint_least16_t immediate16;
 	std::int_least32_t offset32;
 
-	[[nodiscard]] constexpr std::size_t unpackmin() const noexcept { return static_cast<std::uint_least32_t>(offset32) & 0x0000ffffU; }
-	[[nodiscard]] constexpr std::size_t unpackmax() const noexcept { return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) & 0xffff0000U) >> 16U) - 1U; }
+	static constexpr std::uint_least32_t min_offset_mask = 0xffff0000U;
+	static constexpr std::uint_least32_t max_offset_mask = 0x0000ffffU;
+	static constexpr unsigned int max_offset_shift = 16;
 
 	[[nodiscard]] static constexpr std::int_least32_t packminmax(std::size_t nmin, std::size_t nmax)
 	{
 		auto const nmin16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmin, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
 		auto const nmax16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmax + 1U, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
-		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << 16U));
+		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << max_offset_shift));
+	}
+
+	[[nodiscard]] constexpr std::size_t unpackmin() const noexcept
+	{
+		return static_cast<std::uint_least32_t>(offset32) & min_offset_mask;
+	}
+
+	[[nodiscard]] constexpr std::size_t unpackmax() const noexcept
+	{
+		return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) & max_offset_mask) >> max_offset_shift) - 1U;
 	}
 };
 
@@ -2397,15 +2408,14 @@ class basic_parser : public parser_base
 	template <class MatchFn, class... ExtraArgs>
 	[[nodiscard]] std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
 	{
-		std::size_t i = sr;
+		std::size_t const i = sr;
 		std::size_t n = 0;
 		for ( ; n <= nmax; ++n)
-			if (match(*this, i, extra_args...) != 0)
+			if (match(*this, sr, extra_args...) != 0)
 				break;
-		if (n >= nmin) {
-			sr = i;
+		if (n >= nmin)
 			return 0;
-		}
+		sr = i;
 		return 1;
 	}
 
