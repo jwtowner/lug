@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <iostream>
 
 #undef NDEBUG
 #include <cassert>
@@ -148,19 +149,37 @@ void test_environment_callbacks()
 	assert(E.drain_count == 0);
 	assert(E.accept_started_count == 1);
 	assert(E.accept_ended_count == 1);
+
+	// Disable reset on parse
+	assert(E.should_reset_on_parse());
+	E.should_reset_on_parse(false);
+	assert(!E.should_reset_on_parse());
+
+	// Parse another simple string
+	bool const success2 = lug::parse("world", G, E);
+	assert(success2);
+
+	// Re-enable reset on parse
+	assert(!E.should_reset_on_parse());
+	E.should_reset_on_parse(true);
+	assert(E.should_reset_on_parse());
+
+	// Verify the environment hooks were called the expected number of times
+	assert(E.reset_count == 1); // Reset was not called...
+	assert(E.drain_count == 0);
+	assert(E.accept_started_count == 2); // ...but accept was called again
+	assert(E.accept_ended_count == 2);
 }
 
 int main()
-{
-	try {
-		test_line_column_tracking();
-		test_environment_callbacks();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_line_column_tracking();
+	test_environment_callbacks();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

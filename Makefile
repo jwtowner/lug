@@ -1,28 +1,42 @@
 # lug - Embedded DSL for PE grammar parsers in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
 # See LICENSE file for copyright and license details
 
+# This is a POSIX.1-2014 compliant Makefile. It is known to work with GNU Make, NetBSD Make and PDP Make.
+# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html
+.POSIX:
+.PHONY: all clean dist install uninstall options test testsuite runtestsuite samples runsamples lint clangtidy shellcheck tools unicode
+.SUFFIXES: .cpp .o
+
 # distribution version
-VERSION = 0.4.0
+VERSION = 0.5.0
+
+# unicode character database version
+UCD_VERSION = 16.0.0
 
 # paths
 PREFIX = /usr/local
 
 # toolchain
+CXX = c++
 CXXSTD = -std=c++17
-CXXFLAGS = $(CXXSTD) -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses \
-			-Os -ffunction-sections -fdata-sections -I.
+CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
+CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
+CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) -Iinclude
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
-
-# unicode character database version
-UCD_VERSION = 15.1.0
+SHELLCHECK = shellcheck
 
 # samples
-SAMPLES = basic/basic calc/calc demo/demo json/json_matcher json/json_parser xml/xml
+SAMPLES = basic/basic calc/calc demo/demo json/jsoncheck json/jsonformat xml/xmlcheck
 SAMPLES_BIN = $(SAMPLES:%=samples/%)
 SAMPLES_OBJ = $(SAMPLES:%=samples/%.o)
 
-# tests
+# sample tests
+SAMPLES_TESTS_DIRS = basic calc demo json xml
+SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%/.testplan)
+
+# unit tests
 TESTS = acceptcut attributes captures conditions errorhandling leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
@@ -33,12 +47,19 @@ TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # header dependencies
-HEADERS = lug/detail.hpp lug/error.hpp lug/unicode.hpp lug/utf8.hpp lug/lug.hpp
+HEADER_NAMES = detail error iostream unicode utf8 lug
+HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
+
+# shell scripts
+SHELLSCRIPTS = runsamples.sh runtests.sh tools/fetchucd.sh
 
 # distribution files
-DISTFILES = CHANGELOG.md LICENSE.md README.md CMakeLists.txt Makefile runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore .github/ doc/ lug/ samples/ tests/ tools/
+DISTDIRS = .github/ doc/ include/ samples/ tests/ tools/
+DISTDOCFILES = CHANGELOG.md LICENSE.md README.md
+DISTPROJFILES = CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore
+DISTFILES = $(DISTDOCFILES) $(DISTPROJFILES) $(DISTDIRS)
 
-all: options samples tests
+all: options testsuite samples
 
 .cpp.o:
 	@echo CXX $<
@@ -52,19 +73,29 @@ $(SAMPLES_BIN): $(SAMPLES_OBJ)
 
 samples: $(SAMPLES_BIN)
 
+runsamples: samples $(SAMPLES_TESTPLANS)
+	@sh runsamples.sh $(SAMPLES_TESTPLANS)
+
 $(TESTS_OBJ): $(HEADERS)
 
 $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
-tests: $(TESTS_BIN)
+testsuite: $(TESTS_BIN)
 
-check: tests
-	@sh runtests.sh "tests" $(TESTS_BIN)
+runtestsuite: testsuite
+	@sh runtests.sh $(TESTS_BIN)
 
-lint:
+test: runtestsuite runsamples
+
+clangtidy:
 	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
+
+shellcheck:
+	@$(SHELLCHECK) -s sh $(SHELLSCRIPTS)
+
+lint: clangtidy shellcheck
 
 $(TOOLS_OBJ): $(HEADERS)
 
@@ -77,18 +108,21 @@ tools: $(TOOLS_BIN)
 unicode: tools
 	@echo fetching Unicode Character Database $(UCD_VERSION)
 	@cd tools/ && sh fetchucd.sh $(UCD_VERSION)
-	@echo generating lug/unicode.hpp
-	@cd tools/ && ./makeunicode > ../lug/unicode.hpp
+	@echo generating include/lug/unicode.hpp
+	@cd tools/ && ./makeunicode > ../include/lug/unicode.hpp
 
 options:
 	@echo lug build options:
-	@echo "CXX         = $(CXX)"
-	@echo "CXXSTD      = $(CXXSTD)"
-	@echo "CXXFLAGS    = $(CXXFLAGS)"
-	@echo "LDFLAGS     = $(LDFLAGS)"
-	@echo "CLANGTIDY   = $(CLANGTIDY)"
-	@echo "PREFIX      = $(PREFIX)"
-	@echo "UCD_VERSION = $(UCD_VERSION)"
+	@echo "CXX          = $(CXX)"
+	@echo "CXXSTD       = $(CXXSTD)"
+	@echo "CXXWARNFLAGS = $(CXXWARNFLAGS)"
+	@echo "CXXOPTFLAGS  = $(CXXOPTFLAGS)"
+	@echo "CXXFLAGS     = $(CXXFLAGS)"
+	@echo "LDFLAGS      = $(LDFLAGS)"
+	@echo "CLANGTIDY    = $(CLANGTIDY)"
+	@echo "SHELLCHECK   = $(SHELLCHECK)"
+	@echo "PREFIX       = $(PREFIX)"
+	@echo "UCD_VERSION  = $(UCD_VERSION)"
 
 clean:
 	@echo cleaning
@@ -106,15 +140,17 @@ dist: clean
 install: all
 	@echo installing header file to $(DESTDIR)$(PREFIX)/include/lug
 	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
-	@cp -f lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
-	@cp -f lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
-	@cp -f lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/error.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/error.hpp
-	@cp -f lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/iostream.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
+	@cp -f include/lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
-	@cp -f lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@cp -f include/lug/utf8.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 
 uninstall:
@@ -122,8 +158,7 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/error.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp
 	@rmdir $(DESTDIR)$(PREFIX)/include/lug
-
-.PHONY: all samples tests check lint tools unicode options clean dist install uninstall

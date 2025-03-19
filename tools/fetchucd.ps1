@@ -18,6 +18,7 @@ $UCD_FILES = @(
     "PropList.txt",
     "ScriptExtensions.txt",
     "Scripts.txt",
+    "extracted/DerivedBinaryProperties.txt",
     "extracted/DerivedGeneralCategory.txt"
 )
 

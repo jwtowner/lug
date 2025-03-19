@@ -1,0 +1,5 @@
+A = 5                  ; assign 5 to A
+B = A * 2              ; B becomes 10
+C = (A ^ B) / 2        ; half of A to power of B
+X = 10                 ; new variable X
+QUIT

@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 #include <sstream>
 
 #undef NDEBUG
@@ -17,8 +18,8 @@ void test_addition_with_attributes()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		rule Number = lexeme[+"[0-9]"_rx] < [](std::string const& text) -> int { return std::stoi(text); };
-		rule Addition = (lhs % Number) > '+' > (rhs % Number) < [&]{ result = lhs + rhs; };
+		rule Number = lexeme[+"[0-9]"_rx] <[](std::string const& text) -> int { return std::stoi(text); };
+		rule Addition = (lhs % Number) > '+' > (rhs % Number) <[&]{ result = lhs + rhs; };
 		return start(Addition > eoi);
 	}();
 
@@ -82,16 +83,14 @@ void test_nested_arithmetic_with_attributes()
 }
 
 int main()
-{
-	try {
-		test_addition_with_attributes();
-		test_nested_arithmetic_with_attributes();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_addition_with_attributes();
+	test_nested_arithmetic_with_attributes();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

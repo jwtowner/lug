@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Missing root element -->
+<person>
+  <name>John & Doe</name>  <!-- Unescaped & -->
+  <skills>
+    <skill>coding</skil>   <!-- Mismatched tag names -->
+    <skill>design</skill>
+  </skills>
+<address>
+  123 Main St.
+  <city>San Francisco</city>
+</address>
+</person>
+<another_person>          <!-- Multiple root elements -->
+  <data><<invalid>>></data>  <!-- Invalid characters -->
+  <age>-5</age>
+  < space in tag>Bad tag</ space in tag>
+</another_person> 

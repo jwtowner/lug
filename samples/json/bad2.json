@@ -1,0 +1,18 @@
+{
+  "id": 123,
+  "name": "Valid Start",
+  "tags": ["good", "valid", "correct"],
+  "metadata": {
+    "created": "2024-03-20",
+    "version": 1.0
+  },
+  "settings": {
+    enabled: true,
+    "notifications": [
+      "email"
+      "sms",
+    ],
+    'mode': running,
+    items; [1, 2, 3]]
+  }
+}

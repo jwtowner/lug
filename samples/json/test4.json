@@ -1,0 +1,29 @@
+{
+  "string": "Hello, 世界! 🌍",
+  "number": {
+    "int": 123456789,
+    "float": 3.14159,
+    "scientific": 1.23e-4,
+    "negative": -42
+  },
+  "boolean": {
+    "true": true,
+    "false": false
+  },
+  "null": null,
+  "array": [1, "mixed", true, null, {"nested": "object"}],
+  "object": {
+    "nested": {
+      "deep": {
+        "value": "test"
+      }
+    }
+  },
+  "edge_cases": {
+    "empty_string": "",
+    "special_chars": "!@#$%^&*()",
+    "escaped": "Line 1\nLine 2\t\"quoted\"",
+    "unicode": "\u0041\u0042\u0043",
+    "surrogate": "\uD83D\uDE00"
+  }
+}

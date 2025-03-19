@@ -33,7 +33,7 @@ Checks:
   - -readability-function-cognitive-complexity # grammar::start() and basic_parser::parse() are complex, revisit or suppress only for these functions
   - -readability-identifier-length # revisit later
   - -readability-qualified-auto # stylistic preference that unfortunately warns when marking 'auto*' as 'auto* const' or just 'auto const'
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 HeaderFileExtensions:
   - ''
   - h

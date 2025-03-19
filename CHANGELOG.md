@@ -1,5 +1,25 @@
 # Changelog
 
+## Release v0.5.0 (Under Development)
+
+* Implemented collection and object attribute directives. The new `collect<C>[e]` directive synthesizes a sequence or associative container type `C` consisting of elements gathered from the inherited or synthesized attributes in expression `e`. Likewise, there also new `synthesize<C,A...>[e]`, `synthesize_shared<C,A...>[e]` and `synthesize_unique<C,A...>[e]` directives for synthesizing objects, shared pointers and unique pointers respectively, constructed from the component attributes in expression `e`.
+* Implemented `synthesize_collect` directive that combines `collect` and `synthesize` directives together for improved code readability and reduced boilerplate when constructing complex data structures from parsed elements. This is particularly useful for building nested collections like arrays of objects or maps with complex value types.
+* Added `lug::recursive_wrapper` template class for handling circular dependencies in abstract syntax trees, particularily those making use of `std::variant`.
+* Updated to Unicode Standard Version 16.0.0 and added support for building tools to CMakeLists.txt.
+* Optimized character range and rune set matching for ASCII characters, resulting in significant performance improvements for common text processing operations. Added specialized fast paths for ASCII-only inputs that bypass the more expensive Unicode handling code.
+* Implemented test opcodes for head-fail optimization and repeat opcodes for optimized whitespace skipping. These optimizations will be fully enabled in the next release after planned expression tree transformations.
+* Enhanced input source handling with improved buffering and error reporting for `std::istream` sources, and improved the interactive mode support that properly handles line-by-line input for terminal sessions or for line-oriented grammars.
+* Moved `std::istream` support into its own `<lug/iostream.hpp>` header file, removing the dependency on `<iostream>` from the main `<lug/lug.hpp>` header. This reduces compilation times and minimizes header dependencies for projects that don't require stream I/O functionality.
+* Refactored parser commit logic by inlining instructions in `lug::basic_parser` to better align with the stack frame architecture changes introduced in v0.4.0, improving code organization and performance.
+* Fixed issue in the BASIC sample where user-defined functions (e.g. FNA(X)) were crashing during evaluation. This was caused by v0.4.0 changes that reset `lug::environment` during nested parsing operations. Added new `lug::environment::should_reset_on_parse` member function to provide fine-grained control over this behavior, allowing environments to persist across nested parse operations when needed.
+* Added comprehensive test infrastructure for the sample programs, including automated test plans and verification scripts to ensure sample functionality remains correct across changes.
+* Restructured include directory hierarchy by moving `lug/` to `include/lug/`, ensuring cleaner include paths and better organization of header files.
+* Added support for additional compilers (GCC 9/10/11/12, Clang 14/15/16/17) in the C/C++ CI workflow to ensure broader compatibility.
+* Added static analyzer CI workflow for Clang and MSVC to detect potential bugs, memory leaks, and undefined behavior during the build process.
+* Added compiler sanitizer CI workflow with Address Sanitizer (ASan), Undefined Behavior Sanitizer (UBSan), and Memory Sanitizer (MSan) to detect memory errors, undefined behavior, and other runtime issues early in the development process.
+* Added clang-tidy integration to CI workflow to enforce code quality standards and catch potential issues early in the development process.
+* Removed Ubuntu 20.04 from the GitHub workflows as it has reached end-of-life and is no longer supported.
+
 ## Release v0.4.0 (March 4, 2025)
 
 * Added new error handling and recovery with labeled failures, recovery rules and error handlers.

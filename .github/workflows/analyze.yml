@@ -1,0 +1,53 @@
+name: Analyze
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "master" ]
+    tags: [ "v*" ]
+    paths-ignore:
+      - "doc/**"
+      - "*.md"
+      - ".editorconfig"
+      - ".gitignore"
+  pull_request:
+    branches: [ "master" ]
+    paths-ignore:
+      - "doc/**"
+      - "*.md"
+      - ".editorconfig"
+      - ".gitignore"
+
+jobs:
+  clang-analyze:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install clang-tools
+      run: |
+        sudo apt-get update -yq
+        sudo apt-get install -yq clang-tools
+    - name: Generating buildsystem
+      run: scan-build cmake -S "${{ github.workspace }}" -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+    - name: Run Clang Code Analysis
+      run: scan-build cmake --build build
+
+  msvc-analyze:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Generating buildsystem
+      run: cmake -S "${{ github.workspace }}" -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON
+    - name: Run MSVC Code Analysis
+      uses: microsoft/msvc-code-analysis-action@96315324a485db21449515180214ecb78c16a1c5
+      id: run-msvc-analysis
+      with:
+        cmakeBuildDirectory: build
+        buildConfiguration: Debug
+        ruleset: NativeRecommendedRules.ruleset
+    - name: Upload SARIF as an Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sarif-file
+        path: ${{ steps.run-msvc-analysis.outputs.sarif }}

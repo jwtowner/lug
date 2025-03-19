@@ -3,6 +3,7 @@
 // See LICENSE.md file for license details
 
 #include <lug/lug.hpp>
+#include <iostream>
 
 #undef NDEBUG
 #include <cassert>
@@ -31,16 +32,14 @@ void test_match_size_predicate()
 }
 
 int main()
-{
-	try {
-		test_simple_predicates();
-		test_match_size_predicate();
-	} catch (std::exception const& e) {
-		std::cerr << "Error: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "Unknown Error\n";
-		return -1;
-	}
+try {
+	test_simple_predicates();
+	test_match_size_predicate();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "Error: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "Unknown Error\n";
+	return 1;
 }

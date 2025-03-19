@@ -1,0 +1,32 @@
+# lug - Embedded DSL for PE grammar parser combinators in C++
+# Copyright (c) 2017-2025 Jesse W. Towner
+# See LICENSE.md file for license details
+
+# Run this testplan with:
+#   $ ./runsamples.sh samples/json/.testplan
+
+# jsoncheck will test json_matcher class
+[jsoncheck]
+jsoncheck %test*.json% <0> testplan/@.%.out
+jsoncheck - <%test*.json% <0> testplan/@.%.out
+jsoncheck %bad*.json% <1> testplan/@.%.out
+jsoncheck - <%bad*.json% <1> testplan/@.%.out
+
+[jsoncheck.quiet]
+jsoncheck -q %test*.json% <0> testplan/@.%.out
+jsoncheck -q - <%test*.json% <0> testplan/@.%.out
+jsoncheck -q %bad*.json% <1> testplan/@.%.out
+jsoncheck -q - <%bad*.json% <1> testplan/@.%.out
+
+# jsonformat will test json_parser class
+[jsonformat]
+jsonformat %test*.json% <0> testplan/@.%.out
+jsonformat - <%test*.json% <0> testplan/@.%.out
+jsonformat %bad*.json% <1> testplan/@.%.out
+jsonformat - <%bad*.json% <1> testplan/@.%.out
+
+[jsonformat.compact]
+jsonformat -c %test*.json% <0> testplan/@.%.out
+jsonformat -c - <%test*.json% <0> testplan/@.%.out
+jsonformat -c %bad*.json% <1> testplan/@.%.out
+jsonformat -c - <%bad*.json% <1> testplan/@.%.out

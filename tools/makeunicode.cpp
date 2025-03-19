@@ -124,14 +124,17 @@ static std::vector<std::string> const binary_property_names =
 	"Other_Math", "Hex_Digit", "ASCII_Hex_Digit", "Other_Alphabetic", "Ideographic", "Diacritic", "Extender",
 	"Other_Lowercase", "Other_Uppercase", "Noncharacter_Code_Point", "Other_Grapheme_Extend",
 	"IDS_Binary_Operator", "IDS_Trinary_Operator", "IDS_Unary_Operator", "Radical", "Unified_Ideograph",
-	"Other_Default_Ignorable_Code_Point", "Deprecated", "Soft_Dotted", "Logical_Order_Exception", "Other_ID_Start",
-	"Other_ID_Continue", "ID_Compat_Math_Continue", "ID_Compat_Math_Start", "Sentence_Terminal", "Variation_Selector",
-	"Pattern_White_Space", "Pattern_Syntax", "Prepended_Concatenation_Mark", "Regional_Indicator",
-	// DerivedBinaryProperties.txt
+	"Other_Default_Ignorable_Code_Point", "Deprecated", "Soft_Dotted", "Logical_Order_Exception",
+	"Other_ID_Start", "Other_ID_Continue", "ID_Compat_Math_Continue", "ID_Compat_Math_Start",
+	"Sentence_Terminal", "Variation_Selector", "Pattern_White_Space", "Pattern_Syntax",
+	"Prepended_Concatenation_Mark", "Regional_Indicator", "Modifier_Combining_Mark",
+	// DerivedCoreProperties.txt
 	"Lowercase", "Uppercase", "Cased", "Case_Ignorable", "Changes_When_Lowercased", "Changes_When_Uppercased",
 	"Changes_When_Titlecased", "Changes_When_Casefolded", "Changes_When_Casemapped", "Alphabetic",
 	"Default_Ignorable_Code_Point", "Grapheme_Base", "Grapheme_Extend", "Math", "ID_Start", "ID_Continue",
-	"XID_Start", "XID_Continue", "Grapheme_Link", "InCB; Linker", "InCB; Consonant", "InCB; Extend"
+	"XID_Start", "XID_Continue", "Grapheme_Link", "InCB; Linker", "InCB; Consonant", "InCB; Extend",
+	// DerivedBinaryProperties.txt
+	"Bidi_Mirrored"
 };
 
 static auto const binary_properties = build_namemap<enum_type::bitfield, std::uint_least64_t>(binary_property_names);
@@ -211,7 +214,9 @@ static std::vector<std::string> const script_names =
 	// Unicode 14.0.0
 	"Cypro_Minoan", "Old_Uyghur", "Tangsa", "Toto", "Vithkuqi",
 	// Unicode 15.0.0
-	"Kawi", "Nag_Mundari"
+	"Kawi", "Nag_Mundari",
+	// Unicode 16.0.0
+	"Garay", "Gurung_Khema", "Kirat_Rai", "Ol_Onal", "Sunuwar", "Todhri", "Tulu_Tigalari"
 };
 
 static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
@@ -283,7 +288,10 @@ static std::vector<std::string> const block_names =
 	"Arabic Extended-C", "Devanagari Extended-A", "Kawi", "Kaktovik Numerals", "Cyrillic Extended-D", "Nag Mundari",
 	"CJK Unified Ideographs Extension H",
 	// Unicode 15.1.0
-	"CJK Unified Ideographs Extension I"
+	"CJK Unified Ideographs Extension I",
+	// Unicode 16.0.0,
+	"Todhri", "Garay", "Tulu-Tigalari", "Myanmar Extended-C", "Sunuwar", "Egyptian Hieroglyphs Extended-A", "Gurung Khema",
+	"Kirat Rai", "Symbols for Legacy Computing Supplement", "Ol Onal"
 };
 
 static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(block_names);
@@ -291,7 +299,7 @@ static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(
 static std::vector<std::string> const age_names =
 {
 	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "6.3",
-	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1"
+	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1", "16.0"
 };
 
 static auto const ages = build_namemap<enum_type::index, std::uint_least8_t>(age_names);
@@ -444,7 +452,8 @@ void read_and_build_tables()
 			set_ptable_bits(0x2028, 0x2029, "Line_Ending");
 			auto proplist_version = read_ucd_prop_array("ucd/PropList.txt", set_ptable_bits);
 			auto dcp_version = read_ucd_prop_array("ucd/DerivedCoreProperties.txt", set_ptable_bits);
-			return std::vector<std::string>{proplist_version, dcp_version};
+			auto dbp_version = read_ucd_prop_array("ucd/extracted/DerivedBinaryProperties.txt", set_ptable_bits);
+			return std::vector<std::string>{proplist_version, dcp_version, dbp_version};
 		});
 
 		// read in general category table
@@ -483,7 +492,7 @@ void read_and_build_tables()
 			{ "graph", { make_binary_prop_compat_filter({"Assigned"}) } },
 			{ "print", { make_compat_filter({"blank", "graph"}) } },
 			{ "word", { make_compat_filter({"alnum"}), make_binary_prop_compat_filter({"Join_Control"}),
-				make_general_category_compat_filter({"Mn", "Mc", "Me", "Pc"}) } }
+						make_general_category_compat_filter({"Mn", "Mc", "Me", "Pc"}) } }
 		};
 
 		compat_filter_map compat_prop_excludes = {
@@ -889,7 +898,7 @@ auto run_length_encode(std::vector<T> const& input, ucd_type_info const& info)
 			do {
 				T seqlen = (std::min)(static_cast<T>(count - 1), maxseqlen);
 				pass1.insert(std::end(pass1), {static_cast<T>(seqmask | seqlen), value});
-				count -= seqlen + 1;
+				count -= static_cast<std::size_t>(seqlen) + 1;
 			} while (count > maxseqlen);
 		} else {
 			pass1.push_back(value);
@@ -1002,6 +1011,29 @@ public:
 	}
 };
 
+template <class T>
+class comma_printer
+{
+	T index_;
+	T count_;
+	std::string_view newline_;
+
+public:
+	comma_printer(T index, T count, std::string_view newline = "\n")
+		: index_{index}, count_{count}, newline_{newline} {}
+
+	friend std::ostream& operator<<(std::ostream& out, comma_printer const& p) {
+		if (p.index_ < (p.count_ - 1))
+			out << ',';
+		if (!p.newline_.empty())
+			out << p.newline_;
+		return out;
+	}
+};
+
+template <class T> comma_printer(T, T) -> comma_printer<T>;
+template <class T> comma_printer(T, T, std::string_view) -> comma_printer<T>;
+
 class enum_printer
 {
 	enum_type enum_type_;
@@ -1017,15 +1049,14 @@ public:
 		out << "// " << p.comment_ << "\n";
 		out << "enum class " << p.name_ << " : " << p.type_ << "\n{\n";
 		p.body_(out);
-		if (p.enum_type_ == enum_type::bitfield)
-			out << "\tis_bitfield_enum\n";
 		return out << "};\n";
 	}
 };
 
 class enum_parser_printer
 {
-	std::string_view name_, abbr_;
+	std::string_view name_;
+	std::string_view abbr_;
 	std::size_t maxcolwidth_{120};
 	std::function<std::vector<std::pair<std::string, std::string>>()> label_source_;
 
@@ -1121,9 +1152,10 @@ public:
 
 void print_unicode_header()
 {
+
 double log2_block_size = std::ceil(std::log2(static_cast<double>(recordstagetable.block_size)));
 std::size_t const block_shift = static_cast<std::size_t>(std::lrint(log2_block_size));
-std::size_t const block_mask = (1u << block_shift) - 1;
+std::size_t const block_mask = (std::size_t{1} << block_shift) - 1;
 
 std::cout <<
 R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
@@ -1140,16 +1172,21 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 #include <lug/detail.hpp>
 
 #include <cctype>
-#include <cstddef>
 #include <cstdint>
 
 #include <array>
+#include <bitset>
 #include <memory>
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace lug::unicode {
+
+static constexpr char32_t ascii_limit = 0x80U;
+
+[[nodiscard]] constexpr bool is_ascii(char32_t r) noexcept
+{
+	return r < ascii_limit;
+}
 
 // NOLINTBEGIN(hicpp-signed-bitwise)
 )c++"
@@ -1159,7 +1196,7 @@ namespace lug::unicode {
 	auto const pad = align_padding(max_element_size(cnames.cbegin(), cnames.cend()));
 	out << "\t" << std::left << std::setw(pad) << "none" << " = 0,\n";
 	for (std::size_t i = 0, n = cnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << ",\n";
+		out << "\t" << std::left << std::setw(pad) << cnames[i] << " = UINT16_C(1) << " << std::right << std::setw(2) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "ptype", "std::uint_least64_t", "Binary properties", [](std::ostream& out) {
@@ -1167,7 +1204,7 @@ namespace lug::unicode {
 	auto const pad = align_padding(max_element_size(pnames.cbegin(), pnames.cend()));
 	out << "\t" << std::left << std::setw(pad) << "None" << " = 0,\n";
 	for (std::size_t i = 0, n = pnames.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << normalize_property_identifier(pnames[i]) << " = UINT64_C(1) << " << std::right << std::setw(2) << i << ",\n";
+		out << "\t" << std::left << std::setw(pad) << normalize_property_identifier(pnames[i]) << " = UINT64_C(1) << " << std::right << std::setw(2) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::bitfield, "gctype", "std::uint_least32_t", "General categories", [](std::ostream& out) {
@@ -1176,26 +1213,29 @@ namespace lug::unicode {
 	out << "\t" << "None = 0,\n";
 	for (std::size_t i = 0, n = gcnames.size(); i < n; ++i)
 		out << "\t" << gcnames[i] << " = UINT32_C(1) << " << std::right << std::setw(2) << i << ",    " << gclnames[i] << " = " << gcnames[i] << ",\n";
+	std::size_t const compound_count = compound_general_categories.size();
+	std::size_t compound_index = 0;
 	for (auto const& compound : compound_general_categories) {
 		out << "\t" << std::left << std::setw(2) << compound.first << " = ";
 		auto const& components = compound.second.second;
 		int padcount = 0;
-		for (std::size_t i = 0, n = components.size(); i < n; ++i) {
-			out << components[i];
-			padcount += static_cast<int>(components[i].size());
-			if (i < n - 1) {
+		for (std::size_t j = 0, m = components.size(); j < m; ++j) {
+			out << components[j];
+			padcount += static_cast<int>(components[j].size());
+			if (j < (m - 1)) {
 				out << "|";
 				++padcount;
 			}
 		}
-		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << ",\n";
+		out << "," << std::right << std::setw(21 - padcount) << " " << compound.second.first << " = " << compound.first << comma_printer{compound_index, compound_count};
+		++compound_index;
 	}
 })
 << "\n// NOLINTEND(hicpp-signed-bitwise)\n\n"
 << enum_printer(enum_type::index, "sctype", "std::uint_least8_t", "Scripts", [](std::ostream& out) {
 	auto const pad = align_padding(max_element_size(script_names.cbegin(), script_names.cend()));
 	for (std::size_t i = 0, n = script_names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << script_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << script_names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "blktype", "std::uint_least16_t", "Blocks", [](std::ostream& out) {
@@ -1204,7 +1244,7 @@ namespace lug::unicode {
 	std::transform(std::cbegin(block_names), std::cend(block_names), std::back_inserter(names), normalize_property_identifier);
 	auto const pad = align_padding(max_element_size(std::begin(names), std::end(names)));
 	for (std::size_t i = 0, n = names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "agetype", "std::uint_least8_t", "Character Age", [](std::ostream& out) {
@@ -1212,13 +1252,13 @@ namespace lug::unicode {
 	std::transform(age_names.begin(), age_names.end(), std::back_inserter(age_enums), [](auto& name) { return make_version_identifier(name); });
 	auto const pad = align_padding(max_element_size(age_enums.cbegin(), age_enums.cend()));
 	for (std::size_t i = 0, n = age_enums.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << age_enums[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << age_enums[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << "\n"
 << enum_printer(enum_type::index, "eawtype", "std::uint_least8_t", "East Asian Width", [](std::ostream& out) {
 	auto const pad = align_padding(max_element_size(eawidth_names.cbegin(), eawidth_names.cend()));
 	for (std::size_t i = 0, n = eawidth_names.size(); i < n; ++i)
-		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << (i < n - 1 ? ",\n" : "\n");
+		out << "\t" << std::left << std::setw(pad) << eawidth_names[i] << " = " << std::right << std::setw(3) << i << comma_printer{i, n};
 })
 << R"c++(
 // Property Traits
@@ -1244,6 +1284,14 @@ template <> inline constexpr property_enum to_property_enum_v<agetype> = propert
 template <> inline constexpr property_enum to_property_enum_v<eawtype> = property_enum::eawtype;
 
 template <class T> inline constexpr bool is_property_enum_v = to_property_enum_v<std::decay_t<T>> != property_enum::invalid;
+
+} // namespace lug::unicode
+
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ctype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::ptype> = true;
+template <> inline constexpr bool lug::is_flag_enum_v<lug::unicode::gctype> = true;
+
+namespace lug::unicode {
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
@@ -1305,53 +1353,68 @@ public:
 	return record{&table->records[index]};
 }
 
-// Checks if the rune matches all of the string-packed property classes
-[[nodiscard]] inline bool all_of(record const& rec, property_enum penum, std::string_view str)
+struct all_of_fn
 {
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.all_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.all_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.all_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.all_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.all_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.all_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
 	}
-	return false;
-}
+};
+
+// Checks if the rune matches all of the string-packed property classes
+inline constexpr all_of_fn all_of{};
+
+struct any_of_fn
+{
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.any_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.any_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.any_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() == static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() == static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() == static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() == static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
+	}
+};
 
 // Checks if the rune matches any of the string-packed property classes
-[[nodiscard]] inline bool any_of(record const& rec, property_enum penum, std::string_view str)
+inline constexpr any_of_fn any_of{};
+
+struct none_of_fn
 {
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.any_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.any_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.any_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() == lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() == lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() == lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() == lug::detail::string_unpack<eawtype>(str);
+	[[nodiscard]] bool operator()(record const& rec, property_enum penum, std::uint_least64_t pflags) const noexcept
+	{
+		switch (penum) {
+			case property_enum::ctype: return rec.none_of(static_cast<ctype>(pflags));
+			case property_enum::ptype: return rec.none_of(static_cast<ptype>(pflags));
+			case property_enum::gctype: return rec.none_of(static_cast<gctype>(pflags));
+			case property_enum::sctype: return rec.script() != static_cast<sctype>(pflags);
+			case property_enum::blktype: return rec.block() != static_cast<blktype>(pflags);
+			case property_enum::agetype: return rec.age() != static_cast<agetype>(pflags);
+			case property_enum::eawtype: return rec.eawidth() != static_cast<eawtype>(pflags);
+			case property_enum::invalid: return false;
+		}
+		return false;
 	}
-	return false;
-}
+};
 
 // Checks if the rune matches none of the string-packed property classes
-[[nodiscard]] inline bool none_of(record const& rec, property_enum penum, std::string_view str)
-{
-	switch (penum) {
-		case property_enum::invalid: return false;
-		case property_enum::ctype: return rec.none_of(lug::detail::string_unpack<ctype>(str));
-		case property_enum::ptype: return rec.none_of(lug::detail::string_unpack<ptype>(str));
-		case property_enum::gctype: return rec.none_of(lug::detail::string_unpack<gctype>(str));
-		case property_enum::sctype: return rec.script() != lug::detail::string_unpack<sctype>(str);
-		case property_enum::blktype: return rec.block() != lug::detail::string_unpack<blktype>(str);
-		case property_enum::agetype: return rec.age() != lug::detail::string_unpack<agetype>(str);
-		case property_enum::eawtype: return rec.eawidth() != lug::detail::string_unpack<eawtype>(str);
-	}
-	return false;
-}
+inline constexpr none_of_fn none_of{};
 
 // Column width (-1 = non-displayable, 0 = non-spacing, 1 = normal, 2 = wide)
 [[nodiscard]] inline int cwidth(char32_t r)
@@ -1385,81 +1448,137 @@ public:
 }
 
 // Sparse character rune set
-using rune_set = std::vector<std::pair<char32_t, char32_t>>;
-
-inline void push_range(rune_set& runes, char32_t start, char32_t end)
+class rune_set
 {
-	runes.emplace_back(start, end);
-	std::push_heap(std::begin(runes), std::end(runes));
-}
+	friend rune_set negate(rune_set const& /*unused*/);
+	friend rune_set sort_and_optimize(rune_set /*unused*/);
 
-namespace detail {
+	std::vector<std::pair<char32_t, char32_t>> intervals;
+	std::bitset<128> ascii;
 
-inline void push_uniform_casefolded_range(rune_set& runes, ptype props, char32_t start, char32_t end)
-{
-	if ((props & ptype::Cased) != ptype::None) {
-		push_range(runes, tolower(start), tolower(end));
-		push_range(runes, toupper(start), toupper(end));
-	} else {
-		push_range(runes, start, end);
-	}
-}
+	rune_set(std::vector<std::pair<char32_t, char32_t>>&& intr, std::bitset<128> const& asc)
+		: intervals{std::move(intr)}, ascii{asc} {}
 
-} // namespace detail
-
-inline void push_casefolded_range(rune_set& runes, char32_t start, char32_t end)
-{
-	ptype p = query(start).properties();
-	char32_t r1 = start;
-	char32_t r2 = start;
-	for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
-		ptype const q = query(start).properties();
-		if (((p ^ q) & ptype::Cased) != ptype::None) {
-			detail::push_uniform_casefolded_range(runes, p, r1, r2);
-			r1 = rn;
-			p = q;
+	void push_uniform_casefolded_range(ptype props, char32_t start, char32_t end)
+	{
+		if ((props & ptype::Cased) != ptype::None) {
+			push_range(unicode::tolower(start), unicode::tolower(end));
+			push_range(unicode::toupper(start), unicode::toupper(end));
+		} else {
+			push_range(start, end);
 		}
 	}
-	detail::push_uniform_casefolded_range(runes, p, r1, r2);
-}
 
-[[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
-{
-	rune_set optimized_runes;
-	auto out = optimized_runes.end();
-	std::sort_heap(std::begin(runes), std::end(runes));
-	for (auto const& r : runes) {
-		if (out == optimized_runes.end() || r.first < out->first || out->second < r.first)
-			out = optimized_runes.insert(optimized_runes.end(), r);
-		else
-			out->second = out->second < r.second ? r.second : out->second;
+public:
+	rune_set() = default;
+	rune_set(rune_set const&) = default;
+	rune_set(rune_set&&) = default;
+	rune_set& operator=(rune_set const&) = default;
+	rune_set& operator=(rune_set&&) = default;
+	~rune_set() = default;
+
+	rune_set(std::initializer_list<char32_t> list)
+	{
+		for (char32_t const r : list)
+			push_range(r, r);
 	}
-	optimized_runes.shrink_to_fit();
-	return optimized_runes;
-}
+
+	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept { return (ascii == rhs.ascii) && (intervals == rhs.intervals); }
+	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept { return !(*this == rhs); }
+	[[nodiscard]] bool empty() const noexcept { return intervals.empty() && ascii.none(); }
+	void clear() noexcept { intervals.clear(); ascii.reset(); }
+
+	[[nodiscard]] bool contains(char32_t rune) const noexcept
+	{
+		if (rune < unicode::ascii_limit)
+			return ascii[static_cast<std::size_t>(rune)];
+		auto const interval = std::lower_bound(intervals.begin(), intervals.end(), rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
+		return (interval != intervals.end()) && (interval->first <= rune) && (rune <= interval->second);
+	}
+
+	void push_rune(char32_t rune)
+	{
+		if (rune < unicode::ascii_limit) {
+			ascii.set(static_cast<std::size_t>(rune));
+		} else {
+			intervals.emplace_back(rune, rune);
+			std::push_heap(std::begin(intervals), std::end(intervals));
+		}
+	}
+
+	void push_range(char32_t start, char32_t end)
+	{
+		if (start > end)
+			throw bad_character_range{};
+		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
+			ascii.set(static_cast<std::size_t>(rn));
+		if (end >= unicode::ascii_limit) {
+			intervals.emplace_back((std::max)(start, unicode::ascii_limit), end);
+			std::push_heap(std::begin(intervals), std::end(intervals));
+		}
+	}
+
+	void push_casefolded_range(char32_t start, char32_t end)
+	{
+		if (start > end)
+			throw bad_character_range{};
+		ptype p = query(start).properties();
+		char32_t r1 = start;
+		char32_t r2 = start;
+		for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
+			ptype const q = query(start).properties();
+			if (((p ^ q) & ptype::Cased) != ptype::None) {
+				push_uniform_casefolded_range(p, r1, r2);
+				r1 = rn;
+				p = q;
+			}
+		}
+		push_uniform_casefolded_range(p, r1, r2);
+	}
+};
 
 [[nodiscard]] inline rune_set negate(rune_set const& runes)
 {
 	rune_set negated_runes;
-	if (!runes.empty()) {
-		if (char32_t const front = runes.front().first; U'\0' < front)
-			negated_runes.emplace_back(U'\0', front - 1);
-		if (runes.size() > 1) {
-			auto const last = std::cend(runes);
-			auto left = std::cbegin(runes);
+	if (!runes.intervals.empty()) {
+		if (char32_t const front = runes.intervals.front().first; unicode::ascii_limit < front)
+			negated_runes.intervals.emplace_back(unicode::ascii_limit, front - 1);
+		if (runes.intervals.size() > 1) {
+			auto const last = std::cend(runes.intervals);
+			auto left = std::cbegin(runes.intervals);
 			for (;;) {
 				auto right = std::next(left);
 				if (right == last)
 					break;
-				negated_runes.emplace_back(left->second + 1, right->first - 1);
+				negated_runes.intervals.emplace_back(left->second + 1, right->first - 1);
 				left = right;
 			}
 		}
-		if (char32_t const back = runes.back().second; back < U'\xFFFFFFFF')
-			negated_runes.emplace_back(back + 1, U'\xFFFFFFFF');
-		negated_runes.shrink_to_fit();
+		if (char32_t const back = runes.intervals.back().second; back < U'\xFFFFFFFF')
+			negated_runes.intervals.emplace_back(back + 1, U'\xFFFFFFFF');
+	} else {
+		negated_runes.intervals.emplace_back(unicode::ascii_limit, U'\xFFFFFFFF');
 	}
+	negated_runes.intervals.shrink_to_fit();
+	negated_runes.ascii = ~runes.ascii;
 	return negated_runes;
+}
+
+[[nodiscard]] inline rune_set sort_and_optimize(rune_set runes)
+{
+	if (runes.intervals.empty())
+		return runes;
+	std::vector<std::pair<char32_t, char32_t>> optimized_intervals;
+	auto out = optimized_intervals.end();
+	std::sort_heap(std::begin(runes.intervals), std::end(runes.intervals));
+	for (auto const& r : runes.intervals) {
+		if (out == optimized_intervals.end() || r.first < out->first || out->second < r.first)
+			out = optimized_intervals.insert(optimized_intervals.end(), r);
+		else
+			out->second = out->second < r.second ? r.second : out->second;
+	}
+	optimized_intervals.shrink_to_fit();
+	return rune_set{std::move(optimized_intervals), runes.ascii};
 }
 
 namespace detail {
@@ -1623,7 +1742,8 @@ void run_length_decode(InputIt first, InputIt last, OutputIt dest)
 
 #endif
 )c++";
-}
+
+} // void print_unicode_header()
 
 int main(int, char**)
 {

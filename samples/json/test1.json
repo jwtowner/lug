@@ -1,16 +1,1 @@
-{
-  "user": {
-    "name": "Jane Doe",
-    "age": 28,
-    "isActive": true,
-    "contact": {
-      "email": "jane@example.com",
-      "phone": "555-1234"
-    },
-    "interests": ["photography", "hiking", "coding"],
-    "metadata": {
-      "lastLogin": "2025-02-15T08:30:00Z",
-      "accountType": "premium"
-    }
-  }
-}
+{"user":{"age":28,"contact":{"email":"jane@example.com","phone":"555-1234"},"interests":["photography","hiking","coding"],"isActive":true,"metadata":{"accountType":"premium","lastLogin":"2025-02-15T08:30:00Z"},"name":"Jane Doe"}}

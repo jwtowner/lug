@@ -20,6 +20,9 @@ x86/
 [Oo]bj/
 [Ll]og/
 
+# macOS Finder cache file
+.DS_Store
+
 # Editor cache/options directories
 .cursor/
 .vscode/

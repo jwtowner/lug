@@ -1,0 +1,9 @@
+{
+  "name": "test",
+  'age': 25,
+  colors: ["red" "blue"],
+  "nested": {
+    key: value,
+    "items": [1, 2, 3,]
+  }
+}

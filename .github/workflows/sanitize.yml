@@ -1,0 +1,52 @@
+name: Sanitize
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "master", "develop" ]
+    tags: [ "v*" ]
+    paths-ignore:
+      - "doc/**"
+      - "*.md"
+      - ".editorconfig"
+      - ".gitignore"
+  pull_request:
+    branches: [ "master", "develop" ]
+    paths-ignore:
+      - "doc/**"
+      - "*.md"
+      - ".editorconfig"
+      - ".gitignore"
+
+jobs:
+  sanitize:
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+        - cxx: clang++
+          sanitize: address
+        - cxx: clang++
+          sanitize: undefined
+        - cxx: g++
+          sanitize: address
+        - cxx: g++
+          sanitize: leak
+        - cxx: g++
+          sanitize: undefined
+    runs-on: ubuntu-latest
+    env:
+      CXX: ${{ matrix.toolchain.cxx }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install ninja-build
+      run: |
+        sudo apt-get update -yq
+        sudo apt-get install -yq ninja-build
+    - name: Generating buildsystem with -fsanitize=${{ matrix.toolchain.sanitize }}
+      run: cmake -S "${{ github.workspace }}" -B build -G Ninja -DBUILD_TESTS=ON -DBUILD_SAMPLES=ON -DCI_BUILD=ON -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.toolchain.sanitize }}"
+    - name: Building project with -fsanitize=${{ matrix.toolchain.sanitize }}
+      run: cmake --build build
+    - name: Running tests with -fsanitize=${{ matrix.toolchain.sanitize }}
+      run: cd build && ctest --output-on-failure

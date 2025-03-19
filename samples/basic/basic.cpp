@@ -7,6 +7,7 @@
 // https://www.dartmouth.edu/basicfifty/commands.html
 
 #include <lug/lug.hpp>
+#include <lug/iostream.hpp>
 
 #include <cmath>
 #include <cstring>
@@ -35,8 +36,9 @@ public:
 		rule Expr;
 		rule Stmnt;
 
-		rule NL     = lexeme["\n"_sx | "\r\n" | "\r"];
-		rule Delim  = lexeme[","_sx | ";"];
+		rule NL     = lexeme['\n'_cx | "\r\n"_sx | '\r'_cx];
+		rule Delim  = lexeme[','_cx | ';'_cx];
+		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::cout << " "; }];
 		rule LineNo = lexeme[capture(tok_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{tok_}); };
 		rule Real   = lexeme[capture(tok_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
 		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]       <[this]{ return std::stod(std::string{tok_}); };
@@ -92,9 +94,9 @@ public:
 		rule DimEl  = id_%Var > "(" > r1_%Expr > ","
 		                            > r2_%Expr > ")"            <[this]{ dim(tables_[id_], r1_, r2_); }
 		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ dim(lists_[id_], r1_); };
-		rule ReadEl = ref_%Ref                                  <[this]{ read(ref_); };
 		rule DataEl = r1_%Real                                  <[this]{ data(r1_); };
-		rule InptEl = ref_%Ref                                  <[this]{ std::cin >> *ref_; };
+		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
+		rule InptEl = ref_%Ref                                  <[this]{ input(*ref_); };
 		rule PrntEl = txt_%String                               <[this]{ std::cout << txt_; }
 		            | r1_%Expr                                  <[this]{ std::cout << r1_; };
 
@@ -114,12 +116,11 @@ public:
 		            | "LET"_isx > ref_%Ref > "=" > r1_%Expr     <[this]{ *ref_ = r1_; }
 		            | "DIM"_isx > DimEl > *(Delim > DimEl)
 		            | "RESTORE"_isx                             <[this]{ read_itr_ = data_.cbegin(); }
-		            | "READ"_isx > ReadEl > *(Delim > ReadEl)
 		            | "DATA"_isx > DataEl > *(Delim > DataEl)
+		            | "READ"_isx > ReadEl > *(Delim > ReadEl)
 		            | "INPUT"_isx > InptEl > *(Delim > InptEl)
-		            | "PRINT"_isx > ~PrntEl > *(Delim > PrntEl)
-		                          > ( Delim                     <[]    { std::cout << " "; }
-		                            | &NL                       <[]    { std::cout << "\n"; } )
+		            | "PRINT"_isx > ~PrntEl > *(PrntDl > PrntEl)
+		                          > (PrntDl | &NL               <[]    { std::cout << "\n"; })
 		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
@@ -145,27 +146,24 @@ public:
 		rule Init   = when("fnev") > FnEval
 		            | unless("fnev") > Line;
 
-		grammar_ = start(Init > eoi);
+		grammar_    = start(Init > eoi);
 	}
 
 	void repl()
 	{
 		lug::parser parser{grammar_, environment_};
-		parser.push_source([this](std::string& out, lug::source_options opt) {
+		parser.push_source([this](std::back_insert_iterator<std::string> out, lug::source_options opt) {
 			if (quit_)
 				return false;
 			if (line_ != lines_.end()) {
 				lastline_ = line_++;
-				out = lastline_->second;
+				(void)std::copy(lastline_->second.begin(), lastline_->second.end(), out);
 				return true;
 			}
-			if ((opt & lug::source_options::interactive) != lug::source_options::none)
+			if (tty_)
 				std::cout << "> " << std::flush;
-			if (!std::getline(std::cin >> std::ws, out))
-				return false;
-			out.push_back('\n');
-			return true;
-		}, stdin_tty_ ? lug::source_options::interactive : lug::source_options::none);
+			return static_cast<bool>(lug::readsource(std::cin >> std::ws, out, opt));
+		}, lug::source_options::interactive);
 		std::cout.precision(10);
 		while (parser.parse()) ;
 	}
@@ -198,6 +196,11 @@ public:
 		}
 	}
 
+	void seed(int value)
+	{
+		random_.seed(static_cast<std::mt19937_64::result_type>(value));
+	}
+
 private:
 	struct List { std::vector<double> values = std::vector<double>(11, 0.0); };
 	struct Table { std::vector<double> values = std::vector<double>(121, 0.0); std::size_t width = 11, height = 11; };
@@ -211,12 +214,12 @@ private:
 		return filename;
 	}
 
-	void print_error(char const* message)
+	void print_error(std::string_view message)
 	{
-		std::cerr << message << "\n";
+		std::cout << message << "\n";
 		if (!fn_eval_) {
 			if (lastline_ != lines_.end())
-				std::cerr << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
+				std::cout << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
 			line_ = lastline_ = lines_.end();
 			stack_.clear();
 			for_stack_.clear();
@@ -241,7 +244,7 @@ private:
 		line_ = haltline_;
 		haltline_ = lines_.end();
 		if (line_ == haltline_)
-			print_error("CAN'T CONTINUE");
+			print_error("CANNOT CONTINUE");
 	}
 
 	void list(std::ostream& out)
@@ -300,7 +303,7 @@ private:
 		if (lastline_ != lines_.end()) {
 			double& v = vars_[id];
 			v += step;
-			if (for_stack_.empty() || id != for_stack_.back().first) {
+			if (for_stack_.empty() || (id != for_stack_.back().first)) {
 				for_stack_.emplace_back(id, lastline_);
 				v = from;
 			}
@@ -323,20 +326,12 @@ private:
 
 	void next(std::string const& id)
 	{
-		if ((lastline_ != lines_.end()) && !for_stack_.empty() && (for_stack_.back().first == id)) {
+		if ((lastline_ != lines_.end()) && !for_stack_.empty() && (id == for_stack_.back().first)) {
 			lastline_ = line_;
 			line_ = for_stack_.back().second;
 		} else {
 			print_error("NOT MATCH WITH FOR");
 		}
-	}
-
-	void read(double* ref)
-	{
-		if (read_itr_ != data_.cend())
-			*ref = *(read_itr_++);
-		else
-			print_error("NO DATA");
 	}
 
 	void data(double value)
@@ -345,6 +340,26 @@ private:
 		data_.push_back(value);
 		if (reset)
 			read_itr_ = data_.cbegin();
+	}
+
+	void read(double& value)
+	{
+		if (read_itr_ != data_.cend())
+			value = *(read_itr_++);
+		else
+			print_error("NO DATA");
+	}
+
+	void input(double& value)
+	{
+		std::cin >> value;
+		if (std::cin.fail()) {
+			std::cin.clear();
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), std::cin.widen('\n'));
+			print_error("ILLEGAL INPUT");
+		}
+		if (!(tty_ || std::cin.eof()))
+			std::cout << "\n";
 	}
 
 	double& at(List& lst, double i)
@@ -398,12 +413,14 @@ private:
 			print_error("UNDEFINED FUNCTION");
 			return 0.0;
 		}
+		environment_.should_reset_on_parse(false);
 		bool const saved_fn_eval = environment_.set_condition("fnev", true);
 		double& param_var = vars_[param];
 		double const saved_var = param_var;
 		param_var = arg;
 		bool const success = lug::parse(body, grammar_, environment_);
 		environment_.set_condition("fnev", saved_fn_eval);
+		environment_.should_reset_on_parse(true);
 		param_var = saved_var;
 		if (!success) {
 			print_error("EVALUATION ERROR");
@@ -424,7 +441,7 @@ private:
 	int no_{0};
 	double* ref_{nullptr};
 	RelOpFn rop_{nullptr};
-	std::default_random_engine random_{std::random_device{}()};
+	std::mt19937_64 random_{std::random_device{}()};
 	std::list<double> data_;
 	std::list<double>::const_iterator read_itr_{data_.cbegin()};
 	std::unordered_map<std::string, double> vars_;
@@ -438,23 +455,35 @@ private:
 	double invalid_value_{std::numeric_limits<double>::quiet_NaN()};
 	double fn_result_{0.0};
 	bool fn_eval_{false};
-	bool stdin_tty_{lug::stdin_isatty()};
 	bool quit_{false};
+	bool tty_{lug::stdin_isatty()};
 };
 
 int main(int argc, char** argv)
-{
-	try {
-		basic_interpreter interpreter;
-		for (int i = 1; i < argc; ++i)
-			interpreter.load(argv[1]);
-		interpreter.repl();
-	} catch (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
-		return -1;
-	} catch (...) {
-		std::cerr << "UNKNOWN ERROR\n";
-		return -1;
+try {
+	basic_interpreter interpreter;
+	for (int i = 1; i < argc; ++i) {
+		if (std::string_view const arg{argv[i]}; arg == "-s" || arg == "--seed") {
+			if ((i + 1) < argc) {
+				try {
+					interpreter.seed(std::stoi(argv[i + 1]));
+					i++;
+				} catch (std::exception const&) {
+					throw std::runtime_error{"Invalid seed value for random number generator"};
+				}
+			} else {
+				throw std::runtime_error{"No seed value provided for random number generator"};
+			}
+		} else if (arg != "-") {
+			interpreter.load(argv[i]);
+		}
 	}
+	interpreter.repl();
 	return 0;
+} catch (std::exception const& e) {
+	std::cerr << "ERROR: " << e.what() << "\n";
+	return 1;
+} catch (...) {
+	std::cerr << "UNKNOWN ERROR\n";
+	return 1;
 }

@@ -1,0 +1,5 @@
+{
+  "validNumber": 42,
+  "invalidNumber": 012.34e-5,
+  "description": "Numbers in JSON can't have leading zeros"
+}
