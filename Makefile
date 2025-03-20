@@ -37,7 +37,7 @@ SAMPLES_TESTS_DIRS = basic calc demo json xml
 SAMPLES_TESTPLANS = $(SAMPLES_TESTS_DIRS:%=samples/%/.testplan)
 
 # unit tests
-TESTS = acceptcut attributes captures conditions errorhandling leftrecursion nonterminals parser predicates symbols terminals
+TESTS = acceptcut attributes captures conditions encoding errorhandling leftrecursion nonterminals parser predicates symbols terminals
 TESTS_BIN = $(TESTS:%=tests/%)
 TESTS_OBJ = $(TESTS:%=tests/%.o)
 

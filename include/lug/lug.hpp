@@ -667,7 +667,7 @@ class encoder
 		};
 	}
 
-	std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
+	[[nodiscard]] std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
 	{
 		directives const callee_mode = mode_.back();
 		skip(p->entry_mode ^ directives::eps, directives::noskip);
@@ -1212,11 +1212,6 @@ struct directive_modifier
 	}
 };
 
-inline constexpr directive_modifier<directives::none, directives::none, directives::none> matches_eps{};
-inline constexpr directive_modifier<directives::none, directives::none, directives::eps> relays_eps{};
-inline constexpr directive_modifier<directives::postskip, directives::none, directives::eps> skip_after{};
-inline constexpr directive_modifier<directives::preskip, directives::postskip, directives::eps> skip_before{};
-
 struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
 struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
 struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
@@ -1318,7 +1313,7 @@ struct symbol_match_combinator
 	{
 		std::string_view name;
 		constexpr explicit symbol_match_expression(std::string_view n) noexcept : name{n} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name); return m; }
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name); return m; }
 	};
 
 	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{name}; }
@@ -1332,7 +1327,7 @@ struct symbol_match_offset_combinator
 		std::string_view name;
 		std::uint_least8_t offset;
 		constexpr symbol_match_offset_expression(std::string_view n, std::uint_least8_t o) noexcept : name{n}, offset{o} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip(directives::eps).encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name, offset); return m; }
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name, offset); return m; }
 	};
 
 	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
@@ -1351,7 +1346,9 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<negati
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
+		d.dpsh(directives::none, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::none);
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
 		return m2;
@@ -1368,7 +1365,9 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
+		d.dpsh(directives::none, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::none);
 		d.encode(opcode::commit_back, 1, 0, 0);
 		d.jump_to_here(choice);
 		d.encode(opcode::fail, 0, 1);
@@ -1387,7 +1386,9 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	{
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
+		d.dpsh(directives::postskip, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::none);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, expression);
@@ -1408,7 +1409,9 @@ struct repetition_min_max_expression : unary_encoder_expression_interface<repeti
 	{
 		auto const start = d.encode(opcode::jump);
 		auto const subexpression = d.here();
+		d.dpsh(directives::postskip, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (unsigned int i = 0; i < min_count; ++i)
@@ -1439,10 +1442,14 @@ struct choice_expression : binary_encoder_expression_interface<choice_expression
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
 		auto const choice = d.encode(opcode::choice);
+		d.dpsh(directives::none, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::eps);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
+		d.dpsh(directives::none, directives::none);
 		auto m3 = this->e2.evaluate(d, m2);
+		d.dpop(directives::eps);
 		d.jump_to_here(commit);
 		return m3;
 	}
@@ -1457,7 +1464,11 @@ struct sequence_expression : binary_encoder_expression_interface<sequence_expres
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 	{
-		return this->e2.evaluate(d, this->e1.evaluate(d, m));
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpsh(directives::preskip, directives::postskip);
+		auto m3 = this->e2.evaluate(d, m2);
+		d.dpop(directives::eps);
+		return m3;
 	}
 };
 
@@ -1811,11 +1822,11 @@ inline namespace operators {
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
 [[nodiscard]] constexpr auto operator ""_fail(char const* s, std::size_t n) { return failure{std::string_view{s, n}}; }
 
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{matches_eps[e]}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{matches_eps[e]}; } // NOLINT(google-runtime-operator)
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression{matches_eps[skip_after[e]]}; }
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2) { return choice_expression{relays_eps[e1], relays_eps[e2]}; }
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), skip_before[e2]}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{make_expression(e)}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{make_expression(e)}; } // NOLINT(google-runtime-operator)
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression{make_expression(e)}; }
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2) { return choice_expression{make_expression(e1), make_expression(e2)}; }
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), make_expression(e2)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
