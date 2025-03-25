@@ -18,8 +18,7 @@ double v[26];
 
 extern rule Expr;
 
-implicit_space_rule BLANK = lexeme[ *"[ \t]"_rx ];
-
+rule BLANK = noskip[ *"[ \t]"_rx ];
 rule ID     = lexeme[ "[a-zA-Z]"_rx  <[](syntax m) -> int { return std::tolower(m.str().at(0)) - 'a'; } ];
 rule NUMBER = lexeme[ ( ~"[-+]"_rx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx) )
                                      <[](syntax m) -> double { return std::stod(std::string{m}); } ];
@@ -43,7 +42,7 @@ rule Stmt   = ( (   "exit"_isx
             ) > ~Cmnt > eol
             | *( !eol > any ) > eol  <[]{ std::cout << "SYNTAX ERROR\n"; };
 
-grammar Grammar = start(Stmt > eoi);
+grammar Grammar = start(Stmt > eoi, BLANK);
 
 } // namespace samples::calc
 

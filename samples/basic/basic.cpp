@@ -31,11 +31,10 @@ public:
 	{
 		using namespace lug::language;
 
-		implicit_space_rule SP = *"[ \t]"_rx;
-
 		rule Expr;
 		rule Stmnt;
 
+		rule SP     = noskip[*"[ \t]"_rx];
 		rule NL     = lexeme['\n'_cx | "\r\n"_sx | '\r'_cx];
 		rule Delim  = lexeme[','_cx | ';'_cx];
 		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::cout << " "; }];
@@ -146,7 +145,7 @@ public:
 		rule Init   = when("fnev") > FnEval
 		            | unless("fnev") > Line;
 
-		grammar_    = start(Init > eoi);
+		grammar_    = start(Init > eoi, SP);
 	}
 
 	void repl()

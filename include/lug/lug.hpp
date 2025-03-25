@@ -53,7 +53,7 @@ template <class E> inline constexpr bool is_expression_v = is_encoder_expression
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
 
-[[nodiscard]] grammar start(rule const& start_rule);
+[[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
 
 struct registers
 {
@@ -202,7 +202,7 @@ struct program
 class rule
 {
 	friend class encoder;
-	friend grammar start(rule const& start_rule);
+	friend grammar start(rule const& start_rule, rule const& skip_rule);
 	program program_;
 	program_callees callees_;
 	bool currently_encoding_{false};
@@ -223,14 +223,13 @@ public:
 
 class grammar
 {
-	friend grammar start(rule const& start_rule);
+	friend grammar start(rule const& start_rule, rule const& skip_rule);
 	lug::program program_;
 	explicit grammar(lug::program&& p) noexcept : program_{std::move(p)} {}
 public:
 	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	[[nodiscard]] static std::shared_ptr<std::function<void(encoder&)>> const& implicit_space();
 };
 
 struct syntax_position
@@ -675,13 +674,6 @@ class encoder
 		return encode(opcode::call, off, prec, 0);
 	}
 
-	void do_skip(directives& last_mode)
-	{
-		last_mode &= ~(directives::preskip | directives::postskip);
-		last_mode |= (directives::lexeme | directives::noskip);
-		(*grammar::implicit_space())(*this);
-	}
-
 public:
 	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, mode_{initial} {}
 	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
@@ -797,25 +789,11 @@ public:
 
 	void dpop(directives relay)
 	{
-		directives const prev = detail::pop_back(mode_);
-		directives& ancestor_mode = mode_.back();
-		directives const next = (ancestor_mode & ~relay) | (prev & relay);
-		if (((next & directives::postskip) == directives::none) && ((prev & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
-			do_skip(ancestor_mode);
-		mode_.back() = next;
-	}
-
-	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
-	{
+		directives const prev_mode = detail::pop_back(mode_);
 		directives& curr_mode = mode_.back();
-		directives const prev = curr_mode;
-		directives const next = curr_mode & ~(callee_mode & directives::eps);
-		if (entry_mode_ == directives::none)
-			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
-			do_skip(curr_mode);
-		mode_.back() = next;
-		return *this;
+		curr_mode = (curr_mode & ~relay) | (prev_mode & relay);
+		if (((curr_mode & directives::postskip) == directives::none) && ((prev_mode & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
+			encode(opcode::skip_space);
 	}
 
 	bool should_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
@@ -826,6 +804,13 @@ public:
 		if (entry_mode_ == directives::none)
 			entry_mode_ = (prev_mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
 		return ((((prev_mode | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip);
+	}
+
+	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	{
+		if (should_skip(callee_mode, callee_skip))
+			encode(opcode::skip_space);
+		return *this;
 	}
 };
 
@@ -1132,12 +1117,6 @@ template <class E, class = std::enable_if_t<!is_encoder_expression_v<E> && is_ex
 		return predicate_expression{std::forward<E>(e)};
 	else
 		static_assert(detail::always_false_v<E>, "invalid expression type");
-}
-
-template <class E, class = std::enable_if_t<is_expression_v<E>>>
-[[nodiscard]] constexpr auto make_space_expression(E const& e)
-{
-	return [x = make_expression(e)](encoder& d) { (void)x.evaluate(d, encoder_metadata{}); };
 }
 
 template <class E, class>
@@ -1969,56 +1948,26 @@ template <error_response Response>
 	return noskip[nop ^ Response];
 }
 
-class implicit_space_rule
-{
-	std::function<void(encoder&)> prev_rule_;
-	std::weak_ptr<std::function<void(encoder&)>> implicit_space_ref_;
-
-public:
-	template <class E, class = std::enable_if_t<is_expression_v<E>>>
-	implicit_space_rule(E const& e) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
-		: prev_rule_{std::exchange(*grammar::implicit_space(), std::function<void(encoder&)>{make_space_expression(e)})}
-		, implicit_space_ref_{grammar::implicit_space()} {}
-
-	~implicit_space_rule()
-	{
-		if (auto const implicit_space_instance = implicit_space_ref_.lock(); implicit_space_instance)
-			*implicit_space_instance = std::move(prev_rule_);
-	}
-
-	implicit_space_rule(implicit_space_rule const&) = delete;
-	implicit_space_rule(implicit_space_rule&&) = delete;
-	implicit_space_rule& operator=(implicit_space_rule const&) = delete;
-	implicit_space_rule& operator=(implicit_space_rule&&) = delete;
-};
-
 } // namespace language
 
-[[nodiscard]] inline std::shared_ptr<std::function<void(encoder&)>> const& grammar::implicit_space()
-{
-	static thread_local std::shared_ptr<std::function<void(encoder&)>> const instance{std::make_shared<std::function<void(encoder&)>>(make_space_expression(language::operator*(language::space)))};
-	return instance;
-}
-
-[[nodiscard]] inline grammar start(rule const& start_rule)
+[[nodiscard]] inline grammar start(rule const& start_rule, rule const& skip_rule)
 {
 	program grprogram;
 	program_callees grcallees;
 	encoder grencoder{grprogram, grcallees, directives::eps | directives::preskip};
 	grencoder.skip(start_rule.program_.entry_mode, directives::noskip);
-	std::vector<std::pair<std::vector<std::pair<rule const*, bool>>, program const*>> unprocessed{{std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_}};
+	std::vector<std::tuple<std::vector<std::pair<rule const*, bool>>, program const*, opcode>> unprocessed{
+		{std::vector<std::pair<rule const*, bool>>{{&skip_rule, false}}, &skip_rule.program_, opcode::ret},
+		{std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_, opcode::jump}};
 	std::vector<std::pair<program const*, std::ptrdiff_t>> calls;
 	std::unordered_map<program const*, std::ptrdiff_t> addresses;
+	std::unordered_map<program const*, std::ptrdiff_t> epilogue_addresses;
 	std::unordered_set<program const*> left_recursive;
-	std::optional<std::ptrdiff_t> halt_address;
 	do {
-		auto const&& [callstack, subprogram] = detail::pop_back(unprocessed);
+		auto const&& [callstack, subprogram, epilogue_op] = detail::pop_back(unprocessed);
 		if (auto const address = grencoder.here(); addresses.emplace(subprogram, address).second) {
 			grencoder.append(*subprogram);
-			if (!halt_address)
-				halt_address = grencoder.encode(opcode::jump);
-			else
-				grencoder.encode(opcode::ret);
+			epilogue_addresses.emplace(subprogram, grencoder.encode(epilogue_op));
 			if (auto const top_rule = callstack.back().first; top_rule) {
 				for (auto&& [callee_rule, callee_program, instr_offset, callee_mode] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
@@ -2029,15 +1978,37 @@ public:
 								return (caller.second ? 0 : -1);
 							}) != callstack.crend()) {
 						left_recursive.insert(callee_program);
-					} else {
+					} else if (callee_rule != &skip_rule) {
 						auto callee_callstack = callstack;
 						callee_callstack.emplace_back(callee_rule, (callee_mode & directives::eps) != directives::none);
-						unprocessed.emplace_back(std::move(callee_callstack), callee_program);
+						unprocessed.emplace_back(std::move(callee_callstack), callee_program, opcode::ret);
 					}
 				}
 			}
 		}
 	} while (!unprocessed.empty());
+	std::ptrdiff_t const grammar_end_addr = grencoder.here();
+	if (std::ptrdiff_t const start_epilogue_addr = epilogue_addresses[&start_rule.program_]; start_epilogue_addr >= 0)
+		grencoder.jump_to_target(start_epilogue_addr, grammar_end_addr);
+	std::ptrdiff_t const skip_prologue_addr = addresses[&skip_rule.program_];
+	std::ptrdiff_t const skip_epilogue_addr = epilogue_addresses[&skip_rule.program_];
+	if (std::ptrdiff_t const skip_subprogram_length = skip_epilogue_addr - skip_prologue_addr; skip_subprogram_length > 1) {
+		for (std::ptrdiff_t instr_addr = 0; instr_addr < grammar_end_addr; ++instr_addr) {
+			if (auto& instr = grencoder.instruction_at(instr_addr); instr.op == opcode::skip_space) {
+				instr = instruction{opcode::call, 0, 0, 0};
+				calls.emplace_back(&skip_rule.program_, instr_addr);
+			}
+		}
+	} else {
+		instruction const skip_instr = [&]{
+			if (skip_subprogram_length == 1)
+				return grencoder.instruction_at(skip_prologue_addr);
+			return instruction{opcode::jump, 0, 0, 0};
+		}();
+		for (std::ptrdiff_t instr_addr = 0; instr_addr < grammar_end_addr; ++instr_addr)
+			if (auto& instr = grencoder.instruction_at(instr_addr); instr.op == opcode::skip_space)
+				instr = skip_instr;
+	}
 	for (auto [subprogram, instr_addr] : calls) {
 		if (auto& instr = grencoder.instruction_at(instr_addr); (instr.op == opcode::call) || (instr.op == opcode::recover_push)) {
 			instr.offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(instr.offset32 + addresses[subprogram] - (instr_addr + 1));
@@ -2048,10 +2019,13 @@ public:
 			}
 		}
 	}
-	if (halt_address)
-		grencoder.jump_to_here(*halt_address);
 	grprogram.data.emplace_back('\0');
 	return grammar{std::move(grprogram)};
+}
+
+[[nodiscard]] inline grammar start(rule const& start_rule)
+{
+	return start(start_rule, language::noskip[language::operator*(language::space)]);
 }
 
 enum class source_options : std::uint_least8_t { none = 0, interactive = 1 };
@@ -3238,7 +3212,6 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 [[nodiscard]] inline grammar basic_regular_expression::make_grammar()
 {
 	using namespace language;
-	implicit_space_rule const default_space = nop;
 	// NOLINTBEGIN(bugprone-chained-comparison)
 	rule const Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
 	rule const Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
@@ -3249,7 +3222,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 			   > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
 	rule const Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.str()); };
 	// NOLINTEND(bugprone-chained-comparison)
-	return start((+(Dot | Bracket | Sequence) | Empty) > eoi);
+	return start((+(Dot | Bracket | Sequence) | Empty) > eoi, nop);
 }
 
 LUG_DIAGNOSTIC_POP

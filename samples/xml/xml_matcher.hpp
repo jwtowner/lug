@@ -17,8 +17,7 @@ public:
 		using namespace lug::language;
 		namespace lang = lug::language;
 
-		implicit_space_rule SP = *"[ \t\r\n]"_rx;
-
+		rule SP = noskip[*"[ \t\r\n]"_rx];
 		rule Text = noskip[+(!chr('<') > any)];
 		rule Name = lexeme[bre("[A-Za-z_:]") > *bre("[A-Za-z0-9_:.-]")];
 		rule Attribute = Name > '=' > (('\"' > *("[^\"&]"_rx | "&quot;"_sx) > '\"') | ('\'' > *("[^'&]"_rx | "&apos;"_sx) > '\''));
@@ -39,7 +38,7 @@ public:
 		rule Prolog = "<?xml" > VersionInfo > ~EncodingDecl > ~SDDecl > "?>";
 
 		rule File = ~Prolog > *Comment > ~(DTD > *Comment) > Xml > *Comment;
-		grammar_ = start(File > eoi);
+		grammar_ = start(File > eoi, SP);
 	}
 
 	template <typename T>
