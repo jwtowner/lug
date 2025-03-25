@@ -82,13 +82,13 @@ enum class opcode : std::uint_least8_t
 	fail,           recover_push,   recover_pop,    recover_resp,
 	report_push,    report_pop,     predicate,      action,
 	capture_start,  capture_end,    condition_pop,  symbol_end,
-	symbol_pop,     skip_space,
-	match_any,      match_eol,      match_space,    match_octet,
-	match_set,      match_all_of,   match_any_of,   match_none_of,
-	repeat_any,     repeat_eol,     repeat_space,   repeat_octet,
-	repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
-	test_any,       test_eol,       test_space,     test_octet,
-	test_set,       test_all_of,    test_any_of,    test_none_of,
+	symbol_pop,
+	match_any,      match_blank,    match_space,    match_eol,      match_eoi,
+	match_octet,    match_set,      match_all_of,   match_any_of,   match_none_of,
+	repeat_any,     repeat_blank,   repeat_space,   skip_blank,     skip_space,
+	repeat_octet,   repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
+	test_any,       test_blank,     test_space,     test_eol,       test_eoi,
+	test_octet,     test_set,       test_all_of,    test_any_of,    test_none_of,
 	match,          match_cf,       condition_test, condition_push,
 	symbol_exists,  symbol_all,     symbol_all_cf,  symbol_any,
 	symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
@@ -807,15 +807,25 @@ public:
 
 	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
 	{
-		directives& current_mode = mode_.back();
-		directives const prev = current_mode;
-		directives const next = current_mode & ~(callee_mode & directives::eps);
+		directives& curr_mode = mode_.back();
+		directives const prev = curr_mode;
+		directives const next = curr_mode & ~(callee_mode & directives::eps);
 		if (entry_mode_ == directives::none)
 			entry_mode_ = (prev & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
 		if ((((prev | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip)
-			do_skip(current_mode);
+			do_skip(curr_mode);
 		mode_.back() = next;
 		return *this;
+	}
+
+	bool should_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	{
+		directives& curr_mode = mode_.back();
+		directives const prev_mode = curr_mode;
+		curr_mode &= ~(callee_mode & directives::eps);
+		if (entry_mode_ == directives::none)
+			entry_mode_ = (prev_mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
+		return ((((prev_mode | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip);
 	}
 };
 
@@ -1216,8 +1226,8 @@ struct accept_expression : terminal_encoder_expression_interface<accept_expressi
 struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
 struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
 struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::choice, 2, 0, 0); d.encode(opcode::match_any, 0, 1); d.encode(opcode::fail, 0, 2); return m; } };
-struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip(directives::lexeme).encode(opcode::match_eol); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.should_skip() ? 1 : 0); return m; } };
+struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.should_skip() ? 1 : 0); return m; } };
 
 template <opcode Op>
 struct match_class_combinator
@@ -1411,7 +1421,7 @@ struct repetition_min_max_expression : unary_encoder_expression_interface<repeti
 		auto const subexpression = d.here();
 		d.dpsh(directives::postskip, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
-		d.dpop(directives::none);
+		d.dpop(min_count > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (unsigned int i = 0; i < min_count; ++i)
@@ -2054,7 +2064,7 @@ template <typename T> struct input_source_enqueue_drains<T, std::enable_if_t<T::
 template <typename T, typename = void> struct input_source_has_options : std::false_type {};
 template <typename T> struct input_source_has_options<T, std::enable_if_t<std::is_same_v<source_options, decltype(std::declval<T const&>().options())>>> : std::true_type {};
 template <typename T, typename = void> struct input_source_has_fill_buffer : std::false_type {};
-template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T&>().fill_buffer(std::declval<std::size_t>(), std::declval<std::size_t>()))>>> : std::true_type {};
+template <typename T> struct input_source_has_fill_buffer<T, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<T&>().fill_buffer(std::declval<std::size_t>()))>>> : std::true_type {};
 template <typename T, class It, typename = void> struct input_source_has_enqueue : std::false_type {};
 template <typename T, class It> struct input_source_has_enqueue<T, It, std::void_t<decltype(std::declval<T>().enqueue(std::declval<It>(), std::declval<It>()))>> : std::true_type {};
 template <typename T, class InputFunc, typename = void> struct input_source_has_push_source : std::false_type {};
@@ -2073,14 +2083,13 @@ public:
 	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
-	[[nodiscard]] bool fill_buffer(std::size_t fill_required, std::size_t fill_desired)
+	[[nodiscard]] bool fill_buffer(std::size_t fill_required)
 	{
 		if (sources_.empty())
 			return false;
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		std::size_t const required_size = buffer_.size() + fill_required;
-		std::size_t const desired_size = buffer_.size() + fill_desired;
-		while (!sources_.empty() && (buffer_.size() < desired_size))
+		while (!sources_.empty() && (buffer_.size() < required_size))
 			if (auto const& [func, opt] = sources_.back(); !func(std::back_inserter(buffer_), opt))
 				sources_.pop_back();
 		return buffer_.size() >= required_size;
@@ -2373,27 +2382,26 @@ class basic_parser : public parser_base
 {
 	InputSource input_source_;
 
-	[[nodiscard]] bool available(std::size_t sr, std::size_t nrequired, [[maybe_unused]] std::size_t ndesired = 0)
+	[[nodiscard]] bool available(std::size_t sr, std::size_t sn = 1)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			std::size_t const nmaxdesired = (std::max)(nrequired, ndesired);
 			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
 				std::size_t const buffer_remaining = buffer_size - sr;
 				if (sr < buffer_size) {
-					if (nrequired <= buffer_remaining)
+					if (sn <= buffer_remaining)
 						break;
 					if constexpr (detail::input_source_has_options<InputSource>::value)
 						if ((input_source_.options() & source_options::interactive) != source_options::none)
 							return false;
 				}
-				if (!input_source_.fill_buffer(nrequired - buffer_remaining, nmaxdesired - buffer_remaining))
+				if (!input_source_.fill_buffer(sn - buffer_remaining))
 					return false;
 			}
 			return true;
 		} else {
 			std::size_t const buffer_size = input_source_.buffer().size();
-			return (sr < buffer_size) && (nrequired <= (buffer_size - sr));
+			return (sr < buffer_size) && (sn <= (buffer_size - sr));
 		}
 	}
 
@@ -2450,12 +2458,22 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr, [[maybe_unused]] std::uint_least8_t flags)
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
 	{
-		if constexpr (detail::input_source_has_options<InputSource>::value)
-			if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
-				return 1;
-		if (std::size_t const i = sr; available(i, 1)) {
+		if (std::size_t const i = sr; available(i)) {
+			auto const [curr, last] = buffer_range(i);
+			if (auto const next = match(curr, last); next != curr) {
+				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr)
+	{
+		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
 			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
 			sr = i + static_cast<std::size_t>(std::distance(curr, next));
@@ -2464,14 +2482,11 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax, [[maybe_unused]] std::uint_least8_t flags)
+	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any), flags);
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
 		} else {
-			if constexpr (detail::input_source_has_options<InputSource>::value)
-				if ((flags != 0) && ((input_source_.options() & source_options::interactive) != source_options::none))
-					return 1;
 			if ((nmin == 0) && (nmax == (std::numeric_limits<std::size_t>::max)())) {
 				sr = input_source_.buffer().size();
 				return 0;
@@ -2484,38 +2499,22 @@ class basic_parser : public parser_base
 		}
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr)
+	[[nodiscard]] std::ptrdiff_t match_blank(std::size_t& sr)
 	{
-		static constexpr std::size_t max_eol_units = 4;
-		if (std::size_t const i = sr; available(i, 1, max_eol_units)) {
-			auto const [curr, last] = buffer_range(i);
-			if (auto const next = utf8::match_eol(curr, last); next != curr) {
-				sr = i + static_cast<std::size_t>(std::distance(curr, next));
-				return 0;
-			}
-		}
-		return 1;
+		return match_with(sr, utf8::match_blank);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_eol(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_eol));
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
 		else
-			return repeat_match_buffered(sr, nmin, nmax, utf8::match_eol);
+			return repeat_match_buffered(sr, nmin, nmax, utf8::match_blank);
 	}
 
 	[[nodiscard]] std::ptrdiff_t match_space(std::size_t& sr)
 	{
-		static constexpr std::size_t max_space_units = 4;
-		if (std::size_t const i = sr; available(i, 1, max_space_units)) {
-			auto const [curr, last] = buffer_range(i);
-			if (auto const next = utf8::match_space(curr, last); next != curr) {
-				sr = i + static_cast<std::size_t>(std::distance(curr, next));
-				return 0;
-			}
-		}
-		return 1;
+		return match_with(sr, utf8::match_space);
 	}
 
 	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
@@ -2526,9 +2525,41 @@ class basic_parser : public parser_base
 			return repeat_match_buffered(sr, nmin, nmax, utf8::match_space);
 	}
 
+	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t flags)
+	{
+		std::size_t i = sr;
+		if (flags != 0)
+			(void)repeat_blank(i, 0, (std::numeric_limits<std::size_t>::max)());
+		if (std::ptrdiff_t const eol_fail_count = match_with(i, utf8::match_eol); eol_fail_count != 0)
+			return eol_fail_count;
+		sr = i;
+		return 0;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t flags)
+	{
+		std::size_t i = sr;
+		if constexpr (detail::input_source_has_options<InputSource>::value) {
+			if ((input_source_.options() & source_options::interactive) != source_options::none) {
+				if (flags != 0)
+					(void)repeat_match_buffered(i, 0, (std::numeric_limits<std::size_t>::max)(), utf8::match_space);
+				if (i < input_source_.buffer().size())
+					return 1;
+				sr = i;
+				return 0;
+			}
+		}
+		if (flags != 0)
+			(void)repeat_space(i, 0, (std::numeric_limits<std::size_t>::max)());
+		if (available(i))
+			return 1;
+		sr = i;
+		return 0;
+	}
+
 	[[nodiscard]] std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
 	{
-		if (std::size_t const i = sr; available(i, 1) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
+		if (std::size_t const i = sr; available(i) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
 			sr = i + 1;
 			return 0;
 		}
@@ -2572,7 +2603,7 @@ class basic_parser : public parser_base
 	template <class MatchFn>
 	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
 	{
-		if (std::size_t const i = sr; available(i, 1)) {
+		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
 			if (auto const next = decode_and_match_rune(curr, last, match); next != curr) {
 				sr = i + static_cast<std::size_t>(std::distance(curr, next));
@@ -2635,7 +2666,7 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
 	{
-		if (std::size_t i = sr; available(i, 1)) {
+		if (std::size_t i = sr; available(i)) {
 			do {
 				auto const buffer = input_source_.buffer();
 				if (auto const n = buffer.find_first_of(" \t\n\r\f\v", i); n != std::string::npos) {
@@ -2643,7 +2674,7 @@ class basic_parser : public parser_base
 					break;
 				}
 				i = buffer.size();
-			} while (available(i, 1));
+			} while (available(i));
 			if (i > sr) {
 				sr = i;
 				return 0;
@@ -2834,7 +2865,6 @@ public:
 	[[nodiscard]] std::string_view subject() const noexcept { return input_source_.buffer().substr(registers_.sr, input_source_.buffer().size() - registers_.sr); }
 	[[nodiscard]] std::string_view max_match() const noexcept { return input_source_.buffer().substr(0, registers_.mr); }
 	[[nodiscard]] std::string_view max_subject() const noexcept { return input_source_.buffer().substr(registers_.mr, input_source_.buffer().size() - registers_.mr); }
-	[[nodiscard]] bool available(std::size_t sn) { return available(registers_.sr, sn); }
 
 	template <class InputIt, class = std::enable_if_t<detail::input_source_has_enqueue<InputSource, InputIt>::value>>
 	basic_parser& enqueue(InputIt first, InputIt last)
@@ -2996,22 +3026,34 @@ public:
 					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: {
-					fail_count = match_any(registers_.sr, instr.immediate8);
+					fail_count = match_any(registers_.sr);
 				} break;
 				case opcode::test_any: {
-					registers_.pc += (match_any(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
+					registers_.pc += (match_any(registers_.sr) != 0) ? instr.offset32 : 0;
 				} break;
-				case opcode::match_eol: {
-					fail_count = match_eol(registers_.sr);
+				case opcode::match_blank: {
+					fail_count = match_blank(registers_.sr);
 				} break;
-				case opcode::test_eol: {
-					registers_.pc += (match_eol(registers_.sr) != 0) ? instr.offset32 : 0;
+				case opcode::test_blank: {
+					registers_.pc += (match_blank(registers_.sr) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_space: {
 					fail_count = match_space(registers_.sr);
 				} break;
 				case opcode::test_space: {
 					registers_.pc += (match_space(registers_.sr) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_eol: {
+					fail_count = match_eol(registers_.sr, instr.immediate8);
+				} break;
+				case opcode::test_eol: {
+					registers_.pc += (match_eol(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
+				} break;
+				case opcode::match_eoi: {
+					fail_count = match_eoi(registers_.sr, instr.immediate8);
+				} break;
+				case opcode::test_eoi: {
+					registers_.pc += (match_eoi(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::match_octet: {
 					fail_count = match_octet(registers_.sr, instr.immediate8);
@@ -3044,12 +3086,12 @@ public:
 					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::repeat_any: {
-					fail_count = repeat_any(registers_.sr, instr.unpackmin(), instr.unpackmax(), instr.immediate8);
+					fail_count = repeat_any(registers_.sr, instr.unpackmin(), instr.unpackmax());
 				} break;
-				case opcode::repeat_eol: {
-					fail_count = repeat_eol(registers_.sr, instr.unpackmin(), instr.unpackmax());
+				case opcode::repeat_blank: case opcode::skip_blank: {
+					fail_count = repeat_blank(registers_.sr, instr.unpackmin(), instr.unpackmax());
 				} break;
-				case opcode::repeat_space: {
+				case opcode::repeat_space: case opcode::skip_space: {
 					fail_count = repeat_space(registers_.sr, instr.unpackmin(), instr.unpackmax());
 				} break;
 				case opcode::repeat_octet: {

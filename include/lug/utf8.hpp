@@ -162,6 +162,35 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return result;
 }
 
+struct match_blank_unicode_fn
+{
+	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	[[nodiscard]] InputIt operator()(InputIt first, InputIt last) const
+	{
+		if (first != last) {
+			auto const c = *first;
+			if ((c == ' ') || (c == '\t')) {
+				++first;
+				return first;
+			}
+			if (utf8::is_lead(c)) {
+				auto const [next, rune] = utf8::decode_rune(first, last);
+				if ((unicode::query(rune).compatibility() & unicode::ctype::blank) != unicode::ctype::none)
+					return next;
+			}
+		}
+		return first;
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng));
+	}
+};
+
+inline constexpr match_blank_unicode_fn match_blank{};
+
 struct match_eol_unicode_fn
 {
 	static constexpr char nel0 = static_cast<char>(0xc2);
@@ -192,7 +221,7 @@ struct match_eol_unicode_fn
 			if ((c1 == lsps0) && ((next != last) && (*next == lsps1))) {
 				++next;
 				if (next != last) {
-					if (char const c3 =*next; (c3 == ls2) || (c3 == ps2)) {
+					if (auto const c3 =*next; (c3 == ls2) || (c3 == ps2)) {
 						++next;
 						return next;
 					}
@@ -218,7 +247,7 @@ struct match_space_unicode_fn
 	{
 		if (first != last) {
 			auto const c = *first;
-			if ((('\t' <= c) && (c <= '\r')) || (c == ' ')) {
+			if ((c == ' ') || (('\t' <= c) && (c <= '\r'))) {
 				++first;
 				return first;
 			}

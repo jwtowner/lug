@@ -5,6 +5,7 @@
 #include <lug/lug.hpp>
 #include <lug/iostream.hpp>
 
+#include <cctype>
 #include <cstdlib>
 
 namespace samples::calc {
@@ -19,8 +20,7 @@ extern rule Expr;
 
 implicit_space_rule BLANK = lexeme[ *"[ \t]"_rx ];
 
-rule EOL    = lexeme[ "[\n\r;]"_rx ];
-rule ID     = lexeme[ "[a-zA-Z]"_rx  <[](syntax m) -> int { return static_cast<int>(lug::unicode::tolower(static_cast<char32_t>(m.str().at(0))) - U'a'); } ];
+rule ID     = lexeme[ "[a-zA-Z]"_rx  <[](syntax m) -> int { return std::tolower(m.str().at(0)) - 'a'; } ];
 rule NUMBER = lexeme[ ( ~"[-+]"_rx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx) )
                                      <[](syntax m) -> double { return std::stod(std::string{m}); } ];
 rule Value  = n%NUMBER               <[]{ return n; }
@@ -36,11 +36,12 @@ rule Sum    = l%Prod > *(
             )                        <[]{ return l; };
 rule Expr   = i%ID > '=' > s%Sum     <[]{ return v[i] = s; }
             | s%Sum                  <[]{ return s; };
+rule Cmnt   = ';' > *( !eol > any );
 rule Stmt   = ( (   "exit"_isx
                   | "quit"_isx )     <[]{ std::exit(EXIT_SUCCESS); }
                 | e%Expr             <[]{ std::cout << e << "\n"; }
-            ) > EOL
-            | *( !EOL > any ) > EOL  <[]{ std::cout << "SYNTAX ERROR\n"; };
+            ) > ~Cmnt > eol
+            | *( !eol > any ) > eol  <[]{ std::cout << "SYNTAX ERROR\n"; };
 
 grammar Grammar = start(Stmt > eoi);
 

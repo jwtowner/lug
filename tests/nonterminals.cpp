@@ -18,9 +18,29 @@ void test_sequence()
 	assert(!lug::parse("", G));
 	assert(!lug::parse("a", G));
 	assert(!lug::parse("aza", G));
+	assert(!lug::parse("azb ", G));
 	assert(!lug::parse("azb3", G));
 	assert(!lug::parse("a z b", G));
 	assert(!lug::parse(" a z b", G));
+}
+
+void test_sequence_with_skip()
+{
+	using namespace lug::language;
+	rule S = chr('a') > any > chr('b') > eoi;
+	grammar G = start(S);
+	assert(lug::parse("a2b", G));
+	assert(lug::parse("azb", G));
+	assert(lug::parse("ak b", G));
+	assert(lug::parse("a z b", G));
+	assert(lug::parse(" a g b ", G));
+	assert(lug::parse("a  c  b", G));
+	assert(lug::parse("\ta\nz\tb", G));
+	assert(lug::parse("a\td\nb ", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse("a", G));
+	assert(!lug::parse("aza", G));
+	assert(!lug::parse("azb3", G));
 }
 
 void test_choice()
@@ -34,6 +54,28 @@ void test_choice()
 	assert(!lug::parse("ab", G));
 	assert(!lug::parse("ba", G));
 	assert(!lug::parse(" a", G));
+}
+
+void test_choice_with_skip()
+{
+	using namespace lug::language;
+	rule S = (chr('a') | chr('b')) > eoi;
+	grammar G = start(S);
+	assert(lug::parse("a", G));
+	assert(lug::parse("b", G));
+	assert(lug::parse(" a", G));
+	assert(lug::parse("a ", G));
+	assert(lug::parse(" a ", G));
+	assert(lug::parse(" b", G));
+	assert(lug::parse("b ", G));
+	assert(lug::parse(" b ", G));
+	assert(lug::parse("\ta\n", G));
+	assert(lug::parse("\n\tb\t", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse("ab", G));
+	assert(!lug::parse("ba", G));
+	assert(!lug::parse("c", G));
+	assert(!lug::parse(" c ", G));
 }
 
 void test_zero_or_one()
@@ -161,7 +203,9 @@ void test_list()
 int main()
 try {
 	test_sequence();
+	test_sequence_with_skip();
 	test_choice();
+	test_choice_with_skip();
 	test_zero_or_one();
 	test_zero_or_many();
 	test_one_or_many();

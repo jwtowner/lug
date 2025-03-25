@@ -5,7 +5,7 @@
 # This is a POSIX.1-2014 compliant Makefile. It is known to work with GNU Make, NetBSD Make and PDP Make.
 # https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html
 .POSIX:
-.PHONY: all clean dist install uninstall options test testsuite runtestsuite samples runsamples lint clangtidy shellcheck tools unicode
+.PHONY: all clean dist install uninstall options test units rununits samples runsamples lint clangtidy shellcheck tools unicode
 .SUFFIXES: .cpp .o
 
 # distribution version
@@ -59,7 +59,7 @@ DISTDOCFILES = CHANGELOG.md LICENSE.md README.md
 DISTPROJFILES = CMakeLists.txt Makefile runsamples.sh runtests.sh .clang-tidy .editorconfig .gitattributes .gitignore
 DISTFILES = $(DISTDOCFILES) $(DISTPROJFILES) $(DISTDIRS)
 
-all: options testsuite samples
+all: options units samples
 
 .cpp.o:
 	@echo CXX $<
@@ -82,12 +82,15 @@ $(TESTS_BIN): $(TESTS_OBJ)
 	@echo LD $@
 	@$(CXX) -o $@ $@.o $(LDFLAGS)
 
-testsuite: $(TESTS_BIN)
+units: $(TESTS_BIN)
 
-runtestsuite: testsuite
+rununits: units
 	@sh runtests.sh $(TESTS_BIN)
 
-test: runtestsuite runsamples
+test: units samples
+	@sh runtests.sh $(TESTS_BIN)
+	@echo
+	@sh runsamples.sh $(SAMPLES_TESTPLANS)
 
 clangtidy:
 	@$(CLANGTIDY) --quiet $(CXXFLAGS:%=--extra-arg=%) $(HEADERS)
