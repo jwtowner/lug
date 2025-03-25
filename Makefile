@@ -9,7 +9,7 @@
 .SUFFIXES: .cpp .o
 
 # distribution version
-VERSION = 0.5.0
+VERSION = 0.6.0
 
 # unicode character database version
 UCD_VERSION = 16.0.0

@@ -5,7 +5,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(
-  lug VERSION 0.5.0
+  lug VERSION 0.6.0
   DESCRIPTION "Embedded DSL for PE grammar parser combinators in C++"
   HOMEPAGE_URL "https://github.com/jwtowner/lug"
   LANGUAGES CXX)

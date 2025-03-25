@@ -1,6 +1,8 @@
 # Changelog
 
-## Release v0.5.0 (Under Development)
+## Release v0.6.0 (Under Development)
+
+## Release v0.5.0 (March 18th, 2025)
 
 * Implemented collection and object attribute directives. The new `collect<C>[e]` directive synthesizes a sequence or associative container type `C` consisting of elements gathered from the inherited or synthesized attributes in expression `e`. Likewise, there also new `synthesize<C,A...>[e]`, `synthesize_shared<C,A...>[e]` and `synthesize_unique<C,A...>[e]` directives for synthesizing objects, shared pointers and unique pointers respectively, constructed from the component attributes in expression `e`.
 * Implemented `synthesize_collect` directive that combines `collect` and `synthesize` directives together for improved code readability and reduced boilerplate when constructing complex data structures from parsed elements. This is particularly useful for building nested collections like arrays of objects or maps with complex value types.
