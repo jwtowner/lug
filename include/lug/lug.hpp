@@ -102,25 +102,25 @@ struct alignas(std::uint_least64_t) instruction
 	std::uint_least16_t immediate16;
 	std::int_least32_t offset32;
 
-	static constexpr std::uint_least32_t min_offset_mask = 0xffff0000U;
-	static constexpr std::uint_least32_t max_offset_mask = 0x0000ffffU;
-	static constexpr unsigned int max_offset_shift = 16;
+	static constexpr std::uint_least32_t limit_mask = 0x0000ffffU;
+	static constexpr std::uint_fast16_t max_limit_bias = 1;
+	static constexpr unsigned int max_limit_shift = 16;
 
-	[[nodiscard]] static constexpr std::int_least32_t packminmax(std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] static constexpr std::int_least32_t pack_min_max(std::uint_fast16_t nmin, std::uint_fast16_t nmax)
 	{
-		auto const nmin16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmin, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
-		auto const nmax16 = detail::checked_cast<std::uint_least32_t, program_limit_error>(nmax + 1U, 0U, (std::numeric_limits<std::uint_least16_t>::max)());
-		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << max_offset_shift));
+		auto const nmin16 = static_cast<std::uint_least32_t>(nmin) & limit_mask;
+		auto const nmax16 = static_cast<std::uint_least32_t>(nmax + max_limit_bias) & limit_mask;
+		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << max_limit_shift));
 	}
 
-	[[nodiscard]] constexpr std::size_t unpackmin() const noexcept
+	[[nodiscard]] constexpr std::uint_fast16_t unpack_min() const noexcept
 	{
-		return static_cast<std::uint_least32_t>(offset32) & min_offset_mask;
+		return static_cast<std::uint_fast16_t>(static_cast<std::uint_least32_t>(offset32) & limit_mask);
 	}
 
-	[[nodiscard]] constexpr std::size_t unpackmax() const noexcept
+	[[nodiscard]] constexpr std::uint_fast16_t unpack_max() const noexcept
 	{
-		return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) & max_offset_mask) >> max_offset_shift) - 1U;
+		return static_cast<std::uint_fast16_t>((static_cast<std::uint_least32_t>(offset32) >> max_limit_shift) & limit_mask) - max_limit_bias;
 	}
 };
 
@@ -689,6 +689,7 @@ public:
 	[[nodiscard]] instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
 	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
 	void jump_to_here(std::ptrdiff_t addr) { jump_to_target(addr, here()); }
+	std::uint_least16_t add_rune_set(unicode::rune_set&& runes) { return add_item(program_->runesets, std::move(runes)); }
 	std::ptrdiff_t append(instruction instr) { std::ptrdiff_t const addr{here()}; program_->instructions.push_back(instr); return addr; }
 	std::ptrdiff_t append(program const& p) { std::ptrdiff_t const addr{here()}; program_->concatenate(p); return addr; }
 	std::ptrdiff_t encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
@@ -699,9 +700,8 @@ public:
 	std::ptrdiff_t encode(opcode op, semantic_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->actions, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
-	std::ptrdiff_t match(unicode::rune_set&& runes) { return skip().encode(opcode::match_set, add_item(program_->runesets, std::move(runes)), 0); }
+	std::ptrdiff_t encode_min_max(opcode op, std::uint_fast16_t nmin, std::uint_fast16_t nmax, std::uint_least16_t imm16 = 0, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, instruction::pack_min_max(nmin, nmax)}); }
 	std::ptrdiff_t match_any() { return skip().encode(opcode::match_any); }
-	std::ptrdiff_t match_eps() { return skip(directives::lexeme).encode(opcode::match, std::string_view{}); }
 
 	std::ptrdiff_t call(program const& p, std::uint_least16_t prec, [[maybe_unused]] bool allow_inlining = true)
 	{
@@ -756,22 +756,24 @@ public:
 		}
 	}
 
+	std::ptrdiff_t encode_char_or_set(opcode octet_op, opcode set_op, char c, std::uint_fast16_t nmin = 0, std::uint_fast16_t nmax = (std::numeric_limits<std::uint_fast16_t>::max)())
+	{
+		if ((mode() & directives::caseless) != directives::none) {
+			auto const rune = static_cast<char32_t>(static_cast<unsigned char>(c));
+			constexpr auto use_set_mask = unicode::ptype::Alphabetic | unicode::ptype::Ascii;
+			if (auto const properties = unicode::query(rune).properties(); (properties & use_set_mask) == use_set_mask)
+				return encode_min_max(set_op, nmin, nmax, add_rune_set(unicode::sort_and_optimize(unicode::rune_set{rune, unicode::tocasefold(rune)})));
+		}
+		return encode_min_max(octet_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(c)));
+	}
+
 	std::ptrdiff_t match(std::string_view subject)
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
-		if ((mode() & directives::caseless) != directives::none) {
-			if (subject.size() == 1) {
-				auto const rune = static_cast<char32_t>(static_cast<unsigned char>(subject.front()));
-				if (auto const properties = unicode::query(rune).properties(); (properties & unicode::ptype::Ascii) != unicode::ptype::None) {
-					if ((properties & unicode::ptype::Alphabetic) != unicode::ptype::None)
-						return encode(opcode::match_set, add_item(program_->runesets, unicode::sort_and_optimize(unicode::rune_set{rune, unicode::tocasefold(rune)})), 0);
-					return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(rune));
-				}
-			}
-			return encode(opcode::match_cf, utf8::tocasefold(subject));
-		}
 		if (subject.size() == 1)
-			return encode(opcode::match_octet, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(subject.front())));
+			return encode_char_or_set(opcode::match_octet, opcode::match_set, subject.front());
+		if (!subject.empty() && ((mode() & directives::caseless) != directives::none))
+			return encode(opcode::match_cf, utf8::tocasefold(subject));
 		return encode(opcode::match, subject);
 	}
 
@@ -796,19 +798,30 @@ public:
 			encode(opcode::skip_space);
 	}
 
-	bool should_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme) const
+	{
+		return ((((mode_.back() | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip);
+	}
+
+	encoder& commit_eps(directives callee_mode = directives::eps)
 	{
 		directives& curr_mode = mode_.back();
-		directives const prev_mode = curr_mode;
-		curr_mode &= ~(callee_mode & directives::eps);
 		if (entry_mode_ == directives::none)
-			entry_mode_ = (prev_mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		return ((((prev_mode | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip);
+			entry_mode_ = (curr_mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
+		curr_mode &= ~(callee_mode & directives::eps);
+		return *this;
+	}
+
+	[[nodiscard]] bool prepare_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	{
+		bool const result = should_skip(callee_mode, callee_skip);
+		commit_eps(callee_mode);
+		return result;
 	}
 
 	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
 	{
-		if (should_skip(callee_mode, callee_skip))
+		if (prepare_skip(callee_mode, callee_skip))
 			encode(opcode::skip_space);
 		return *this;
 	}
@@ -1023,12 +1036,12 @@ class basic_regular_expression : public terminal_encoder_expression_interface<ba
 			if (!runes.empty() && classes == unicode::ctype::none) {
 				if (circumflex)
 					runes = unicode::negate(runes);
-				encoder.match(std::move(runes));
+				encoder.skip().encode(opcode::match_set, encoder.add_rune_set(std::move(runes)));
 			} else {
 				if (circumflex)
 					encoder.encode(opcode::choice, 2 + (!runes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0), 0, 0);
 				if (!runes.empty())
-					encoder.match(std::move(runes));
+					encoder.skip().encode(opcode::match_set, encoder.add_rune_set(std::move(runes)));
 				if (classes != unicode::ctype::none)
 					encoder.match_class<opcode::match_any_of>(classes);
 				if (circumflex) {
@@ -1074,7 +1087,8 @@ struct char32_range_expression : terminal_encoder_expression_interface<char32_ra
 	char32_t start;
 	char32_t end;
 	constexpr char32_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, d.mode(), start, end))); return m; }
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_set, d.add_rune_set(make_rune_set(d.mode()))); return m; }
+	[[nodiscard]] unicode::rune_set make_rune_set(directives mode) const { return unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, mode, start, end)); }
 };
 
 template <class Target>
@@ -1203,24 +1217,23 @@ struct directive_modifier
 
 struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
 struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
-struct nop_expression : terminal_encoder_expression_interface<nop_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
-struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_eps(); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.should_skip() ? 1 : 0); return m; } };
-struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.should_skip() ? 1 : 0); return m; } };
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); return m; } };
+struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); return m; } };
+struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
+
+template <opcode Op, class Property>
+struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Op, Property>>
+{
+	Property property;
+	constexpr explicit match_class_expression(Property p) noexcept : property{p} {}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class<Op>(property); return m; }
+};
 
 template <opcode Op>
 struct match_class_combinator
 {
-	template <class Property>
-	struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Property>>
-	{
-		Property property;
-		constexpr explicit match_class_expression(Property p) noexcept : property{p} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class<Op>(property); return m; }
-	};
-
 	template <class Property, class = std::enable_if_t<unicode::is_property_enum_v<Property>>>
-	[[nodiscard]] constexpr match_class_expression<std::decay_t<Property>> operator()(Property p) const { return match_class_expression<std::decay_t<Property>>{p}; }
+	[[nodiscard]] constexpr match_class_expression<Op,std::decay_t<Property>> operator()(Property p) const { return match_class_expression<Op, std::decay_t<Property>>{p}; }
 };
 
 struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator<opcode::match_any_of>
@@ -1231,7 +1244,16 @@ struct match_any_expression : terminal_encoder_expression_interface<match_any_ex
 template <unicode::ctype Property>
 struct ctype_expression : terminal_encoder_expression_interface<ctype_expression<Property>>
 {
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class<opcode::match_any_of>(Property); return m; }
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
+	{
+		if constexpr (Property == unicode::ctype::blank)
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
+		else if constexpr (Property == unicode::ctype::space)
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
+		else
+			d.match_class<opcode::match_any_of>(Property);
+		return m;
+	}
 };
 
 template <bool Value>
@@ -1364,15 +1386,216 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 	}
 };
 
-template <class E1>
-struct repetition_expression : unary_encoder_expression_interface<repetition_expression<E1>, E1>
+inline constexpr std::uint_fast16_t forever = (std::numeric_limits<std::uint_fast16_t>::max)();
+inline constexpr std::uint_fast16_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
+
+template <class E>
+inline constexpr bool is_repetition_expression_always_optimizable_v =
+	std::is_same_v<E, match_any_expression> ||
+	std::is_same_v<E, ctype_expression<unicode::ctype::blank>> ||
+	std::is_same_v<E, ctype_expression<unicode::ctype::space>> ||
+	std::is_same_v<E, char_expression> ||
+	std::is_same_v<E, char32_range_expression>;
+
+template <class E>
+inline constexpr bool is_repetition_expression_optimizable_v =
+	is_repetition_expression_always_optimizable_v<E> ||
+	std::is_same_v<E, string_expression>;
+
+template <std::uint_fast16_t NMin, std::uint_fast16_t NMax, class E>
+[[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, [[maybe_unused]] encoder& d)
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1>, E1>;
-	using base_type::base_type;
+	if constexpr (is_repetition_expression_always_optimizable_v<std::decay_t<E>>) {
+		if (d.should_skip())
+			return false;
+		d.commit_eps();
+		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>) {
+			d.encode_min_max(opcode::repeat_any, NMin, NMax);
+		} else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::blank>>) {
+			d.encode_min_max(opcode::repeat_blank, NMin, NMax);
+		} else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>) {
+			d.encode_min_max(opcode::repeat_space, NMin, NMax);
+		} else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>) {
+			d.encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.c, NMin, NMax);
+		} else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression>) {
+			d.encode_min_max(opcode::repeat_set, NMin, NMax, e.make_rune_set(d.mode()));
+		}
+		return true;
+	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
+		if (d.should_skip() || (e.text.size() != 1))
+			return false;
+		d.commit_eps().encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.text.front(), NMin, NMax);
+		return true;
+	} else {
+		static_assert(detail::always_false_v<E>, "unsupported repetition expression");
+	}
+}
+
+template <class E1, std::uint_fast16_t NMin, std::uint_fast16_t NMax>
+struct repetition_expression : unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>
+{
+	static_assert((NMin > 0) && (NMin < NMax) && (NMax <= max_repetitions));
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
 	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<NMin, NMax>(this->e1, d))
+				return m;
+		auto const start = d.encode(opcode::jump);
+		auto const loop_body = d.here();
+		d.dpsh(directives::postskip, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(NMin > 0 ? directives::eps : directives::none);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		for (std::uint_fast16_t i = 0; i < NMin; ++i)
+			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+		std::ptrdiff_t const loop_end = (3 * static_cast<std::ptrdiff_t>(NMax - NMin)) + d.here();
+		for (std::uint_fast16_t i = NMin; i < NMax; ++i) {
+			d.encode(opcode::choice, (loop_end - d.here() - 1), 0, 0);
+			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+			auto const commit = d.encode(opcode::commit);
+			d.jump_to_here(commit);
+		}
+		return m2;
+	}
+};
+
+template <class E1, std::uint_fast16_t NCount>
+struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>
+{
+	static_assert((NCount > 0) && (NCount <= max_repetitions));
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<NCount, NCount>(this->e1, d))
+				return m;
+		auto const start = d.encode(opcode::jump);
+		auto const loop_body = d.here();
+		d.dpsh(directives::postskip, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::eps);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		for (std::uint_fast16_t i = 0; i < NCount; ++i)
+			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+		return m2;
+	}
+};
+
+template <class E1, std::uint_fast16_t NMin>
+struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>
+{
+	static_assert((NMin > 0) && (NMin <= max_repetitions));
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<NMin, forever>(this->e1, d))
+				return m;
+		auto const start = d.encode(opcode::jump);
+		auto const loop_body = d.here();
+		d.dpsh(directives::postskip, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(NMin > 0 ? directives::eps : directives::none);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		for (std::uint_fast16_t i = 0; i < NMin; ++i)
+			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+		auto const choice = d.encode(opcode::choice);
+		auto const loop = d.here();
+		d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+		auto const commit = d.encode(opcode::commit_partial);
+		d.jump_to_here(choice);
+		d.jump_to_target(commit, loop);
+		return m2;
+	}
+};
+
+template <class E1, std::uint_fast16_t NMax>
+struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>
+{
+	static_assert((NMax > 0) && (NMax <= max_repetitions));
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<0, NMax>(this->e1, d))
+				return m;
+		auto const start = d.encode(opcode::jump);
+		auto const loop_body = d.here();
+		d.dpsh(directives::postskip, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::none);
+		d.encode(opcode::ret);
+		d.jump_to_here(start);
+		std::ptrdiff_t const loop_end = (3 * static_cast<std::ptrdiff_t>(NMax)) + d.here();
+		for (std::uint_fast16_t i = 0; i < NMax; ++i) {
+			d.encode(opcode::choice, (loop_end - d.here() - 1), 0, 0);
+			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
+			auto const commit = d.encode(opcode::commit);
+			d.jump_to_here(commit);
+		}
+		return m2;
+	}
+};
+
+template <class E1>
+struct repetition_expression<E1, 0, 0> : unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	template <class M> [[nodiscard]] decltype(auto) evaluate([[maybe_unused]] encoder& /*d*/, M const& m) const { return m; }
+};
+
+template <class E1>
+struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<0, 1>(this->e1, d))
+				return m;
+		auto const choice = d.encode(opcode::choice);
+		d.dpsh(directives::none, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::eps);
+		auto const commit = d.encode(opcode::commit);
+		d.jump_to_here(choice);
+		d.jump_to_here(commit);
+		return m2;
+	}
+};
+
+template <class E1>
+struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<0, forever>(this->e1, d))
+				return m;
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
 		d.dpsh(directives::postskip, directives::none);
@@ -1386,38 +1609,77 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 };
 
 template <class E1>
-struct repetition_min_max_expression : unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>
+struct repetition_expression<E1, 1, 1> : unary_encoder_expression_interface<repetition_expression<E1, 1, 1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<repetition_min_max_expression<E1>, E1>;
-	unsigned int min_count;
-	unsigned int max_count;
-	repetition_min_max_expression(E1 const& e, unsigned int nmin, unsigned int nmax) : base_type{e}, min_count{nmin}, max_count{nmax} {}
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 1>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	template <class M> [[nodiscard]] decltype(auto) evaluate(encoder& d, M const& m) const { return this->e1.evaluate(d, m); }
+};
+
+template <class E1>
+struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repetition_expression<E1, 1, 2>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 2>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
 	template <class M>
-	[[nodiscard]] decltype(auto) evaluate(encoder& d, M const& m) const
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
-		auto const start = d.encode(opcode::jump);
-		auto const subexpression = d.here();
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<1, 2>(this->e1, d))
+				return m;
+		(void)this->e1.evaluate(d, m);
+		d.dpsh(directives::preskip, directives::postskip);
+		auto const choice = d.encode(opcode::choice);
+		d.dpsh(directives::none, directives::none);
+		auto m2 = this->e1.evaluate(d, m);
+		d.dpop(directives::eps);
+		auto const commit = d.encode(opcode::commit);
+		d.jump_to_here(choice);
+		d.jump_to_here(commit);
+		d.dpop(directives::eps);
+		return m2;
+	}
+};
+
+template <class E1>
+struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interface<repetition_expression<E1, 1, forever>, E1>
+{
+	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, forever>, E1>;
+	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+
+	template <class M>
+	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	{
+		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+			if (repetition_encode_optimized<1, forever>(this->e1, d))
+				return m;
+		(void)this->e1.evaluate(d, m);
+		d.dpsh(directives::preskip, directives::postskip);
+		auto const choice = d.encode(opcode::choice);
+		auto const expression = d.here();
 		d.dpsh(directives::postskip, directives::none);
 		auto m2 = this->e1.evaluate(d, m);
-		d.dpop(min_count > 0 ? directives::eps : directives::none);
-		d.encode(opcode::ret);
-		d.jump_to_here(start);
-		for (unsigned int i = 0; i < min_count; ++i)
-			d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
-		if (max_count > min_count) {
-			std::vector<std::ptrdiff_t> choices;
-			choices.reserve(max_count - min_count);
-			for (unsigned int i = min_count; i < max_count; ++i) {
-				choices.emplace_back(d.encode(opcode::choice));
-				d.encode(opcode::call, (subexpression - d.here() - 1), 0, 0);
-				auto const commit = d.encode(opcode::commit);
-				d.jump_to_here(commit);
-			}
-			for (auto const& choice : choices)
-				d.jump_to_here(choice);
-		}
+		d.dpop(directives::none);
+		auto const commit = d.encode(opcode::commit_partial);
+		d.jump_to_here(choice);
+		d.jump_to_target(commit, expression);
+		d.dpop(directives::eps);
 		return m2;
+	}
+};
+
+template <std::uint_fast16_t NMin, std::uint_fast16_t NMax>
+struct repetition_combinator
+{
+	static_assert((NMin <= NMax), "min count must be less than or equal to max count");
+	static_assert((NMin <= max_repetitions), "min count must be less than or equal to max repetitions");
+	static_assert(((NMax <= max_repetitions) || (NMax == forever)), "max count must be less than or equal to max repetitions or forever");
+
+	template <class E, class = std::enable_if_t<is_expression_v<E>>>
+	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
+	{
+		return repetition_expression<std::decay_t<decltype(make_expression(e))>, NMin, NMax>{make_expression(e)};
 	}
 };
 
@@ -1590,7 +1852,6 @@ struct local_to_block_expression : unary_encoder_expression_interface<local_to_b
 
 template <class X1> negative_lookahead_expression(X1&&) -> negative_lookahead_expression<std::decay_t<X1>>;
 template <class X1> positive_lookahead_expression(X1&&) -> positive_lookahead_expression<std::decay_t<X1>>;
-template <class X1> repetition_expression(X1&&) -> repetition_expression<std::decay_t<X1>>;
 template <class X1, class X2> choice_expression(X1&&, X2&&) -> choice_expression<std::decay_t<X1>, std::decay_t<X2>>;
 template <class X1, class X2> sequence_expression(X1&&, X2&&) -> sequence_expression<std::decay_t<X1>, std::decay_t<X2>>;
 template <class X1, class Action> action_expression(X1&&, Action&&) -> action_expression<std::decay_t<X1>, std::decay_t<Action>>;
@@ -1741,17 +2002,17 @@ struct synthesize_unique_factory
 
 namespace language {
 
-using environment = lug::environment; using grammar = lug::grammar; using rule = lug::rule; using lug::start;
-using error_context = lug::error_context; using error_response = lug::error_response; using lug::recover_with; using lug::failure;
-using syntax = lug::syntax; using syntax_position = lug::syntax_position; using syntax_range = lug::syntax_range;
+using lug::environment; using lug::grammar; using lug::rule; using lug::start; using lug::forever; using lug::max_repetitions;
+using lug::error_context; using lug::error_response; using lug::recover_with; using lug::failure;
+using lug::syntax; using lug::syntax_position; using lug::syntax_range;
 using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype; using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
 inline constexpr directive_modifier<directives::caseless, directives::none, directives::eps> caseless{};
 inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
 inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
 inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
-inline constexpr accept_expression accept{}; inline constexpr cut_expression cut{}; inline constexpr nop_expression nop{};
-inline constexpr eps_expression eps{}; inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{};
+inline constexpr accept_expression accept{}; inline constexpr cut_expression cut{};
+inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator<opcode::match_all_of> all{}; inline constexpr match_class_combinator<opcode::match_none_of> none{};
 inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
 inline constexpr ctype_expression<ctype::upper> upper{}; inline constexpr ctype_expression<ctype::digit> digit{}; inline constexpr ctype_expression<ctype::xdigit> xdigit{};
@@ -1765,6 +2026,10 @@ inline constexpr symbol_match_offset_combinator<opcode::symbol_tail, opcode::sym
 inline constexpr symbol_match_combinator<opcode::symbol_all, opcode::symbol_all_cf> match_all{};
 inline constexpr symbol_match_combinator<opcode::symbol_any, opcode::symbol_any_cf> match_any{};
 inline constexpr symbol_match_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match{};
+template <std::uint_fast16_t NMin, std::uint_fast16_t NMax> inline constexpr repetition_combinator<NMin, NMax> repeat{};
+template <std::uint_fast16_t NMin> inline constexpr repetition_combinator<NMin, forever> at_least{};
+template <std::uint_fast16_t NMax> inline constexpr repetition_combinator<0, NMax> at_most{};
+template <std::uint_fast16_t N> inline constexpr repetition_combinator<N, N> exactly{};
 template <class Container, class... ElementArgs> inline constexpr collect_combinator<Container, ElementArgs...> collect{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_factory, T, Args...> synthesize{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_shared_factory, T, Args...> synthesize_shared{};
@@ -1813,14 +2078,14 @@ inline namespace operators {
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{make_expression(e)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{make_expression(e)}; } // NOLINT(google-runtime-operator)
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression{make_expression(e)}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, forever>{make_expression(e)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2) { return choice_expression{make_expression(e1), make_expression(e2)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), make_expression(e2)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { auto const& x = make_expression(e); return x > *x; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return e | eps; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 1, forever>{make_expression(e)}; }
+template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, 1>{make_expression(e)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e) { return cut > e; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e, int) { return e > cut; }
 
@@ -1905,19 +2170,6 @@ inline constexpr struct
 }
 raise{};
 
-inline constexpr struct
-{
-	struct repeat_from_to
-	{
-		unsigned int min_count;
-		unsigned int max_count;
-		template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator[](E const& e) const noexcept { return repetition_min_max_expression{make_expression(e), min_count, max_count}; }
-	};
-	[[nodiscard]] constexpr auto operator()(unsigned int count) const noexcept { return repeat_from_to{count, count}; }
-	[[nodiscard]] constexpr auto operator()(unsigned int min_count, unsigned int max_count) const noexcept { return repeat_from_to{min_count, max_count}; }
-}
-repeat{};
-
 template <error_response Response = error_response::resume, class Pattern, class = std::enable_if_t<is_expression_v<Pattern>>>
 [[nodiscard]] constexpr auto sync(Pattern const& pattern)
 {
@@ -1937,15 +2189,15 @@ template <error_response Response = error_response::resume, class DefaultValue>
 [[nodiscard]] constexpr auto with_value(DefaultValue&& default_value)
 {
 	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
-		return noskip[nop < std::forward<DefaultValue>(default_value) ^ Response];
+		return noskip[eps < std::forward<DefaultValue>(default_value) ^ Response];
 	else
-		return noskip[nop < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
+		return noskip[eps < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
 }
 
 template <error_response Response>
 [[nodiscard]] constexpr auto with_response()
 {
-	return noskip[nop ^ Response];
+	return noskip[eps ^ Response];
 }
 
 } // namespace language
@@ -2399,10 +2651,10 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn, class... ExtraArgs>
-	[[nodiscard]] std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
+	[[nodiscard]] std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
 	{
 		std::size_t const i = sr;
-		std::size_t n = 0;
+		std::uint_fast16_t n = 0;
 		for ( ; n <= nmax; ++n)
 			if (match(*this, sr, extra_args...) != 0)
 				break;
@@ -2413,10 +2665,10 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	[[nodiscard]] std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match)
 	{
 		std::size_t const i = sr;
-		std::size_t n = 0;
+		std::uint_fast16_t n = 0;
 		auto const [first, last] = buffer_range(i);
 		auto curr = first;
 		for ( ; n <= nmax; ++n) {
@@ -2456,12 +2708,12 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
 		} else {
-			if ((nmin == 0) && (nmax == (std::numeric_limits<std::size_t>::max)())) {
+			if ((nmin == 0) && (nmax == (std::numeric_limits<std::uint_fast16_t>::max)())) {
 				sr = input_source_.buffer().size();
 				return 0;
 			}
@@ -2478,7 +2730,7 @@ class basic_parser : public parser_base
 		return match_with(sr, utf8::match_blank);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
@@ -2491,7 +2743,7 @@ class basic_parser : public parser_base
 		return match_with(sr, utf8::match_space);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
@@ -2499,32 +2751,32 @@ class basic_parser : public parser_base
 			return repeat_match_buffered(sr, nmin, nmax, utf8::match_space);
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t flags)
+	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
 	{
 		std::size_t i = sr;
-		if (flags != 0)
-			(void)repeat_blank(i, 0, (std::numeric_limits<std::size_t>::max)());
+		if (mode != 0)
+			(void)repeat_blank(i, 0, forever);
 		if (std::ptrdiff_t const eol_fail_count = match_with(i, utf8::match_eol); eol_fail_count != 0)
 			return eol_fail_count;
 		sr = i;
 		return 0;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t flags)
+	[[nodiscard]] std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
 	{
 		std::size_t i = sr;
 		if constexpr (detail::input_source_has_options<InputSource>::value) {
 			if ((input_source_.options() & source_options::interactive) != source_options::none) {
-				if (flags != 0)
-					(void)repeat_match_buffered(i, 0, (std::numeric_limits<std::size_t>::max)(), utf8::match_space);
+				if (mode != 0)
+					(void)repeat_match_buffered(i, 0, forever, utf8::match_space);
 				if (i < input_source_.buffer().size())
 					return 1;
 				sr = i;
 				return 0;
 			}
 		}
-		if (flags != 0)
-			(void)repeat_space(i, 0, (std::numeric_limits<std::size_t>::max)());
+		if (mode != 0)
+			(void)repeat_space(i, 0, forever);
 		if (available(i))
 			return 1;
 		sr = i;
@@ -2540,15 +2792,15 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_octet(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t octet)
+	[[nodiscard]] std::ptrdiff_t repeat_octet(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, std::uint_least8_t octet)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_octet), octet);
 		} else {
 			std::size_t const i = sr;
 			auto const [first, last] = buffer_range(i);
-			auto const last_nmax = (static_cast<std::size_t>(std::distance(first, last)) > nmax) ? (first + static_cast<std::ptrdiff_t>(nmax)) : last;
-			auto const next = std::find_if_not(first, last_nmax, [octet](auto const c) { return static_cast<unsigned char>(c) == octet; });
+			auto const tail = (static_cast<std::size_t>(std::distance(first, last)) <= static_cast<std::size_t>(nmax)) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
+			auto const next = std::find_if_not(first, tail, [octet](auto const c) { return static_cast<unsigned char>(c) == octet; });
 			if (auto const count = static_cast<std::size_t>(std::distance(first, next)); count >= nmin) {
 				sr = i + count;
 				return 0;
@@ -2588,7 +2840,7 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
@@ -3060,28 +3312,28 @@ public:
 					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::repeat_any: {
-					fail_count = repeat_any(registers_.sr, instr.unpackmin(), instr.unpackmax());
+					fail_count = repeat_any(registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_blank: case opcode::skip_blank: {
-					fail_count = repeat_blank(registers_.sr, instr.unpackmin(), instr.unpackmax());
+					fail_count = repeat_blank(registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_space: case opcode::skip_space: {
-					fail_count = repeat_space(registers_.sr, instr.unpackmin(), instr.unpackmax());
+					fail_count = repeat_space(registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_octet: {
-					fail_count = repeat_octet(registers_.sr, instr.unpackmin(), instr.unpackmax(), instr.immediate8);
+					fail_count = repeat_octet(registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
 				} break;
 				case opcode::repeat_set: {
-					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_rune_set_matcher(instr));
+					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_rune_set_matcher(instr));
 				} break;
 				case opcode::repeat_all_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::all_of, instr));
+					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::all_of, instr));
 				} break;
 				case opcode::repeat_any_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::any_of, instr));
+					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::any_of, instr));
 				} break;
 				case opcode::repeat_none_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpackmin(), instr.unpackmax(), make_property_matcher(unicode::none_of, instr));
+					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::none_of, instr));
 				} break;
 				case opcode::condition_test: {
 					fail_count = (environment_->has_condition(str) != (instr.immediate8 != 0)) ? 1 : 0;
@@ -3213,7 +3465,6 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 {
 	using namespace language;
 	// NOLINTBEGIN(bugprone-chained-comparison)
-	rule const Empty = eps                                    <[](generator& g) { g.encoder.match_eps(); };
 	rule const Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
 	rule const Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.str()); }
 			   | str("[:") > +(!chr(':') > any) > str(":]")   <[](generator& g, syntax const& x) { g.bracket_class(x.str().substr(2, x.range().size - 4)); }
@@ -3222,7 +3473,7 @@ LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 			   > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
 	rule const Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.str()); };
 	// NOLINTEND(bugprone-chained-comparison)
-	return start((+(Dot | Bracket | Sequence) | Empty) > eoi, nop);
+	return start(~(+(Dot | Bracket | Sequence)) > eoi, eps);
 }
 
 LUG_DIAGNOSTIC_POP

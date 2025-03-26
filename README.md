@@ -6,7 +6,7 @@ lug
 [![Tidy](https://github.com/jwtowner/lug/actions/workflows/tidy.yml/badge.svg)](https://github.com/jwtowner/lug/actions/workflows/tidy.yml)
 [![License](https://img.shields.io/packagist/l/doctrine/orm.svg)](https://github.com/jwtowner/lug/blob/master/LICENSE.md)
 ===
-A C++ embedded domain specific language for expressing parsers as extended [parsing expression grammars (PEGs)](https://en.wikipedia.org/wiki/Parsing_expression_grammar)
+A C++ embedded domain specific language for [parsing expression grammars (PEGs)](https://en.wikipedia.org/wiki/Parsing_expression_grammar)
 
 ![lug](https://github.com/jwtowner/lug/raw/master/doc/lug_logo_large.png)
 
@@ -15,7 +15,7 @@ Features
 - Natural syntax resembling external parser generator languages, with support for attributes and semantic actions.
 - Ability to handle context-sensitive grammars with symbol tables, conditions and syntactic predicates.
 - Generated parsers are compiled to special-purpose bytecode and executed in a virtual parsing machine.
-- Clear separation of syntactic and lexical rules, with the ability to customize implicit whitespace skipping.
+- Implicit whitespace skipping with clear separation of syntactic and lexical rules.
 - Support for direct and indirect left recursion, with precedence levels to disambiguate subexpressions with mixed left/right recursion.
 - Full support for UTF-8 text parsing, including Level 1 and partial Level 2 compliance with the UTS #18 Unicode Regular Expressions technical standard.
 - Error handling and recovery with labeled failures, recovery rules and error handlers.
@@ -161,8 +161,10 @@ Quick Reference
 | `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default). |
 | `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace. |
 | `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping. |
-| `repeat(N)⁠[e]` | Matches exactly *N* occurences of expression *e*. |
-| `repeat(N,M)⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
+| `repeat<N,M>⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
+| `at_least<N>⁠[e]` | Matches at least *N* occurences of expression *e*. |
+| `at_most<N>⁠[e]` | Matches at most *N* occurences of expression *e*. |
+| `exactly<N>⁠[e]` | Matches exactly *N* occurences of expression *e*. |
 | `on(C)⁠[e]` | Sets the condition *C* to true for the scope of subexpression *e*. |
 | `off(C)⁠[e]` | Sets the condition *C* to false for the scope of subexpression *e* (the default). |
 | `symbol(S)⁠[e]` | Pushes a symbol definition for symbol *S* with value equal to the captured input matching subexpression *e*. |
@@ -172,6 +174,7 @@ Quick Reference
 | `collect<C>⁠[e]` | Synthesizes a collection attribute of container type *C* from the attributes inherited from or synthesized within expression *e*. |
 | `collect<C,A...>⁠[e]` | Synthesizes a collection attribute of container type *C* consisting of elements, each of which are constructed from sequences of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
 | `synthesize<T,A...>⁠[e]` | Synthesizes an object of type *T* constructed from a sequence of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
+| `synthesize_collect<T,C,A...>⁠[e]` | Synthesizes an object of type *T* constructed from a container of type *C* composed of the attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
 | `synthesize_shared<T>⁠[e]` | Synthesizes an object of type `std::shared_ptr<T>` by calling `std::make_shared` passing in an attribute of type *T* inherited from or synthesized within expression *e*. |
 | `synthesize_shared<T,A...>⁠[e]` | Synthesizes an object of type `std::shared_ptr<T>` by calling `std::make_shared` passing in a sequence of attributes inherited from or synthesized within expression *e* and that match the types of parameter pack *A...*. |
 | `synthesize_unique<T>⁠[e]` | Synthesizes an object of type `std::unique_ptr<T>` by calling `std::make_unique` passing in an attribute of type *T* inherited from or synthesized within expression *e*. |
@@ -189,10 +192,9 @@ Quick Reference
 
 | Terminal | Description |
 | --- | --- |
-| `nop` | No operation, does not emit any instructions. |
-| `eps` | Matches the empty string. |
 | `eoi` | Matches the end of the input sequence. |
-| `eol` | Matches a Unicode line-ending. |
+| `eol` | Matches a line-ending. |
+| `eps` | Matches the empty string. Equivalent to no-operation. |
 | `cut` | Emits a cut operation, accepting semantic actions up to current match prefix unless there were syntax errors, and draining the input source. |
 | `accept` | Accepts all semantic actions up to current match prefix, even after recovering from syntax errors. Does not drain the input source. |
 | `raise⁠(f)` | Raises the labeled failure *f* to be handled by the top level error handler and recovery rule. |

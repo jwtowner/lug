@@ -229,7 +229,7 @@ void test_calculator_errors_with_recovery_resume()
 	Stmt = Expr[FNoExpr] > (
 	       &')'_cx > raise(FLParen)
 	     | eoi[FInvalid]
-	     ) > ( when("evaluate-errors") > accept | nop ) // Force acceptance of semantic actions
+	     ) > ( when("evaluate-errors") > accept | eps ) // Force acceptance of semantic actions
 	     ^= error_handler;
 
 	// Define grammar with error halting on failure

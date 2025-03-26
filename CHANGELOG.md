@@ -2,7 +2,14 @@
 
 ## Release v0.6.0 (Under Development)
 
-## Release v0.5.0 (March 18th, 2025)
+* Completely redesigned repeat mechanism with a highly optimized implementation that dramatically reduces bytecode size and significantly improves parsing performance for repetitive patterns. Introduced more expressive control directives: `repeat<min,max>[e]` for bounded repetition, `at_least<min>[e]` for minimum repetition, `at_most<max>[e]` for maximum repetition, and `exactly<count>[e]` for fixed repetition.
+* Added specialized repeat opcodes that eliminate redundant stack operations and reduce instruction count for common repetition patterns.
+* Implemented tail-call optimization for repeat operations to prevent stack overflow on deeply nested repetitions.
+* Implemented an optimized whitespace skipping mechanism, replacing the previous implementation for better performance.
+* Fixed critical issues with `eol` and `eoi` combinators that were incorrectly interacting with whitespace skipping logic.
+* Added specialized fast paths for common whitespace patterns to improve parsing speed in typical scenarios.
+
+## Release v0.5.0 (March 18, 2025)
 
 * Implemented collection and object attribute directives. The new `collect<C>[e]` directive synthesizes a sequence or associative container type `C` consisting of elements gathered from the inherited or synthesized attributes in expression `e`. Likewise, there also new `synthesize<C,A...>[e]`, `synthesize_shared<C,A...>[e]` and `synthesize_unique<C,A...>[e]` directives for synthesizing objects, shared pointers and unique pointers respectively, constructed from the component attributes in expression `e`.
 * Implemented `synthesize_collect` directive that combines `collect` and `synthesize` directives together for improved code readability and reduced boilerplate when constructing complex data structures from parsed elements. This is particularly useful for building nested collections like arrays of objects or maps with complex value types.

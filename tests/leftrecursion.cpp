@@ -14,7 +14,7 @@ void test_direct_left_recursion()
 	rule R, S;
 	R = R > chr('a') | chr('a');
 	S = R > !chr('a');
-	grammar G = start(S, nop);
+	grammar G = start(S, eps);
 	assert(lug::parse("a", G));
 	assert(lug::parse("aa", G));
 	assert(lug::parse("aab", G));
@@ -33,7 +33,7 @@ void test_indirect_left_recursion()
 	Q = R > chr('a');
 	R = Q | chr('a');
 	S = R > !chr('a');
-	grammar const G = start(S, nop);
+	grammar const G = start(S, eps);
 	assert(lug::parse("a", G));
 	assert(lug::parse("aa", G));
 	assert(lug::parse("aab", G));
@@ -55,7 +55,7 @@ void test_association_and_precedence()
 	  | E[2] > chr('*') > E[3] <[&out]{ out += '*'; }
 	  | N <[&out](syntax x){ out += x.str(); };
 	S = E > eoi;
-	grammar const G = start(S, nop);
+	grammar const G = start(S, eps);
 	out.clear();
 	assert(lug::parse("1", G) && out == "1");
 	out.clear();
@@ -77,10 +77,9 @@ void test_association_and_precedence()
 void test_hidden_left_recursion()
 {
 	using namespace lug::language;
-	implicit_space_rule Space = nop;
 	rule R = *chr('b') > R > chr('a') | chr('a');
 	rule S = R > !(chr('a') | chr('b'));
-	grammar G = start(S);
+	grammar G = start(S, eps);
 	assert(lug::parse("a", G));
 	assert(lug::parse("aa", G));
 	assert(lug::parse("aa", G));

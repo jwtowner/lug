@@ -21,22 +21,6 @@ void test_empty()
 	assert(!lug::parse("α", G)); // U+03B1 GREEK SMALL LETTER ALPHA
 }
 
-void test_any()
-{
-	using namespace lug::language;
-	rule S = noskip[ any > eoi ];
-	grammar G = start(S);
-	assert(lug::parse("a", G));
-	assert(lug::parse("2", G));
-	assert(lug::parse("z", G));
-	assert(lug::parse("α", G)); // U+03B1 GREEK SMALL LETTER ALPHA
-	assert(!lug::parse("aa", G));
-	assert(!lug::parse("", G));
-	assert(!lug::parse(" a", G));
-	assert(!lug::parse("a ", G));
-	assert(!lug::parse("αa", G)); // U+03B1 GREEK SMALL LETTER ALPHA, FOLLOWED BY LETTER A
-}
-
 void test_eol()
 {
 	using namespace lug::language;
@@ -90,6 +74,22 @@ void test_eol()
 	assert(!lug::parse("\u0085 ", G)); // U+0085 NEL Next Line
 	assert(!lug::parse("\u2028 ", G)); // U+2028 LS Line Separator
 	assert(!lug::parse("\u2029 ", G)); // U+2029 PS Paragraph Separator
+}
+
+void test_any()
+{
+	using namespace lug::language;
+	rule S = noskip[ any > eoi ];
+	grammar G = start(S);
+	assert(lug::parse("a", G));
+	assert(lug::parse("2", G));
+	assert(lug::parse("z", G));
+	assert(lug::parse("α", G)); // U+03B1 GREEK SMALL LETTER ALPHA
+	assert(!lug::parse("aa", G));
+	assert(!lug::parse("", G));
+	assert(!lug::parse(" a", G));
+	assert(!lug::parse("a ", G));
+	assert(!lug::parse("αa", G)); // U+03B1 GREEK SMALL LETTER ALPHA, FOLLOWED BY LETTER A
 }
 
 void test_char()
