@@ -785,8 +785,7 @@ public:
 
 	void dpsh(directives enable, directives disable)
 	{
-		directives const ancestor_mode = mode_.back();
-		mode_.push_back((ancestor_mode & ~disable) | enable);
+		mode_.push_back((mode_.back() & ~disable) | enable);
 	}
 
 	void dpop(directives relay)
@@ -1409,17 +1408,16 @@ template <std::size_t NMin, std::size_t NMax, class E>
 		if (d.should_skip())
 			return false;
 		d.commit_eps();
-		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>) {
+		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>)
 			d.encode_min_max(opcode::repeat_any, NMin, NMax);
-		} else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::blank>>) {
+		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::blank>>)
 			d.encode_min_max(opcode::repeat_blank, NMin, NMax);
-		} else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>) {
+		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>)
 			d.encode_min_max(opcode::repeat_space, NMin, NMax);
-		} else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>) {
+		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>)
 			d.encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.c, NMin, NMax);
-		} else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression>) {
+		else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression>)
 			d.encode_min_max(opcode::repeat_set, NMin, NMax, e.make_rune_set(d.mode()));
-		}
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
 		if (d.should_skip() || (e.text.size() != 1))
@@ -1444,9 +1442,10 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized<NMin, NMax>(this->e1, d))
 				return m;
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(NMin > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
@@ -1467,7 +1466,7 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 template <class E1, std::size_t NCount>
 struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>
 {
-	static_assert((NCount > 0) && (NCount <= max_repetitions));
+	static_assert((NCount > 1) && (NCount <= max_repetitions));
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
@@ -1477,9 +1476,10 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized<NCount, NCount>(this->e1, d))
 				return m;
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(directives::eps);
 		d.encode(opcode::ret);
@@ -1493,7 +1493,7 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 template <class E1, std::size_t NMin>
 struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>
 {
-	static_assert((NMin > 0) && (NMin <= max_repetitions));
+	static_assert((NMin > 1) && (NMin <= max_repetitions));
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
@@ -1503,9 +1503,10 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized<NMin, forever>(this->e1, d))
 				return m;
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(NMin > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
@@ -1535,9 +1536,10 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized<0, NMax>(this->e1, d))
 				return m;
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(directives::none);
 		d.encode(opcode::ret);
@@ -1596,9 +1598,10 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized<0, forever>(this->e1, d))
 				return m;
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(directives::none);
 		auto const commit = d.encode(opcode::commit_partial);
@@ -1629,15 +1632,13 @@ struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repe
 			if (repetition_encode_optimized<1, 2>(this->e1, d))
 				return m;
 		(void)this->e1.evaluate(d, m);
-		d.dpsh(directives::preskip, directives::postskip);
 		auto const choice = d.encode(opcode::choice);
-		d.dpsh(directives::none, directives::none);
+		d.dpsh(directives::preskip, directives::postskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(directives::eps);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.jump_to_here(commit);
-		d.dpop(directives::eps);
 		return m2;
 	}
 };
@@ -1655,16 +1656,15 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 			if (repetition_encode_optimized<1, forever>(this->e1, d))
 				return m;
 		(void)this->e1.evaluate(d, m);
-		d.dpsh(directives::preskip, directives::postskip);
+		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
-		d.dpsh(directives::postskip, directives::none);
+		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
 		d.dpop(directives::none);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, expression);
-		d.dpop(directives::eps);
 		return m2;
 	}
 };
@@ -2076,11 +2076,27 @@ inline namespace operators {
 [[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
 [[nodiscard]] constexpr auto operator ""_fail(char const* s, std::size_t n) { return failure{std::string_view{s, n}}; }
 
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
+[[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2)
+{
+	if constexpr (detail::is_template_instantiation_of_v<E1, choice_expression>)
+		return choice_expression{e1.e1, e1.e2 | e2};
+	else
+		return choice_expression{make_expression(e1), make_expression(e2)};
+}
+
+template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
+[[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2)
+{
+	if constexpr (detail::is_template_instantiation_of_v<E1, sequence_expression>)
+		return sequence_expression{e1.e1, e1.e2 > e2};
+	else
+		return sequence_expression{make_expression(e1), make_expression(e2)};
+}
+
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{make_expression(e)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{make_expression(e)}; } // NOLINT(google-runtime-operator)
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, forever>{make_expression(e)}; }
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2) { return choice_expression{make_expression(e1), make_expression(e2)}; }
-template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2) { return sequence_expression{make_expression(e1), make_expression(e2)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
 template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
@@ -3384,8 +3400,8 @@ public:
 					if (!fail(fail_count))
 						return false;
 					accept_or_drain_if_deferred();
-					fail_count = 0;
 				}
+				fail_count = 0;
 			}
 		}
 		if (!success_)

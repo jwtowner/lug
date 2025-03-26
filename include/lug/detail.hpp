@@ -120,6 +120,10 @@ template <class R, class Fn, class... Args> struct is_invocable_r_exact_impl<std
 template <class R, class Fn, class... Args> struct is_invocable_r_exact : is_invocable_r_exact_impl<void, R, Fn, Args...> {};
 template <class R, class Fn, class... Args> inline constexpr bool is_invocable_r_exact_v = is_invocable_r_exact<R, Fn, Args...>::value;
 
+template <class T, template <class...> class X> struct is_template_instantiation_of : std::false_type {};
+template <template <class...> class X, class... Args> struct is_template_instantiation_of<X<Args...>, X> : std::true_type {};
+template <class T, template <class...> class X> inline constexpr bool is_template_instantiation_of_v = is_template_instantiation_of<T, X>::value;
+
 template <class T> struct remove_cvref_from_tuple;
 template <class T> struct remove_cvref_from_tuple<T const> : remove_cvref_from_tuple<T> {};
 template <class T> struct remove_cvref_from_tuple<T volatile> : remove_cvref_from_tuple<T> {};

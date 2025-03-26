@@ -67,18 +67,18 @@ public:
 		// JSON grammar rules
 		rule JSON;
 		auto ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
-		auto FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
-		auto IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
-		auto Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ] < MakeNumber;
-		auto True           = lexeme[ "true"_sx ] < MakeTrue;
-		auto False          = lexeme[ "false"_sx ] < MakeFalse;
+		auto FractionalPart = lexeme[ '.'_cx > +"[0-9]"_rx ];
+		auto IntegralPart   = lexeme[ '0'_cx | "[1-9]"_rx > *"[0-9]"_rx ];
+		auto Number         = lexeme[ ~'-'_cx > IntegralPart > ~FractionalPart > ~ExponentPart ] < MakeNumber;
+		auto True           = lexeme[ "true" ] < MakeTrue;
+		auto False          = lexeme[ "false" ] < MakeFalse;
 		auto Null           = lexeme[ "null" ] < MakeNull;
 		auto UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
 		auto Escape         = lexeme[ '\\' > ("[/\"\\bfnrt]"_rx | UnicodeEscape) ];
 		rule KeyOrString    = lexeme[ '"' > *("[^\"\\\u0000-\u001F]"_rx | Escape) > '"' ] < MakeKeyOrString;
 		auto String         = synthesize<json_node, std::string>[ KeyOrString ];
 		auto Array          = '[' > synthesize_collect<json_node, json_array>[ JSON >> ',' ] > ']';
-		auto Object         = '{' > synthesize_collect<json_node, json_object, std::string, json_node>[ ( KeyOrString > ':' > JSON ) >> ',' ] > '}';
+		auto Object         = '{' > synthesize_collect<json_node, json_object, std::string, json_node>[ (KeyOrString > ':' > JSON) >> ',' ] > '}';
 		JSON                = Object | Array | String | Number | True | False | Null;
 		grammar_            = start(JSON > eoi);
 	}

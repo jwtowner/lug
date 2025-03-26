@@ -17,9 +17,9 @@ public:
 		using namespace lug::language;
 		rule JSON;
 		auto ExponentPart   = lexeme[ "[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx ];
-		auto FractionalPart = lexeme[ "."_sx > +"[0-9]"_rx ];
-		auto IntegralPart   = lexeme[ "0"_sx | "[1-9]"_rx > *"[0-9]"_rx ];
-		auto Number         = lexeme[ ~"-"_sx > IntegralPart > ~FractionalPart > ~ExponentPart ];
+		auto FractionalPart = lexeme[ '.'_cx > +"[0-9]"_rx ];
+		auto IntegralPart   = lexeme[ '0'_cx | "[1-9]"_rx > *"[0-9]"_rx ];
+		auto Number         = lexeme[ ~'-'_cx > IntegralPart > ~FractionalPart > ~ExponentPart ];
 		auto Boolean        = lexeme[ "true"_sx | "false" ];
 		auto Null           = lexeme[ "null" ];
 		auto UnicodeEscape  = lexeme[ 'u' > "[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]"_rx ];
