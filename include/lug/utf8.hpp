@@ -60,7 +60,7 @@ inline constexpr std::array<char, 3> utf8_replacement_sequence
 
 inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
-[[nodiscard]] constexpr decode_state decode_rune_octet(char32_t& rune, char octet, decode_state state) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr decode_state decode_rune_octet(char32_t& rune, char octet, decode_state state) noexcept
 {
 	auto const symbol = static_cast<std::uint_least32_t>(static_cast<unsigned char>(octet));
 	auto const dfa_class = static_cast<std::uint_least32_t>(dfa_class_table[symbol]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
@@ -68,7 +68,7 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 	return static_cast<decode_state>(dfa_transition_table[static_cast<std::size_t>(state) + dfa_class]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
 }
 
-[[nodiscard]] constexpr std::uint_least32_t non_ascii_rune_length(char32_t rune) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::uint_least32_t non_ascii_rune_length(char32_t rune) noexcept
 {
 	if (rune < 0x00000800U)
 		return 2;
@@ -81,7 +81,7 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 struct is_ascii_fn
 {
-	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
 		return (static_cast<unsigned char>(octet) & 0x80U) == 0x00U;
 	}
@@ -91,7 +91,7 @@ inline constexpr is_ascii_fn is_ascii{};
 
 struct is_lead_fn
 {
-	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
 		return (static_cast<unsigned char>(octet) & 0xc0U) == 0xc0U;
 	}
@@ -101,7 +101,7 @@ inline constexpr is_lead_fn is_lead{};
 
 struct is_lead_or_ascii_fn
 {
-	[[nodiscard]] constexpr bool operator()(char octet) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
 		return (static_cast<unsigned char>(octet) & 0xc0U) != 0x80U;
 	}

@@ -32,8 +32,21 @@
 #endif
 #endif // LUG_NO_RTTI
 
-#ifdef __GNUC__
+#ifndef LUG_ALWAYS_INLINE
+#if !defined LUG_DEBUG && !defined _DEBUG
+#if defined __GNUC__
+#define LUG_ALWAYS_INLINE [[gnu::always_inline]]
+#elif defined _MSC_VER
+#define LUG_ALWAYS_INLINE __forceinline
+#else
+#define LUG_ALWAYS_INLINE
+#endif
+#else
+#define LUG_ALWAYS_INLINE
+#endif
+#endif // LUG_ALWAYS_INLINE
 
+#ifdef __GNUC__
 #define LUG_DIAGNOSTIC_PUSH_AND_IGNORE \
 _Pragma("GCC diagnostic push") \
 _Pragma("GCC diagnostic ignored \"-Wparentheses\"") \
@@ -41,15 +54,11 @@ _Pragma("GCC diagnostic ignored \"-Wlogical-not-parentheses\"") \
 _Pragma("GCC diagnostic ignored \"-Wuninitialized\"") \
 _Pragma("GCC diagnostic ignored \"-Wunused-variable\"")
 _Pragma("GCC diagnostic ignored \"-Wunused-but-set-variable\"")
-
 #define LUG_DIAGNOSTIC_POP \
 _Pragma("GCC diagnostic pop")
-
 #else
-
 #define LUG_DIAGNOSTIC_PUSH_AND_IGNORE
 #define LUG_DIAGNOSTIC_POP
-
 #endif
 
 namespace lug {
@@ -59,43 +68,43 @@ template <class T> inline constexpr bool is_flag_enum_v = false;
 inline namespace flag_enum_ops {
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-[[nodiscard]] constexpr T operator~(T x) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr T operator~(T x) noexcept
 {
 	return static_cast<T>(~static_cast<std::underlying_type_t<T>>(x));
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-[[nodiscard]] constexpr T operator&(T x, T y) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr T operator&(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) & static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-[[nodiscard]] constexpr T operator|(T x, T y) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr T operator|(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) | static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-[[nodiscard]] constexpr T operator^(T x, T y) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr T operator^(T x, T y) noexcept
 {
 	return static_cast<T>(static_cast<std::underlying_type_t<T>>(x) ^ static_cast<std::underlying_type_t<T>>(y));
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-constexpr T& operator&=(T& x, T y) noexcept
+LUG_ALWAYS_INLINE constexpr T& operator&=(T& x, T y) noexcept
 {
 	return (x = x & y);
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-constexpr T& operator|=(T& x, T y) noexcept
+LUG_ALWAYS_INLINE constexpr T& operator|=(T& x, T y) noexcept
 {
 	return (x = x | y);
 }
 
 template <class T, class = std::enable_if_t<is_flag_enum_v<T>>>
-constexpr T& operator^=(T& x, T y) noexcept
+LUG_ALWAYS_INLINE constexpr T& operator^=(T& x, T y) noexcept
 {
 	return (x = x ^ y);
 }
@@ -172,7 +181,7 @@ template <class C> inline constexpr bool container_has_reserve_v = container_has
 struct identity
 {
 	template <class T>
-	[[nodiscard]] constexpr T&& operator()( T&& t ) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr T&& operator()( T&& t ) const noexcept
 	{
 		return std::forward<T>(t);
 	}
@@ -383,7 +392,7 @@ template <class InputIt, class UnaryPredicate>
 }
 
 template <class Sequence>
-[[nodiscard]] constexpr auto pop_back(Sequence& s) -> typename Sequence::value_type
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto pop_back(Sequence& s) -> typename Sequence::value_type
 {
 	typename Sequence::value_type result{std::move(s.back())}; // NOLINT(misc-const-correctness)
 	s.pop_back();
@@ -399,7 +408,7 @@ template <class Error, class Sequence>
 }
 
 template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
-[[nodiscard]] constexpr T sar(T x, unsigned int n) noexcept
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr T sar(T x, unsigned int n) noexcept
 {
 	if constexpr ((static_cast<T>(-1) >> 1U) == static_cast<T>(-1)) { // NOLINT(hicpp-signed-bitwise)
 		return x >> n; // NOLINT(hicpp-signed-bitwise)
@@ -415,7 +424,7 @@ constexpr std::size_t move_only_any_buffer_align = alignof(std::max_align_t);
 constexpr std::size_t move_only_any_buffer_size = 6 * sizeof(void*);
 
 template <class T>
-static constexpr bool is_move_only_any_small() noexcept
+[[nodiscard]] constexpr bool is_move_only_any_small() noexcept
 {
 	return (sizeof(T) <= move_only_any_buffer_size)
 		&& (alignof(T) <= move_only_any_buffer_align)

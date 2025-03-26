@@ -103,24 +103,24 @@ struct alignas(std::uint_least64_t) instruction
 	std::int_least32_t offset32;
 
 	static constexpr std::uint_least32_t limit_mask = 0x0000ffffU;
-	static constexpr std::uint_fast16_t max_limit_bias = 1;
+	static constexpr std::size_t max_limit_bias = 1;
 	static constexpr unsigned int max_limit_shift = 16;
 
-	[[nodiscard]] static constexpr std::int_least32_t pack_min_max(std::uint_fast16_t nmin, std::uint_fast16_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE static constexpr std::int_least32_t pack_min_max(std::size_t nmin, std::size_t nmax)
 	{
 		auto const nmin16 = static_cast<std::uint_least32_t>(nmin) & limit_mask;
 		auto const nmax16 = static_cast<std::uint_least32_t>(nmax + max_limit_bias) & limit_mask;
 		return static_cast<std::int_least32_t>(nmin16 | (nmax16 << max_limit_shift));
 	}
 
-	[[nodiscard]] constexpr std::uint_fast16_t unpack_min() const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::size_t unpack_min() const noexcept
 	{
-		return static_cast<std::uint_fast16_t>(static_cast<std::uint_least32_t>(offset32) & limit_mask);
+		return static_cast<std::size_t>(static_cast<std::uint_least32_t>(offset32) & limit_mask);
 	}
 
-	[[nodiscard]] constexpr std::uint_fast16_t unpack_max() const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::size_t unpack_max() const noexcept
 	{
-		return static_cast<std::uint_fast16_t>((static_cast<std::uint_least32_t>(offset32) >> max_limit_shift) & limit_mask) - max_limit_bias;
+		return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) >> max_limit_shift) & limit_mask) - max_limit_bias;
 	}
 };
 
@@ -700,7 +700,7 @@ public:
 	std::ptrdiff_t encode(opcode op, semantic_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->actions, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
-	std::ptrdiff_t encode_min_max(opcode op, std::uint_fast16_t nmin, std::uint_fast16_t nmax, std::uint_least16_t imm16 = 0, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, instruction::pack_min_max(nmin, nmax)}); }
+	std::ptrdiff_t encode_min_max(opcode op, std::size_t nmin, std::size_t nmax, std::uint_least16_t imm16 = 0, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, instruction::pack_min_max(nmin, nmax)}); }
 	std::ptrdiff_t match_any() { return skip().encode(opcode::match_any); }
 
 	std::ptrdiff_t call(program const& p, std::uint_least16_t prec, [[maybe_unused]] bool allow_inlining = true)
@@ -756,7 +756,7 @@ public:
 		}
 	}
 
-	std::ptrdiff_t encode_char_or_set(opcode octet_op, opcode set_op, char c, std::uint_fast16_t nmin = 0, std::uint_fast16_t nmax = (std::numeric_limits<std::uint_fast16_t>::max)())
+	std::ptrdiff_t encode_char_or_set(opcode octet_op, opcode set_op, char c, std::size_t nmin = 0, std::size_t nmax = (std::numeric_limits<std::size_t>::max)())
 	{
 		if ((mode() & directives::caseless) != directives::none) {
 			auto const rune = static_cast<char32_t>(static_cast<unsigned char>(c));
@@ -1386,8 +1386,8 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 	}
 };
 
-inline constexpr std::uint_fast16_t forever = (std::numeric_limits<std::uint_fast16_t>::max)();
-inline constexpr std::uint_fast16_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
+inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)();
+inline constexpr std::size_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
 
 template <class E>
 inline constexpr bool is_repetition_expression_always_optimizable_v =
@@ -1402,7 +1402,7 @@ inline constexpr bool is_repetition_expression_optimizable_v =
 	is_repetition_expression_always_optimizable_v<E> ||
 	std::is_same_v<E, string_expression>;
 
-template <std::uint_fast16_t NMin, std::uint_fast16_t NMax, class E>
+template <std::size_t NMin, std::size_t NMax, class E>
 [[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, [[maybe_unused]] encoder& d)
 {
 	if constexpr (is_repetition_expression_always_optimizable_v<std::decay_t<E>>) {
@@ -1431,7 +1431,7 @@ template <std::uint_fast16_t NMin, std::uint_fast16_t NMax, class E>
 	}
 }
 
-template <class E1, std::uint_fast16_t NMin, std::uint_fast16_t NMax>
+template <class E1, std::size_t NMin, std::size_t NMax>
 struct repetition_expression : unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>
 {
 	static_assert((NMin > 0) && (NMin < NMax) && (NMax <= max_repetitions));
@@ -1451,10 +1451,10 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 		d.dpop(NMin > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
-		for (std::uint_fast16_t i = 0; i < NMin; ++i)
+		for (std::size_t i = 0; i < NMin; ++i)
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
 		std::ptrdiff_t const loop_end = (3 * static_cast<std::ptrdiff_t>(NMax - NMin)) + d.here();
-		for (std::uint_fast16_t i = NMin; i < NMax; ++i) {
+		for (std::size_t i = NMin; i < NMax; ++i) {
 			d.encode(opcode::choice, (loop_end - d.here() - 1), 0, 0);
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
 			auto const commit = d.encode(opcode::commit);
@@ -1464,7 +1464,7 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	}
 };
 
-template <class E1, std::uint_fast16_t NCount>
+template <class E1, std::size_t NCount>
 struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>
 {
 	static_assert((NCount > 0) && (NCount <= max_repetitions));
@@ -1484,13 +1484,13 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 		d.dpop(directives::eps);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
-		for (std::uint_fast16_t i = 0; i < NCount; ++i)
+		for (std::size_t i = 0; i < NCount; ++i)
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
 		return m2;
 	}
 };
 
-template <class E1, std::uint_fast16_t NMin>
+template <class E1, std::size_t NMin>
 struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>
 {
 	static_assert((NMin > 0) && (NMin <= max_repetitions));
@@ -1510,7 +1510,7 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 		d.dpop(NMin > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
-		for (std::uint_fast16_t i = 0; i < NMin; ++i)
+		for (std::size_t i = 0; i < NMin; ++i)
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
 		auto const choice = d.encode(opcode::choice);
 		auto const loop = d.here();
@@ -1522,7 +1522,7 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 	}
 };
 
-template <class E1, std::uint_fast16_t NMax>
+template <class E1, std::size_t NMax>
 struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>
 {
 	static_assert((NMax > 0) && (NMax <= max_repetitions));
@@ -1543,7 +1543,7 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		std::ptrdiff_t const loop_end = (3 * static_cast<std::ptrdiff_t>(NMax)) + d.here();
-		for (std::uint_fast16_t i = 0; i < NMax; ++i) {
+		for (std::size_t i = 0; i < NMax; ++i) {
 			d.encode(opcode::choice, (loop_end - d.here() - 1), 0, 0);
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
 			auto const commit = d.encode(opcode::commit);
@@ -1669,7 +1669,7 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 	}
 };
 
-template <std::uint_fast16_t NMin, std::uint_fast16_t NMax>
+template <std::size_t NMin, std::size_t NMax>
 struct repetition_combinator
 {
 	static_assert((NMin <= NMax), "min count must be less than or equal to max count");
@@ -2026,10 +2026,10 @@ inline constexpr symbol_match_offset_combinator<opcode::symbol_tail, opcode::sym
 inline constexpr symbol_match_combinator<opcode::symbol_all, opcode::symbol_all_cf> match_all{};
 inline constexpr symbol_match_combinator<opcode::symbol_any, opcode::symbol_any_cf> match_any{};
 inline constexpr symbol_match_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match{};
-template <std::uint_fast16_t NMin, std::uint_fast16_t NMax> inline constexpr repetition_combinator<NMin, NMax> repeat{};
-template <std::uint_fast16_t NMin> inline constexpr repetition_combinator<NMin, forever> at_least{};
-template <std::uint_fast16_t NMax> inline constexpr repetition_combinator<0, NMax> at_most{};
-template <std::uint_fast16_t N> inline constexpr repetition_combinator<N, N> exactly{};
+template <std::size_t NMin, std::size_t NMax> inline constexpr repetition_combinator<NMin, NMax> repeat{};
+template <std::size_t NMin> inline constexpr repetition_combinator<NMin, forever> at_least{};
+template <std::size_t NMax> inline constexpr repetition_combinator<0, NMax> at_most{};
+template <std::size_t N> inline constexpr repetition_combinator<N, N> exactly{};
 template <class Container, class... ElementArgs> inline constexpr collect_combinator<Container, ElementArgs...> collect{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_factory, T, Args...> synthesize{};
 template <class T, class... Args> inline constexpr synthesize_combinator<synthesize_shared_factory, T, Args...> synthesize_shared{};
@@ -2305,8 +2305,8 @@ class multi_input_source
 	bool reading_{false};
 
 public:
+	[[nodiscard]] LUG_ALWAYS_INLINE std::string_view buffer() const noexcept { return buffer_; }
 	[[nodiscard]] source_options options() const noexcept { return !sources_.empty() ? sources_.back().second : source_options::none; }
-	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 
 	[[nodiscard]] bool fill_buffer(std::size_t fill_required)
@@ -2351,7 +2351,7 @@ class string_input_source
 {
 	std::string buffer_;
 public:
-	[[nodiscard]] std::string_view buffer() const noexcept { return buffer_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
 	template <class Rng, class = detail::enable_if_char_input_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
@@ -2362,7 +2362,7 @@ class string_view_input_source
 	std::string_view buffer_;
 public:
 	using enqueue_drains = std::true_type;
-	[[nodiscard]] constexpr std::string_view buffer() const noexcept { return buffer_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::string_view buffer() const noexcept { return buffer_; }
 	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
 	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = (last > first) ? std::string_view{&(*first), static_cast<std::size_t>(last - first)} : std::string_view{}; }
 	template <class Rng, class = detail::enable_if_char_contiguous_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
@@ -2399,13 +2399,13 @@ protected:
 	bool success_{false};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
-	[[nodiscard]] auto make_rune_set_matcher(instruction const& instr) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE auto make_rune_set_matcher(instruction const& instr) const noexcept
 	{
 		return [&set = program_->runesets[instr.immediate16]](char32_t rune) noexcept { return set.contains(rune); };
 	}
 
 	template <class Predicate>
-	[[nodiscard]] auto make_property_matcher(Predicate const& pred, instruction const& instr) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE auto make_property_matcher(Predicate const& pred, instruction const& instr) const noexcept
 	{
 		return [&pred,
 				prop = static_cast<unicode::property_enum>(instr.immediate8),
@@ -2415,14 +2415,14 @@ protected:
 	}
 
 	template <class T>
-	[[nodiscard]] T& top_stack_frame()
+	[[nodiscard]] LUG_ALWAYS_INLINE T& top_stack_frame()
 	{
 		if (stack_frames_.empty())
 			throw bad_stack{};
 		return std::get<T>(stack_frames_.back());
 	}
 
-	void pop_responses_after(std::size_t n)
+	LUG_ALWAYS_INLINE void pop_responses_after(std::size_t n)
 	{
 		if (n < responses_.size())
 			responses_.resize(n);
@@ -2443,12 +2443,6 @@ protected:
 			responses_.resize(n);
 		}
 		return dropped;
-	}
-
-	[[nodiscard]] std::size_t push_response(std::size_t call_depth, std::size_t action_index, syntax_range const& range = {parser_base::max_size, 0})
-	{
-		responses_.emplace_back(call_depth, action_index, range);
-		return responses_.size();
 	}
 
 	[[nodiscard]] std::ptrdiff_t call_into(std::size_t prec, std::ptrdiff_t off)
@@ -2631,18 +2625,18 @@ class basic_parser : public parser_base
 		}
 	}
 
-	[[nodiscard]] auto buffer_range(std::size_t position = 0) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE auto buffer_range(std::size_t position = 0) const noexcept
 	{
 		auto const buffer = input_source_.buffer();
 		return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
 	}
 
-	[[nodiscard]] bool compare(std::size_t sr, std::size_t sn, std::string_view str) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE bool compare(std::size_t sr, std::size_t sn, std::string_view str) const noexcept
 	{
 		return input_source_.buffer().compare(sr, sn, str) == 0;
 	}
 
-	[[nodiscard]] bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) noexcept
 	{
 		std::string& subject = casefolded_subjects_[sr];
 		if (subject.size() < sn)
@@ -2651,10 +2645,10 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn, class... ExtraArgs>
-	[[nodiscard]] std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
 	{
 		std::size_t const i = sr;
-		std::uint_fast16_t n = 0;
+		std::size_t n = 0;
 		for ( ; n <= nmax; ++n)
 			if (match(*this, sr, extra_args...) != 0)
 				break;
@@ -2665,10 +2659,10 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
 	{
 		std::size_t const i = sr;
-		std::uint_fast16_t n = 0;
+		std::size_t n = 0;
 		auto const [first, last] = buffer_range(i);
 		auto curr = first;
 		for ( ; n <= nmax; ++n) {
@@ -2678,59 +2672,59 @@ class basic_parser : public parser_base
 			curr = next;
 		}
 		if (n >= nmin) {
-			sr = i + static_cast<std::size_t>(std::distance(first, curr));
+			sr = i + static_cast<std::size_t>(curr - first);
 			return 0;
 		}
 		return 1;
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
 	{
 		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
 			if (auto const next = match(curr, last); next != curr) {
-				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				sr = i + static_cast<std::size_t>(next - curr);
 				return 0;
 			}
 		}
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_any(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr)
 	{
 		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
 			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
-			sr = i + static_cast<std::size_t>(std::distance(curr, next));
+			sr = i + static_cast<std::size_t>(next - curr);
 			return 0;
 		}
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_any(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
 		} else {
-			if ((nmin == 0) && (nmax == (std::numeric_limits<std::uint_fast16_t>::max)())) {
+			if ((nmin == 0) && (nmax == forever)) {
 				sr = input_source_.buffer().size();
 				return 0;
 			}
 			return repeat_match_buffered(sr, nmin, nmax, [](auto first, auto last) {
 				if (first == last)
 					return first;
-				return std::find_if(std::next(first), last, utf8::is_lead_or_ascii);
+				return std::find_if(first + 1, last, utf8::is_lead_or_ascii);
 			});
 		}
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_blank(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr)
 	{
 		return match_with(sr, utf8::match_blank);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
@@ -2738,12 +2732,12 @@ class basic_parser : public parser_base
 			return repeat_match_buffered(sr, nmin, nmax, utf8::match_blank);
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_space(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr)
 	{
 		return match_with(sr, utf8::match_space);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax)
+	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
@@ -2751,7 +2745,7 @@ class basic_parser : public parser_base
 			return repeat_match_buffered(sr, nmin, nmax, utf8::match_space);
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
 	{
 		std::size_t i = sr;
 		if (mode != 0)
@@ -2762,46 +2756,56 @@ class basic_parser : public parser_base
 		return 0;
 	}
 
-	[[nodiscard]] std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
 	{
 		std::size_t i = sr;
 		if constexpr (detail::input_source_has_options<InputSource>::value) {
 			if ((input_source_.options() & source_options::interactive) != source_options::none) {
 				if (mode != 0)
 					(void)repeat_match_buffered(i, 0, forever, utf8::match_space);
-				if (i < input_source_.buffer().size())
-					return 1;
-				sr = i;
-				return 0;
+				if (i >= input_source_.buffer().size()) {
+					sr = i;
+					return 0;
+				}
+				return 1;
 			}
 		}
 		if (mode != 0)
 			(void)repeat_space(i, 0, forever);
-		if (available(i))
-			return 1;
-		sr = i;
-		return 0;
-	}
-
-	[[nodiscard]] std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
-	{
-		if (std::size_t const i = sr; available(i) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
-			sr = i + 1;
+		if (!available(i)) {
+			sr = i;
 			return 0;
 		}
 		return 1;
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_octet(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, std::uint_least8_t octet)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
+	{
+		std::size_t const i = sr;
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			if (available(i) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
+				sr = i + 1;
+				return 0;
+			}
+		} else {
+			if (auto const buffer = input_source_.buffer(); (i < buffer.size()) && (static_cast<unsigned char>(buffer[i]) == value)) {
+				sr = i + 1;
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_octet(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t octet)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_octet), octet);
 		} else {
 			std::size_t const i = sr;
 			auto const [first, last] = buffer_range(i);
-			auto const tail = (static_cast<std::size_t>(std::distance(first, last)) <= static_cast<std::size_t>(nmax)) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
-			auto const next = std::find_if_not(first, tail, [octet](auto const c) { return static_cast<unsigned char>(c) == octet; });
-			if (auto const count = static_cast<std::size_t>(std::distance(first, next)); count >= nmin) {
+			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
+			auto const next = std::find_if(first, tail, [octet](auto const c) { return static_cast<unsigned char>(c) != octet; });
+			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
 				sr = i + count;
 				return 0;
 			}
@@ -2832,7 +2836,7 @@ class basic_parser : public parser_base
 		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
 			if (auto const next = decode_and_match_rune(curr, last, match); next != curr) {
-				sr = i + static_cast<std::size_t>(std::distance(curr, next));
+				sr = i + static_cast<std::size_t>(next - curr);
 				return 0;
 			}
 		}
@@ -2840,7 +2844,7 @@ class basic_parser : public parser_base
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::uint_fast16_t nmin, std::uint_fast16_t nmax, MatchFn const& match)
+	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
@@ -2849,7 +2853,7 @@ class basic_parser : public parser_base
 	}
 
 	template <class Compare>
-	[[nodiscard]] std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
 	{
 		if (std::size_t const i = sr, n = str.size(); !n || (available(i, n) && comp(*this, i, n, str))) {
 			sr = i + n;
@@ -3227,7 +3231,8 @@ public:
 					fail_count = accepted ? 0 : 1;
 				} break;
 				case opcode::action: {
-					registers_.rc = push_response(registers_.cd, instr.immediate16);
+					responses_.emplace_back(registers_.cd, instr.immediate16, syntax_range{parser_base::max_size, 0});
+					registers_.rc = responses_.size();
 				} break;
 				case opcode::capture_start: {
 					stack_frames_.emplace_back(std::in_place_type<capture_frame>, registers_.sr);
@@ -3242,7 +3247,8 @@ public:
 						fail_count = 1;
 						break;
 					}
-					registers_.rc = push_response(registers_.cd, instr.immediate16, syntax_range{sr0, sr1 - sr0});
+					responses_.emplace_back(registers_.cd, instr.immediate16,  syntax_range{sr0, sr1 - sr0});
+					registers_.rc = responses_.size();
 					accept_or_drain_if_deferred();
 				} break;
 				case opcode::match: {
@@ -3251,65 +3257,35 @@ public:
 				case opcode::match_cf: {
 					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
-				case opcode::match_any: {
+				case opcode::match_any: case opcode::test_any: {
 					fail_count = match_any(registers_.sr);
 				} break;
-				case opcode::test_any: {
-					registers_.pc += (match_any(registers_.sr) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_blank: {
+				case opcode::match_blank: case opcode::test_blank: {
 					fail_count = match_blank(registers_.sr);
 				} break;
-				case opcode::test_blank: {
-					registers_.pc += (match_blank(registers_.sr) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_space: {
+				case opcode::match_space: case opcode::test_space: {
 					fail_count = match_space(registers_.sr);
 				} break;
-				case opcode::test_space: {
-					registers_.pc += (match_space(registers_.sr) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_eol: {
+				case opcode::match_eol: case opcode::test_eol: {
 					fail_count = match_eol(registers_.sr, instr.immediate8);
 				} break;
-				case opcode::test_eol: {
-					registers_.pc += (match_eol(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_eoi: {
+				case opcode::match_eoi: case opcode::test_eoi: {
 					fail_count = match_eoi(registers_.sr, instr.immediate8);
 				} break;
-				case opcode::test_eoi: {
-					registers_.pc += (match_eoi(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_octet: {
+				case opcode::match_octet: case opcode::test_octet: {
 					fail_count = match_octet(registers_.sr, instr.immediate8);
 				} break;
-				case opcode::test_octet: {
-					registers_.pc += (match_octet(registers_.sr, instr.immediate8) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_set: {
+				case opcode::match_set: case opcode::test_set: {
 					fail_count = match_rune(registers_.sr, make_rune_set_matcher(instr));
 				} break;
-				case opcode::test_set: {
-					registers_.pc += (match_rune(registers_.sr, make_rune_set_matcher(instr)) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_all_of: {
+				case opcode::match_all_of: case opcode::test_all_of: {
 					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr));
 				} break;
-				case opcode::test_all_of: {
-					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr)) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_any_of: {
+				case opcode::match_any_of: case opcode::test_any_of: {
 					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::any_of, instr));
 				} break;
-				case opcode::test_any_of: {
-					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::any_of, instr)) != 0) ? instr.offset32 : 0;
-				} break;
-				case opcode::match_none_of: {
+				case opcode::match_none_of: case opcode::test_none_of: {
 					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr));
-				} break;
-				case opcode::test_none_of: {
-					registers_.pc += (match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr)) != 0) ? instr.offset32 : 0;
 				} break;
 				case opcode::repeat_any: {
 					fail_count = repeat_any(registers_.sr, instr.unpack_min(), instr.unpack_max());
@@ -3402,10 +3378,14 @@ public:
 				default: throw bad_opcode{};
 			}
 			if (fail_count > 0) {
-				if (!fail(fail_count))
-					return false;
-				accept_or_drain_if_deferred();
-				fail_count = 0;
+				if ((instr.op >= opcode::test_any) && (instr.op <= opcode::test_none_of)) {
+					registers_.pc += instr.offset32;
+				} else {
+					if (!fail(fail_count))
+						return false;
+					accept_or_drain_if_deferred();
+					fail_count = 0;
+				}
 			}
 		}
 		if (!success_)
