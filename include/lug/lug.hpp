@@ -159,8 +159,14 @@ struct program
 			if (new_instr.op < opcode::match) {
 				std::optional<std::size_t> object;
 				switch (new_instr.op) {
-					case opcode::match_any_of: case opcode::match_all_of: case opcode::match_none_of: object = instr.immediate16 + uniforms_offset; break;
-					case opcode::match_set: object = instr.immediate16 + runesets_offset; break;
+					case opcode::match_any_of: case opcode::match_all_of: case opcode::match_none_of:
+					case opcode::test_any_of: case opcode::test_all_of: case opcode::test_none_of:
+					case opcode::repeat_any_of: case opcode::repeat_all_of: case opcode::repeat_none_of:
+						object = instr.immediate16 + uniforms_offset;
+						break;
+					case opcode::match_set: case opcode::test_set: case opcode::repeat_set:
+						object = instr.immediate16 + runesets_offset;
+						break;
 					case opcode::report_push: object = instr.immediate16 + handlers_offset; break;
 					case opcode::predicate: object = instr.immediate16 + predicates_offset; break;
 					case opcode::action: object = instr.immediate16 + actions_offset; break;
@@ -1365,7 +1371,8 @@ inline constexpr bool is_repetition_expression_always_optimizable_v =
 	std::is_same_v<E, ctype_expression<unicode::ctype::blank>> ||
 	std::is_same_v<E, ctype_expression<unicode::ctype::space>> ||
 	std::is_same_v<E, char_expression> ||
-	std::is_same_v<E, char32_range_expression>;
+	std::is_same_v<E, char32_range_expression> ||
+	std::is_same_v<E, bracket_expression>;
 
 template <class E>
 inline constexpr bool is_repetition_expression_optimizable_v =
@@ -1388,7 +1395,9 @@ template <std::size_t NMin, std::size_t NMax, class E>
 		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>)
 			d.encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.c, NMin, NMax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression>)
-			d.encode_min_max(opcode::repeat_set, NMin, NMax, e.make_rune_set(d.mode()));
+			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
+		else if constexpr (std::is_same_v<std::decay_t<E>, bracket_expression>)
+			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
 		if (d.should_skip() || (e.text.size() != 1))
