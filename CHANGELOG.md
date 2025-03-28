@@ -2,10 +2,10 @@
 
 ## Release v0.6.0 (Under Development)
 
+* Implemented optimized `synthesize_collect_expression` that combines synthesize and collect operations into a single semantic action, eliminating redundant attribute stack operations and significantly improving performance for complex data structure construction.
 * Replaced the basic regular expression (BRE) implementation with bracket expressions (`_bx`). This change improves performance and reduces code complexity as the previous implementation was only partially complete and primarily used for character sets or ranges. The new bracket expressions provide the same functionality with better optimization opportunities in the expression tree, resulting in smaller code size, faster parsing and faster compilation times.
 * Completely redesigned repeat mechanism with a highly optimized implementation that dramatically reduces bytecode size and significantly improves parsing performance for repetitive patterns. Introduced more expressive control directives: `repeat<min,max>[e]` for bounded repetition, `at_least<min>[e]` for minimum repetition, `at_most<max>[e]` for maximum repetition, and `exactly<count>[e]` for fixed repetition.
 * Added specialized repeat opcodes that eliminate redundant stack operations and reduce instruction count for common repetition patterns.
-* Implemented tail-call optimization for repeat operations to prevent stack overflow on deeply nested repetitions.
 * Implemented an optimized whitespace skipping mechanism, replacing the previous implementation for better performance.
 * Fixed critical issues with `eol` and `eoi` combinators that were incorrectly interacting with whitespace skipping logic.
 * Added specialized fast paths for common whitespace patterns to improve parsing speed in typical scenarios.

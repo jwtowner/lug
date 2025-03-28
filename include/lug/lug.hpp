@@ -1846,6 +1846,32 @@ template <class X1> symbol_block_expression(X1&&) -> symbol_block_expression<std
 template <class X1> local_block_expression(X1&&) -> local_block_expression<std::decay_t<X1>>;
 template <class X1> local_to_block_expression(X1&&, std::string_view) -> local_to_block_expression<std::decay_t<X1>>;
 
+template <class Container, class... As, std::size_t... Is>
+[[nodiscard]] Container build_container(environment& envr, std::index_sequence<Is...> const& seq)
+{
+	Container container;
+	if (auto attributes = envr.finish_attribute_collection(seq.size()); !attributes.empty()) {
+		if constexpr (detail::container_has_reserve_v<Container>)
+			container.reserve(attributes.size() / seq.size());
+		if constexpr (detail::container_has_emplace_back_v<Container, As...>) {
+			for ( ; !attributes.empty(); attributes.consume_front(seq.size()))
+				(void)container.emplace_back(attributes.template read_front<As, Is>()...);
+		}
+		else if constexpr (detail::container_has_emplace_after_v<Container, As...>) {
+			for (auto last = container.cbegin(); !attributes.empty(); attributes.consume_front(seq.size()))
+				last = container.emplace_after(last, attributes.template read_front<As, Is>()...);
+		}
+		else if constexpr (detail::container_has_emplace_v<Container, As...>) {
+			for ( ; !attributes.empty(); attributes.consume_back(seq.size()))
+				(void)container.emplace(attributes.template read_back<As, Is, sizeof...(Is)>()...);
+		}
+		else {
+			static_assert(detail::always_false_v<Container>, "container type does not support attribute collection");
+		}
+	}
+	return container;
+}
+
 template <class E1, class Container, class... ElementArgs>
 struct collect_expression : unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>
 {
@@ -1859,31 +1885,8 @@ struct collect_expression : unary_encoder_expression_interface<collect_expressio
 	{
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.start_attribute_collection(); }});
 		auto m2 = this->e1.evaluate(d, m);
-		d.encode(opcode::action, semantic_action{[](environment& envr) { collect_expression::build_collection<ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{}); }});
+		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{})); }});
 		return m2;
-	}
-
-	template <class... As, std::size_t... Is>
-	static void build_collection(environment& envr, std::index_sequence<Is...> const& seq)
-	{
-		Container container;
-		if (auto attributes = envr.finish_attribute_collection(seq.size()); !attributes.empty()) {
-			if constexpr (detail::container_has_reserve_v<Container>)
-				container.reserve(attributes.size() / seq.size());
-			if constexpr (detail::container_has_emplace_back_v<Container, As...>) {
-				for ( ; !attributes.empty(); attributes.consume_front(seq.size()))
-					(void)container.emplace_back(attributes.template read_front<As, Is>()...);
-			} else if constexpr (detail::container_has_emplace_after_v<Container, As...>) {
-				for ( auto last = container.cbegin(); !attributes.empty(); attributes.consume_front(seq.size()))
-					last = container.emplace_after(last, attributes.template read_front<As, Is>()...);
-			} else if constexpr (detail::container_has_emplace_v<Container, As...>) {
-				for ( ; !attributes.empty(); attributes.consume_back(seq.size()))
-					(void)container.emplace(attributes.template read_back<As, Is, sizeof...(Is)>()...);
-			} else {
-				static_assert(detail::always_false_v<Container>, "container type does not support attribute collection");
-			}
-		}
-		envr.push_attribute(std::move(container));
 	}
 };
 
@@ -1906,7 +1909,7 @@ template <class E1, class Factory, class T, class... Args>
 struct synthesize_expression : unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>
 {
 	static_assert(sizeof...(Args) > 0, "no arguments types provided to synthesize expression" );
-	static_assert(std::is_constructible_v<T, std::decay_t<Args>...>, "synthesized type does not support the provided constructor arguments" );
+	static_assert(std::is_constructible_v<T, std::decay_t<Args>...>, "synthesized type T does not support the provided constructor arguments" );
 	using base_type = unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
 	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
@@ -1943,6 +1946,27 @@ struct synthesize_combinator
 	}
 };
 
+template <class E1, class Factory, class T, class Container, class... ElementArgs>
+struct synthesize_collect_expression : unary_encoder_expression_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>
+{
+	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression");
+	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types");
+	static_assert(std::is_constructible_v<T, Container>, "synthesized type T not constructible from Container type argument");
+	using base_type = unary_encoder_expression_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>;
+	template <class X1, class F, class V, class C, class... As> constexpr synthesize_collect_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<V> /*v*/, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
+
+	template <class M>
+	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	{
+		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.start_attribute_collection(); }});
+		auto m2 = this->e1.evaluate(d, m);
+		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(Factory{}(std::in_place_type<T>, lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{}))); }});
+		return m2;
+	}
+};
+
+template <class X1, class F, class V, class C, class... As> synthesize_collect_expression(X1&&, std::in_place_type_t<F>, std::in_place_type_t<V>, std::in_place_type_t<C>, std::in_place_type_t<As>...) -> synthesize_collect_expression<std::decay_t<X1>, F, V, C, As...>;
+
 template <class Factory, class T, class Container, class... ElementArgs>
 struct synthesize_collect_combinator
 {
@@ -1950,9 +1974,9 @@ struct synthesize_collect_combinator
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
 		if constexpr (sizeof...(ElementArgs) == 0)
-			return synthesize_expression{collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<typename Container::value_type>}, std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>};
+			return synthesize_collect_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>, std::in_place_type<typename Container::value_type>};
 		else
-			return synthesize_expression{collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<ElementArgs>...}, std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>};
+			return synthesize_collect_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>, std::in_place_type<ElementArgs>...};
 	}
 };
 

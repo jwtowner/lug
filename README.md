@@ -202,7 +202,7 @@ Quick Reference
 | `chr(c)` | Matches the UTF-8, UTF-16, or UTF-32 character *c*. |
 | `chr(c1, c2)` | Matches characters in the UTF-8, UTF-16, or UTF-32 interval \[*c1*-*c2*\]. |
 | `str(s)` | Matches the sequence of characters in the string *s*. |
-| `bkt(s)` | Bracket expression matching a set of characters or character ranges, optionally negated with a `^` prefix. Can be referred to informally as a character bucket expression. |
+| `bkt(s)` | Bracket expression matching a set of characters and/or character intervals in string *s*, optionally negated with a *^* prefix. |
 | `any` | Matches any single character. |
 | `any(flags)` | Matches a character exhibiting any of the character properties. |
 | `all(flags)` | Matches a character with all of the character properties. |
@@ -236,7 +236,7 @@ Quick Reference
 | `_bx` | Bracket Expression | Bracket expression containing multiple caracters and character ranges. |
 | `_icx` | Case Insensitive Character Expression | Same as `_cx` but case insensitive |
 | `_isx` | Case Insensitive String Expression | Same as `_sx` but case insensitive |
-| `_ibx` | Case Insensitive Regular Expression | Same as `_bx` but case insensitive |
+| `_ibx` | Case Insensitive Bracket Expression | Same as `_bx` but case insensitive |
 | `_scx` | Case Sensitive Character Expression | Same as `_cx` but case sensitive |
 | `_ssx` | Case Sensitive String Expression | Same as `_sx` but case sensitive |
 | `_sbx` | Case Sensitive Bracket Expression | Same as `_bx` but case sensitive |
