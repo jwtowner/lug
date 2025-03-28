@@ -18,7 +18,7 @@ double v[26];
 
 extern rule Expr;
 
-rule BLANK = noskip[ *"[ \t]"_rx ];
+rule BLANK  = noskip[ *"[ \t]"_rx ];
 rule ID     = lexeme[ "[a-zA-Z]"_rx  <[](syntax m) -> int { return std::tolower(m.str().at(0)) - 'a'; } ];
 rule NUMBER = lexeme[ ( ~"[-+]"_rx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx) )
                                      <[](syntax m) -> double { return std::stod(std::string{m}); } ];

@@ -40,7 +40,7 @@ public:
 		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::cout << " "; }];
 		rule LineNo = lexeme[capture(tok_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{tok_}); };
 		rule Real   = lexeme[capture(tok_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
-		               > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]]       <[this]{ return std::stod(std::string{tok_}); };
+		                     > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]] <[this]{ return std::stod(std::string{tok_}); };
 		rule String = lexeme["\"" > capture(tok_)[*"[^\"]"_rx] > "\""]   <[this]{ return tok_.str(); };
 		rule Var    = lexeme[capture(tok_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(tok_); };
 		rule Fn     = lexeme["FN"_isx > capture(tok_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(tok_); };
