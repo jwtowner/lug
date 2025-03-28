@@ -20,6 +20,10 @@ x86/
 [Oo]bj/
 [Ll]og/
 
+# valgrind files
+cachegrind.out.*
+callgrind.out.*
+
 # macOS Finder cache file
 .DS_Store
 
