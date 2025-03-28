@@ -1003,7 +1003,7 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_set, d.add_rune_set(make_rune_set(d.mode()))); return m; }
 
-	unicode::rune_set make_rune_set(directives mode) const
+	[[nodiscard]] unicode::rune_set make_rune_set(directives mode) const
 	{
 		unicode::rune_set result;
 		std::optional<char32_t> left_rune;
@@ -1394,9 +1394,7 @@ template <std::size_t NMin, std::size_t NMax, class E>
 			d.encode_min_max(opcode::repeat_space, NMin, NMax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>)
 			d.encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.c, NMin, NMax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression>)
-			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
-		else if constexpr (std::is_same_v<std::decay_t<E>, bracket_expression>)
+		else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression> || std::is_same_v<std::decay_t<E>, bracket_expression>)
 			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {

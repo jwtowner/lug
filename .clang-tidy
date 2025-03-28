@@ -2,6 +2,7 @@
 Checks:
   - clang-diagnostic-*
   - clang-analyzer-*
+  - -clang-analyzer-optin.core.EnumCastOutOfRange # interferes with flag enums
   - android-*
   - bugprone-*
   - -bugprone-easily-swappable-parameters # many functions have easily swappable parameters
