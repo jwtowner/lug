@@ -121,7 +121,7 @@ void test_calculator_errors_no_recovery()
 	double n{0.0}, e{0.0}, l{0.0}, r{0.0};
 
 	// Define NUMBER rule that converts captured string to double
-	auto NUMBER = lexeme[ ( ~'-'_cx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx) )
+	auto NUMBER = lexeme[ ( ~'-'_cx > +"0-9"_bx > ~('.' > +"0-9"_bx) )
 			<[](syntax m) -> double { return std::stod(std::string{m}); } ];
 
 	// Define Stmt, Expr, Prod, and Term rules
@@ -200,14 +200,14 @@ void test_calculator_errors_with_recovery_resume()
 
 	// Define labeled failures with recovery rules
 	failure FNoExpr{"missing expression", with_value("<MISSING-EXPRESSION>"s)};
-	failure FExpr{"expected an expression after opening parenthesis", sync_with_value("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync_with_value("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FExpr{"expected an expression after opening parenthesis", sync_with_value(")+*/-"_bx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync_with_value(")+*/-"_bx, "<BAD-OPERAND>"s)};
 	failure FRParen{"expected a closing parenthesis after expression", sync(')'_cx)};
 	failure FLParen{"closing parenthesis with no matching opening parenthesis"};
 	failure FInvalid{"invalid character"};
 
 	// Define lexical token rule that matches a number
-	auto NUMBER = lexeme[~'-'_cx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx)];
+	auto NUMBER = lexeme[~'-'_cx > +"0-9"_bx > ~('.' > +"0-9"_bx)];
 
 	// Define attribute variables to capture results
 	std::string_view number;
@@ -306,14 +306,14 @@ void test_calculator_errors_with_recovery_accept()
 
 	// Define labeled failures with recovery rules
 	failure FNoExpr{"missing expression", with_value<error_response::accept>("<MISSING-EXPRESSION>"s)};
-	failure FExpr{"expected an expression after opening parenthesis", sync_with_value<error_response::accept>("[)+*/-]"_rx, "<BAD-EXPRESSION>"s)};
-	failure FOperand{ "expected an operand after the operator", sync_with_value<error_response::accept>("[)+*/-]"_rx, "<BAD-OPERAND>"s)};
+	failure FExpr{"expected an expression after opening parenthesis", sync_with_value<error_response::accept>(")+*/-"_bx, "<BAD-EXPRESSION>"s)};
+	failure FOperand{ "expected an operand after the operator", sync_with_value<error_response::accept>(")+*/-"_bx, "<BAD-OPERAND>"s)};
 	failure FRParen{"expected a closing parenthesis after expression", sync<error_response::accept>(')'_cx)};
 	failure FLParen{"closing parenthesis with no matching opening parenthesis", with_response<error_response::accept>()};
 	failure FInvalid{"invalid character", with_response<error_response::accept>()};
 
 	// Define lexical token rule that matches a number
-	auto NUMBER = lexeme[~'-'_cx > +"[0-9]"_rx > ~('.' > +"[0-9]"_rx)];
+	auto NUMBER = lexeme[~'-'_cx > +"0-9"_bx > ~('.' > +"0-9"_bx)];
 
 	// Define attribute variables to capture results
 	std::string_view number;

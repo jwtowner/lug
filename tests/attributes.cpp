@@ -18,7 +18,7 @@ void test_addition_with_attributes()
 	lug::grammar const G = [&]
 	{
 		using namespace lug::language;
-		rule Number = lexeme[+"[0-9]"_rx] <[](std::string const& text) -> int { return std::stoi(text); };
+		rule Number = lexeme[+"0-9"_bx] <[](std::string const& text) -> int { return std::stoi(text); };
 		rule Addition = (lhs % Number) > '+' > (rhs % Number) <[&]{ result = lhs + rhs; };
 		return start(Addition > eoi);
 	}();
@@ -47,7 +47,7 @@ void test_nested_arithmetic_with_attributes()
 	{
 		using namespace lug::language;
 		rule Expression;
-		auto Number = lexeme[+"[0-9]"_rx] <[](std::string const& text) -> int { return std::stoi(text); };
+		auto Number = lexeme[+"0-9"_bx] <[](std::string const& text) -> int { return std::stoi(text); };
 		auto Factor = (Number | '(' > Expression > ')');
 		rule Term = (lhs%Factor) > *(('*' > (rhs%Factor) <[&]{ lhs *= rhs; })
 								 | ('/' > (rhs%Factor) <[&]{ lhs /= rhs; }))     <[&]{ return lhs; };

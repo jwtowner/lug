@@ -190,87 +190,101 @@ void test_string()
 	assert(!lug::parse("h", G2));
 }
 
-void test_regex_simple()
+void test_bracket()
 {
 	using namespace lug::language;
 
-	// ASCII regular expression
-	rule S = noskip[ bre("hello.w[oO]rld[[:digit:]]") > eoi ];
-	grammar G = start(S);
-	assert(lug::parse("hello world4", G));
-	assert(lug::parse("hello_wOrld8", G));
-	assert(!lug::parse("hello world!", G));
-	assert(!lug::parse("hello", G));
-	assert(!lug::parse("h", G));
-	assert(!lug::parse("", G));
-
-	// Unicode regular expression
-	rule S2 = noskip[ bre("κα[λΛ]ημέρα κ[όΟ]σμε") > eoi ];
-	grammar G2 = start(S2);
-	assert(lug::parse("καΛημέρα κόσμε", G2));
-	assert(lug::parse("καλημέρα κΟσμε", G2));
-	assert(!lug::parse("καλημέρα κόσμε!", G2));
-	assert(!lug::parse("hello world", G2));
-	assert(!lug::parse("h", G2));
-
-	// Unicode negated regular expression with escape sequences
-	rule S3 = noskip[ +"[^\"\\\u0000-\u001F]"_rx > eoi ];
-	grammar G3 = start(S3);
-	assert(lug::parse("Hello, world!🌍", G3));
-	assert(lug::parse("Hello, 世界!🌍", G3));
-	assert(lug::parse("Hello, moon!🌕", G3));
-	assert(lug::parse("Hello, 月!🌕", G3));
-	assert(!lug::parse("\"hello world\"", G3));
-	assert(!lug::parse("\\hello world", G3));
-	assert(!lug::parse("\u0000hello world", G3));
-	assert(!lug::parse("\u001Fhello world", G3));
-
-	rule S4 = noskip[ +"[^\"\\\u0000-\u001F\U0001F315]"_rx > eoi ];
-	grammar G4 = start(S4);
-	assert(lug::parse("Hello, world!🌍", G4));
-	assert(lug::parse("Hello, 世界!🌍", G4));
-	assert(!lug::parse("Hello, moon!🌕", G4));
-	assert(!lug::parse("Hello, 月!🌕", G4));
-	assert(!lug::parse("\"hello world\"", G4));
-	assert(!lug::parse("\\hello world", G4));
-	assert(!lug::parse("\u0000hello world", G4));
-	assert(!lug::parse("\u001Fhello world", G4));
-}
-
-/* TODO: Implement full BRE support
-void test_regex_complex()
-{
-	using namespace lug::language;
-	
-	// Test nested groups and quantifiers
-	rule S1 = noskip[ bre("(abb*c?)*") > eoi ];
+	rule S1 = noskip[ bkt("oO") > eoi ];
 	grammar G1 = start(S1);
-	assert(lug::parse("", G1));
-	assert(lug::parse("ab", G1));
-	assert(lug::parse("abbc", G1));
-	assert(lug::parse("ababc", G1));
-	assert(!lug::parse("ac", G1));
-}*/
-
-void test_regex_unicode_categories()
-{
-	using namespace lug::language;
-	
-	// Test unicode letter category
-	rule S1 = noskip[ bre("[[:alpha:]]") > eoi ];
-	grammar G1 = start(S1);
-	assert(lug::parse("a", G1));
-	assert(lug::parse("α", G1));  // Greek alpha
-	assert(!lug::parse("1", G1));
+	assert(lug::parse("o", G1));
+	assert(lug::parse("O", G1));
 	assert(!lug::parse("", G1));
-	
-	// Test unicode number category
-	rule S2 = noskip[ bre("[[:digit:]]") > eoi ];
+	assert(!lug::parse("0", G1));
+	assert(!lug::parse("a", G1));
+	assert(!lug::parse("A", G1));
+	assert(!lug::parse("o!", G1));
+	assert(!lug::parse("O!", G1));
+	assert(!lug::parse("oO", G1));
+
+	rule S2 = noskip[ bkt("^a") > eoi ];
 	grammar G2 = start(S2);
-	assert(lug::parse("1", G2));
-	assert(lug::parse("٣", G2));  // Arabic-Indic digit three
-	assert(!lug::parse("a", G2));
+	assert(lug::parse("b", G2));
+	assert(lug::parse("c", G2));
+	assert(lug::parse("A", G2));
+	assert(lug::parse("0", G2));
+	assert(lug::parse("_", G2));
 	assert(!lug::parse("", G2));
+	assert(!lug::parse("a", G2));
+
+	rule S3 = noskip[ bkt("a-z") > eoi ];
+	grammar G3 = start(S3);
+	assert(lug::parse("a", G3));
+	assert(lug::parse("m", G3));
+	assert(lug::parse("z", G3));
+	assert(!lug::parse("A", G3));
+	assert(!lug::parse("0", G3));
+	assert(!lug::parse("", G3));
+	assert(!lug::parse("az", G3));
+
+	rule S4 = noskip[ bkt("^a-z") > eoi ];
+	grammar G4 = start(S4);
+	assert(lug::parse("A", G4));
+	assert(lug::parse("N", G4));
+	assert(lug::parse("Z", G4));
+	assert(lug::parse("0", G4));
+	assert(lug::parse("9", G4));
+	assert(!lug::parse("a", G4));
+	assert(!lug::parse("m", G4));
+	assert(!lug::parse("z", G4));
+	assert(!lug::parse("", G4));
+	assert(!lug::parse("AZ", G4));
+
+	rule S5 = noskip[ bkt("a-zA-Z0-9") > eoi ];
+	grammar G5 = start(S5);
+	assert(lug::parse("a", G5));
+	assert(lug::parse("z", G5));
+	assert(lug::parse("A", G5));
+	assert(lug::parse("Z", G5));
+	assert(lug::parse("0", G5));
+	assert(lug::parse("9", G5));
+	assert(!lug::parse("", G5));
+	assert(!lug::parse("!", G5));
+	assert(!lug::parse("-", G5));
+	assert(!lug::parse("_", G5));
+	assert(!lug::parse("az", G5));
+
+	rule S6 = noskip[ bkt("α-ω") > eoi ];
+	grammar G6 = start(S6);
+	assert(lug::parse("α", G6));
+	assert(lug::parse("ω", G6));
+	assert(!lug::parse("a", G6));
+	assert(!lug::parse("A", G6));
+
+	rule S7 = noskip[ bkt(".^") > eoi ];
+	grammar G7 = start(S7);
+	assert(lug::parse(".", G7));
+	assert(lug::parse("^", G7));
+	assert(!lug::parse("z", G7));
+	assert(!lug::parse("_", G7));
+	assert(!lug::parse("A", G7));
+	assert(!lug::parse("0", G7));
+	assert(!lug::parse("", G7));
+	assert(!lug::parse("..", G7));
+	assert(!lug::parse(".^", G7));
+
+	rule S8 = noskip[ bkt("a-zA-Z0-9_-") > eoi ];
+	grammar G8 = start(S8);
+	assert(lug::parse("a", G8));
+	assert(lug::parse("z", G8));
+	assert(lug::parse("A", G8));
+	assert(lug::parse("Z", G8));
+	assert(lug::parse("0", G8));
+	assert(lug::parse("9", G8));
+	assert(lug::parse("-", G8));
+	assert(lug::parse("_", G8));
+	assert(!lug::parse("", G8));
+	assert(!lug::parse("!", G8));
+	assert(!lug::parse("az", G8));
 }
 
 void test_character_classes()
@@ -360,9 +374,7 @@ try {
 	test_char();
 	test_char_range();
 	test_string();
-	test_regex_simple();
-	/*test_regex_complex();*/
-	test_regex_unicode_categories();
+	test_bracket();
 	test_character_classes();
 	return 0;
 } catch (std::exception const& e) {

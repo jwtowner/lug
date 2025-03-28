@@ -34,16 +34,16 @@ public:
 		rule Expr;
 		rule Stmnt;
 
-		rule SP     = noskip[*"[ \t]"_rx];
+		rule SP     = noskip[*" \t"_bx];
 		rule NL     = lexeme['\n'_cx | "\r\n"_sx | '\r'_cx];
 		rule Delim  = lexeme[','_cx | ';'_cx];
 		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::cout << " "; }];
-		rule LineNo = lexeme[capture(tok_)[+"[0-9]"_rx]]                 <[this]{ return std::stoi(std::string{tok_}); };
-		rule Real   = lexeme[capture(tok_)[+"[0-9]"_rx > ~("."_sx > +"[0-9]"_rx)
-		                     > ~("[Ee]"_rx > ~"[+-]"_rx > +"[0-9]"_rx)]] <[this]{ return std::stod(std::string{tok_}); };
-		rule String = lexeme["\"" > capture(tok_)[*"[^\"]"_rx] > "\""]   <[this]{ return tok_.str(); };
-		rule Var    = lexeme[capture(tok_)["[A-Za-z]"_rx > ~"[0-9]"_rx]] <[this]{ return lug::utf8::toupper(tok_); };
-		rule Fn     = lexeme["FN"_isx > capture(tok_)["[A-Za-z]"_rx]]    <[this]{ return lug::utf8::toupper(tok_); };
+		rule LineNo = lexeme[capture(tok_)[+"0-9"_bx]]                   <[this]{ return std::stoi(std::string{tok_}); };
+		rule Real   = lexeme[capture(tok_)[+"0-9"_bx > ~("."_sx > +"0-9"_bx)
+		                     > ~("Ee"_bx > ~"+-"_bx > +"0-9"_bx)]]       <[this]{ return std::stod(std::string{tok_}); };
+		rule String = lexeme["\"" > capture(tok_)[*"^\""_bx] > "\""]     <[this]{ return tok_.str(); };
+		rule Var    = lexeme[capture(tok_)["A-Za-z"_bx > ~"0-9"_bx]]     <[this]{ return lug::utf8::toupper(tok_); };
+		rule Fn     = lexeme["FN"_isx > capture(tok_)["A-Za-z"_bx]]      <[this]{ return lug::utf8::toupper(tok_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 		            | ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -57,7 +57,7 @@ public:
 		            | id_%Var > "(" > r1_%Expr > ")"            <[this]{ return &at(lists_[id_], r1_); }
 		            | id_%Var                                   <[this]{ return &vars_[id_]; };
 
-		rule Value  = !"[A-Z][A-Z][A-Z]"_irx
+		rule Value  = !(lexeme[exactly<3>["A-Z"_ibx]])
 		            > ( ref_%Ref                                <[this]{ return *ref_; }
 		              | Real | "(" > Expr > ")" )
 		            | fn_%Fn > "(" > r1_%Expr > ")"             <[this]{ return call(fn_, r1_); }
@@ -72,7 +72,7 @@ public:
 		            | "INT"_isx > "(" > r1_%Expr > ")"          <[this]{ return std::trunc(r1_); }
 		            | "RND"_isx > ~ ( "(" > ~(r1_%Expr) > ")" ) <[this]{ return std::uniform_real_distribution{}(random_); };
 
-		rule Factor = r1_%Value > ~("[↑^]"_rx > r2_%Value       <[this]{ r1_ = std::pow(r1_, r2_); }
+		rule Factor = r1_%Value > ~("↑^"_bx > r2_%Value         <[this]{ r1_ = std::pow(r1_, r2_); }
 		            )                                           <[this]{ return r1_; };
 
 		rule Term   = r1_%Factor > *(
@@ -417,7 +417,7 @@ private:
 		double& param_var = vars_[param];
 		double const saved_var = param_var;
 		param_var = arg;
-		bool const success = lug::parse(body, grammar_, environment_);
+		bool const success = lug::parser{grammar_, environment_}.parse(body);
 		environment_.set_condition("fnev", saved_fn_eval);
 		environment_.should_reset_on_parse(true);
 		param_var = saved_var;

@@ -1526,7 +1526,7 @@ public:
 		char32_t r1 = start;
 		char32_t r2 = start;
 		for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
-			ptype const q = query(start).properties();
+			ptype const q = query(rn).properties();
 			if (((p ^ q) & ptype::Cased) != ptype::None) {
 				push_uniform_casefolded_range(p, r1, r2);
 				r1 = rn;

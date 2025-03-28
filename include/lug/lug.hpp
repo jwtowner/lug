@@ -826,18 +826,6 @@ public:
 	}
 };
 
-template <class RuneSet>
-inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
-{
-	if (first > last)
-		throw bad_character_range{};
-	if ((mode & directives::caseless) != directives::none)
-		static_cast<unicode::rune_set&>(runes).push_casefolded_range(first, last);
-	else
-		static_cast<unicode::rune_set&>(runes).push_range(first, last);
-	return std::forward<RuneSet>(runes);
-}
-
 template <class Derived>
 struct common_encoder_expression_interface
 {
@@ -991,73 +979,56 @@ template <class Derived> template <class Handler, class>
 	return report_expression<Derived, std::decay_t<Handler>>{derived(), std::forward<Handler>(handler)};
 }
 
-class basic_regular_expression : public terminal_encoder_expression_interface<basic_regular_expression>
+template <class RuneSet>
+inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
 {
-	std::string expression_;
-	std::shared_ptr<program> program_;
+	if (first > last)
+		throw bad_character_range{};
+	if ((mode & directives::caseless) != directives::none)
+		static_cast<unicode::rune_set&>(runes).push_casefolded_range(first, last);
+	else
+		static_cast<unicode::rune_set&>(runes).push_range(first, last);
+	return std::forward<RuneSet>(runes);
+}
 
-	[[nodiscard]] static grammar make_grammar();
+struct bracket_expression : terminal_encoder_expression_interface<bracket_expression>
+{
+	std::string_view pattern;
+	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_set, d.add_rune_set(make_rune_set(d.mode()))); return m; }
 
-	struct generator final : environment
+	unicode::rune_set make_rune_set(directives mode) const
 	{
-		lug::program_callees callees;
-		lug::encoder encoder;
-		unicode::rune_set runes;
-		unicode::ctype classes{unicode::ctype::none};
+		unicode::rune_set result;
+		std::optional<char32_t> left_rune;
+		auto curr = pattern.begin();
+		auto const last = pattern.end();
 		bool circumflex{false};
-
-		generator(basic_regular_expression const& se, directives mode)
-			: encoder{*se.program_, callees, mode | directives::eps | directives::lexeme} {}
-
-		void bracket_class(std::string_view s)
-		{
-			if (auto c = unicode::stoctype(s); c.has_value())
-				classes |= c.value();
-			else
-				throw bad_character_class{};
+		if ((curr != last) && (*curr == '^')) {
+			circumflex = true;
+			++curr;
 		}
-
-		void bracket_range(std::string_view s)
-		{
-			bracket_range(s.substr(0, s.find('-')), s.substr(s.find('-') + 1));
-		}
-
-		void bracket_range(std::string_view a, std::string_view b)
-		{
-			add_rune_range(std::ref(runes), encoder.mode(),
-				utf8::decode_rune(std::begin(a), std::end(a)).second,
-				utf8::decode_rune(std::begin(b), std::end(b)).second);
-		}
-
-		void bracket_commit()
-		{
-			runes = unicode::sort_and_optimize(std::move(runes));
-			if (!runes.empty() && classes == unicode::ctype::none) {
-				if (circumflex)
-					runes = unicode::negate(runes);
-				encoder.skip().encode(opcode::match_set, encoder.add_rune_set(std::move(runes)));
+		while (curr != last) {
+			auto const [next, next_rune] = utf8::decode_rune(curr, last);
+			if ((next_rune == U'-') && (next != last) && left_rune.has_value()) {
+				auto const [right, right_rune] = utf8::decode_rune(next, last);
+				add_rune_range(std::ref(result), mode, *left_rune, right_rune);
+				left_rune = std::nullopt;
+				curr = right;
 			} else {
-				if (circumflex)
-					encoder.encode(opcode::choice, 2 + (!runes.empty() ? 1 : 0) + (classes != unicode::ctype::none ? 1 : 0), 0, 0);
-				if (!runes.empty())
-					encoder.skip().encode(opcode::match_set, encoder.add_rune_set(std::move(runes)));
-				if (classes != unicode::ctype::none)
-					encoder.match_class<opcode::match_any_of>(classes);
-				if (circumflex) {
-					encoder.encode(opcode::commit);
-					encoder.encode(opcode::fail, 0, 1);
-					encoder.match_any();
-				}
+				if (left_rune.has_value())
+					add_rune_range(std::ref(result), mode, *left_rune, *left_rune);
+				left_rune = next_rune;
+				curr = next;
 			}
-			runes.clear();
-			classes = unicode::ctype::none;
-			circumflex = false;
 		}
-	};
-
-public:
-	explicit basic_regular_expression(std::string_view e) : expression_{e}, program_{std::make_shared<program>()} {}
-	template <class M> [[nodiscard]] auto evaluate(encoder& d, M const& m) const -> M const&;
+		if (left_rune.has_value())
+			add_rune_range(std::ref(result), mode, *left_rune, *left_rune);
+		result = unicode::sort_and_optimize(std::move(result));
+		if (circumflex)
+			result = unicode::negate(result);
+		return result;
+	}
 };
 
 struct string_expression : terminal_encoder_expression_interface<string_expression>
@@ -2040,10 +2011,10 @@ template <class T, class Container, class... ElementArgs> inline constexpr synth
 
 inline constexpr struct
 {
-	[[nodiscard]] basic_regular_expression operator()(std::string_view s) const { return basic_regular_expression{s}; }
-	[[nodiscard]] basic_regular_expression operator()(char const* s, std::size_t n) const { return basic_regular_expression{std::string_view{s, n}}; }
+	[[nodiscard]] bracket_expression operator()(std::string_view s) const { return bracket_expression{s}; }
+	[[nodiscard]] bracket_expression operator()(char const* s, std::size_t n) const { return bracket_expression{std::string_view{s, n}}; }
 }
-bre{};
+bkt{};
 
 inline constexpr struct
 {
@@ -2065,15 +2036,15 @@ inline namespace operators {
 [[nodiscard]] constexpr auto operator ""_cx(char c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_cx(char32_t c) { return chr(c); }
 [[nodiscard]] constexpr auto operator ""_sx(char const* s, std::size_t n) { return string_expression{std::string_view{s, n}}; }
-[[nodiscard]] inline auto operator ""_rx(char const* s, std::size_t n) { return basic_regular_expression{std::string_view{s, n}}; }
+[[nodiscard]] constexpr auto operator ""_bx(char const* s, std::size_t n) { return bracket_expression{std::string_view{s, n}}; }
 [[nodiscard]] constexpr auto operator ""_icx(char c) { return caseless[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_icx(char32_t c) { return caseless[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_isx(char const* s, std::size_t n) { return caseless[string_expression{std::string_view{s, n}}]; }
-[[nodiscard]] inline auto operator ""_irx(char const* s, std::size_t n) { return caseless[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_ibx(char const* s, std::size_t n) { return caseless[bracket_expression{std::string_view{s, n}}]; }
 [[nodiscard]] constexpr auto operator ""_scx(char c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_scx(char32_t c) { return cased[chr(c)]; }
 [[nodiscard]] constexpr auto operator ""_ssx(char const* s, std::size_t n) { return cased[string_expression{std::string_view{s, n}}]; }
-[[nodiscard]] inline auto operator ""_srx(char const* s, std::size_t n) { return cased[basic_regular_expression{std::string_view{s, n}}]; }
+[[nodiscard]] constexpr auto operator ""_sbx(char const* s, std::size_t n) { return cased[bracket_expression{std::string_view{s, n}}]; }
 [[nodiscard]] constexpr auto operator ""_fail(char const* s, std::size_t n) { return failure{std::string_view{s, n}}; }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
@@ -2343,12 +2314,6 @@ public:
 		buffer_.insert(buffer_.end(), first, last);
 	}
 
-	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
-	void enqueue(InputRng&& rng) // NOLINT(cppcoreguidelines-missing-std-forward)
-	{
-		enqueue(rng.begin(), rng.end());
-	}
-
 	template <class InputFunc, class = std::enable_if_t<
 			std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>>
 			|| std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>>>
@@ -2370,7 +2335,6 @@ public:
 	[[nodiscard]] LUG_ALWAYS_INLINE std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
-	template <class Rng, class = detail::enable_if_char_input_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
 };
 
 class string_view_input_source
@@ -2381,7 +2345,6 @@ public:
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::string_view buffer() const noexcept { return buffer_; }
 	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
 	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = (last > first) ? std::string_view{&(*first), static_cast<std::size_t>(last - first)} : std::string_view{}; }
-	template <class Rng, class = detail::enable_if_char_contiguous_range_t<Rng>> void enqueue(Rng&& rng) { enqueue(rng.begin(), rng.end()); } // NOLINT(cppcoreguidelines-missing-std-forward)
 };
 
 class parser_base
@@ -3121,6 +3084,13 @@ public:
 		return *this;
 	}
 
+	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
+	basic_parser& enqueue(InputRng&& rng) // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		enqueue(rng.begin(), rng.end());
+		return *this;
+	}
+
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
 	basic_parser& push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
@@ -3132,6 +3102,12 @@ public:
 	bool parse(InputIt first, InputIt last)
 	{
 		return enqueue(first, last).parse();
+	}
+
+	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
+	bool parse(InputRng&& rng)
+	{
+		return enqueue(std::forward<InputRng>(rng)).parse();
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>
@@ -3453,38 +3429,6 @@ inline bool parse(std::string_view input, grammar const& grmr)
 inline bool parse(std::string_view input, grammar const& grmr, environment& envr)
 {
 	return parse(input.cbegin(), input.cend(), grmr, envr);
-}
-
-LUG_DIAGNOSTIC_PUSH_AND_IGNORE
-
-[[nodiscard]] inline grammar basic_regular_expression::make_grammar()
-{
-	using namespace language;
-	// NOLINTBEGIN(bugprone-chained-comparison)
-	rule const Dot = chr('.')                                 <[](generator& g) { g.encoder.match_any(); };
-	rule const Element = any > chr('-') > !chr(']') > any     <[](generator& g, syntax const& x) { g.bracket_range(x.str()); }
-			   | str("[:") > +(!chr(':') > any) > str(":]")   <[](generator& g, syntax const& x) { g.bracket_class(x.str().substr(2, x.range().size - 4)); }
-			   | any                                          <[](generator& g, syntax const& x) { g.bracket_range(x.str(), x.str()); };
-	rule const Bracket = chr('[') > ~(chr('^')                <[](generator& g) { g.circumflex = true; })
-			   > Element > *(!chr(']') > Element) > chr(']')  <[](generator& g) { g.bracket_commit(); };
-	rule const Sequence = +(!(chr('.') | chr('[')) > any)     <[](generator& g, syntax const& x) { g.encoder.match(x.str()); };
-	// NOLINTEND(bugprone-chained-comparison)
-	return start(~(+(Dot | Bracket | Sequence)) > eoi, eps);
-}
-
-LUG_DIAGNOSTIC_POP
-
-template <class M>
-[[nodiscard]] inline auto basic_regular_expression::evaluate(encoder& d, M const& m) const -> M const&
-{
-	if (program_->instructions.empty()) {
-		static grammar const grmr = make_grammar();
-		generator genr(*this, d.mode() & directives::caseless);
-		if (!parse(expression_, grmr, genr))
-			throw bad_string_expression{};
-	}
-	d.skip((program_->entry_mode & directives::eps) ^ directives::eps).append(*program_);
-	return m;
 }
 
 } // namespace lug

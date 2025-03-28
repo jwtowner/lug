@@ -131,7 +131,7 @@ void test_environment_callbacks()
 	using namespace lug::language;
 
 	// Create a simple grammar
-	grammar G = start(+"[a-z]"_rx > eoi);
+	grammar G = start(+bkt("a-z") > eoi);
 
 	// Create a test environment
 	test_environment E;
