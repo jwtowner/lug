@@ -62,7 +62,7 @@ public:
 		auto MakeTrue = []{ return json_node{true}; };
 		auto MakeFalse = []{ return json_node{false}; };
 		auto MakeNumber = [](std::string_view s) { return json_node{std::stod(std::string{s})}; };
-		auto MakeKeyOrString = [](std::string_view s) { return std::string{s.substr(1, s.size() - 2)}; };
+		auto MakeKeyOrString = [](std::string_view s) { return std::string{s}; };
 
 		// JSON grammar rules
 		rule JSON;
@@ -75,7 +75,7 @@ public:
 		auto Null           = lexeme[ "null" ] < MakeNull;
 		auto UnicodeEscape  = lexeme[ 'u' > exactly<4>[ "0-9A-Fa-f"_bx ] ];
 		auto Escape         = lexeme[ '\\' > ("/\"\\bfnrt"_bx | UnicodeEscape) ];
-		rule KeyOrString    = lexeme[ '"' > *("^\"\\\u0000-\u001F"_bx | Escape) > '"' ] < MakeKeyOrString;
+		rule KeyOrString    = lexeme[ '"' > (*("^\"\\\u0000-\u001F"_bx | Escape) < MakeKeyOrString) > '"' ];
 		auto String         = synthesize<json_node, std::string>[ KeyOrString ];
 		auto Array          = '[' > synthesize_collect<json_node, json_array>[ JSON >> ',' ] > ']';
 		auto Object         = '{' > synthesize_collect<json_node, json_object, std::string, json_node>[ (KeyOrString > ':' > JSON) >> ',' ] > '}';
