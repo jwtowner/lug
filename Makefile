@@ -2,7 +2,7 @@
 # Copyright (c) 2017-2025 Jesse W. Towner
 # See LICENSE file for copyright and license details
 
-# This is a POSIX.1-2014 compliant Makefile. It is known to work with GNU Make, NetBSD Make and PDP Make.
+# This is a POSIX.1-2024 compliant Makefile. It is known to work with GNU Make, NetBSD Make and PDP Make.
 # https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html
 .POSIX:
 .PHONY: all clean dist install uninstall options test units rununits samples runsamples lint clangtidy shellcheck tools unicode
@@ -124,7 +124,9 @@ options:
 	@echo "LDFLAGS      = $(LDFLAGS)"
 	@echo "CLANGTIDY    = $(CLANGTIDY)"
 	@echo "SHELLCHECK   = $(SHELLCHECK)"
+	@echo "DESTDIR      = $(DESTDIR)"
 	@echo "PREFIX       = $(PREFIX)"
+	@echo "VERSION      = $(VERSION)"
 	@echo "UCD_VERSION  = $(UCD_VERSION)"
 
 clean:
