@@ -1004,10 +1004,11 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 	[[nodiscard]] unicode::rune_set make_rune_set(directives mode) const
 	{
 		unicode::rune_set result;
-		std::optional<char32_t> left_rune;
+		bool circumflex{false};
+		bool left_rune_present{false};
+		char32_t left_rune{U'\0'};
 		auto curr = pattern.begin();
 		auto const last = pattern.end();
-		bool circumflex{false};
 		if ((curr != last) && (*curr == '^')) {
 			circumflex = true;
 			++curr;
@@ -1018,20 +1019,22 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 			auto const [next, next_rune] = utf8::decode_rune(curr, last);
 			if ((next_rune == U'-') && (next != last)) {
 				auto const [right, right_rune] = utf8::decode_rune(next, last);
-				if (!left_rune.has_value())
+				if (!left_rune_present)
 					throw bad_character_range{};
-				add_rune_range(std::ref(result), mode, *left_rune, right_rune);
-				left_rune = std::nullopt;
+				add_rune_range(std::ref(result), mode, left_rune, right_rune);
+				left_rune = U'\0';
+				left_rune_present = false;
 				curr = right;
 			} else {
-				if (left_rune.has_value())
-					add_rune_range(std::ref(result), mode, *left_rune, *left_rune);
+				if (left_rune_present)
+					add_rune_range(std::ref(result), mode, left_rune, left_rune);
 				left_rune = next_rune;
+				left_rune_present = true;
 				curr = next;
 			}
 		}
-		if (left_rune.has_value())
-			add_rune_range(std::ref(result), mode, *left_rune, *left_rune);
+		if (left_rune_present)
+			add_rune_range(std::ref(result), mode, left_rune, left_rune);
 		result = unicode::sort_and_optimize(std::move(result));
 		if (circumflex)
 			result = unicode::negate(result);
