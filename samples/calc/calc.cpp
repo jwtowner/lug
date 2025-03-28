@@ -20,7 +20,7 @@ extern rule Expr;
 
 rule BLANK  = noskip[ *" \t"_bx ];
 rule ID     = lexeme[ "a-zA-Z"_bx    <[](syntax m) -> int { return std::tolower(m.str().at(0)) - 'a'; } ];
-rule NUMBER = lexeme[ ( ~"-+"_bx > +"0-9"_bx > ~('.' > +"0-9"_bx) )
+rule NUMBER = lexeme[ ( ~"+-"_bx > +"0-9"_bx > ~('.' > +"0-9"_bx) )
                                      <[](syntax m) -> double { return std::stod(std::string{m}); } ];
 rule Value  = n%NUMBER               <[]{ return n; }
             | i%ID > !"="_sx         <[]{ return v[i]; }

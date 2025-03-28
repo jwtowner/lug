@@ -988,8 +988,6 @@ template <class Derived> template <class Handler, class>
 template <class RuneSet>
 inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
 {
-	if (first > last)
-		throw bad_character_range{};
 	if ((mode & directives::caseless) != directives::none)
 		static_cast<unicode::rune_set&>(runes).push_casefolded_range(first, last);
 	else
@@ -1014,10 +1012,14 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 			circumflex = true;
 			++curr;
 		}
+		if (curr == last)
+			throw bad_character_range{};
 		while (curr != last) {
 			auto const [next, next_rune] = utf8::decode_rune(curr, last);
-			if ((next_rune == U'-') && (next != last) && left_rune.has_value()) {
+			if ((next_rune == U'-') && (next != last)) {
 				auto const [right, right_rune] = utf8::decode_rune(next, last);
+				if (!left_rune.has_value())
+					throw bad_character_range{};
 				add_rune_range(std::ref(result), mode, *left_rune, right_rune);
 				left_rune = std::nullopt;
 				curr = right;
@@ -3094,8 +3096,7 @@ public:
 	template <class InputRng, class = detail::enable_if_char_input_range_t<InputRng>>
 	basic_parser& enqueue(InputRng&& rng) // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
-		enqueue(rng.begin(), rng.end());
-		return *this;
+		return enqueue(rng.begin(), rng.end());
 	}
 
 	template <class InputFunc, class = std::enable_if_t<detail::input_source_has_push_source<InputSource, InputFunc&&>::value>>

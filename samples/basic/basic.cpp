@@ -417,7 +417,7 @@ private:
 		double& param_var = vars_[param];
 		double const saved_var = param_var;
 		param_var = arg;
-		bool const success = lug::parser{grammar_, environment_}.parse(body);
+		bool const success = lug::parse(body, grammar_, environment_);
 		environment_.set_condition("fnev", saved_fn_eval);
 		environment_.should_reset_on_parse(true);
 		param_var = saved_var;
