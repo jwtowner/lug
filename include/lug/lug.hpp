@@ -7,6 +7,7 @@
 
 #include <lug/utf8.hpp>
 
+#include <bitset>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -54,6 +55,249 @@ template <class A> inline constexpr bool is_capture_action_v = std::is_invocable
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
 
 [[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
+
+class rune_set
+{
+	friend class rune_set_builder;
+
+	std::bitset<128> ascii_map_;
+	std::unique_ptr<std::pair<char32_t, char32_t>[]> intervals_;
+	std::size_t intervals_size_{0};
+
+	constexpr explicit rune_set(std::bitset<128> const& ascii_map) noexcept
+		: ascii_map_{ascii_map}
+	{}
+
+	rune_set(std::bitset<128> const& ascii_map, std::unique_ptr<std::pair<char32_t, char32_t>[]>&& intervals, std::size_t size) noexcept
+		: ascii_map_{ascii_map}
+		, intervals_{std::move(intervals)}
+		, intervals_size_{size}
+	{}
+
+public:
+	constexpr rune_set() noexcept = default;
+
+	rune_set(rune_set const& other)
+		: ascii_map_{other.ascii_map_}
+		, intervals_size_{other.intervals_size_}
+	{
+		if (intervals_size_ > 0) {
+			intervals_ = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals_size_);
+			std::copy_n(other.intervals_.get(), intervals_size_, intervals_.get());
+		}
+	}
+
+	rune_set(rune_set&& other) noexcept
+		: ascii_map_{other.ascii_map_}
+		, intervals_{std::move(other.intervals_)}
+		, intervals_size_{std::exchange(other.intervals_size_, 0)}
+	{}
+
+	rune_set& operator=(rune_set const& other)
+	{
+		rune_set{other}.swap(*this);
+		return *this;
+	}
+
+	rune_set& operator=(rune_set&& other) noexcept
+	{
+		rune_set{std::move(other)}.swap(*this);
+		return *this;
+	}
+	
+	~rune_set() = default;
+
+	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept
+	{
+		return (ascii_map_ == rhs.ascii_map_) &&
+				(intervals_size_ == rhs.intervals_size_) &&
+				(intervals_size_ == 0 || std::equal(intervals_.get(), intervals_.get() + intervals_size_, rhs.intervals_.get()));
+	}
+
+	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept
+	{
+		return !(*this == rhs);
+	}
+
+	[[nodiscard]] bool contains(char32_t rune) const noexcept
+	{
+		if (rune < unicode::ascii_limit)
+			return ascii_map_[static_cast<std::size_t>(rune)];
+		auto const interval = std::lower_bound(intervals_.get(), intervals_.get() + intervals_size_, rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
+		return (interval != intervals_.get() + intervals_size_) && (interval->first <= rune) && (rune <= interval->second);
+	}
+
+	[[nodiscard]] bool empty() const noexcept
+	{
+		return ascii_map_.none() && (intervals_size_ == 0);
+	}
+
+	void swap(rune_set& other) noexcept
+	{
+		std::swap(ascii_map_, other.ascii_map_);
+		intervals_.swap(other.intervals_);
+		std::swap(intervals_size_, other.intervals_size_);
+	}
+};
+
+class rune_set_builder
+{
+	std::bitset<128> ascii_map_;
+	std::vector<std::pair<char32_t, char32_t>> intervals_;
+	bool casefolded_{false};
+	bool negated_{false};
+
+	static inline std::vector<std::pair<char32_t, char32_t>> shared_negated_empty_intervals_{{unicode::ascii_limit, U'\xFFFFFFFF'}};
+
+	[[nodiscard]] static std::vector<std::pair<char32_t, char32_t>> negate_intervals(std::vector<std::pair<char32_t, char32_t>> const& intervals)
+	{
+		std::vector<std::pair<char32_t, char32_t>> result;
+		if (char32_t const front = intervals.front().first; unicode::ascii_limit < front)
+			result.emplace_back(unicode::ascii_limit, front - 1);
+		if (intervals.size() > 1) {
+			auto const last = intervals.cend();
+			for (auto left = intervals.cbegin(), right = left + 1; right != last; ++left, ++right)
+				result.emplace_back(left->second + 1, right->first - 1);
+		}
+		if (char32_t const back = intervals.back().second; back < U'\xFFFFFFFF')
+			result.emplace_back(back + 1, U'\xFFFFFFFF');
+		return result;
+	}
+
+	[[nodiscard]] static rune_set make_rune_set(std::bitset<128> const& ascii_map, std::vector<std::pair<char32_t, char32_t>> const& intervals)
+	{
+		auto interval_array = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals.size());
+		std::copy(intervals.begin(), intervals.end(), interval_array.get());
+		return rune_set{ascii_map, std::move(interval_array), intervals.size()};
+	}
+
+	void push_rune(char32_t rune)
+	{
+		if (rune < unicode::ascii_limit) {
+			ascii_map_.set(static_cast<std::size_t>(rune));
+		} else {
+			intervals_.emplace_back(rune, rune);
+			std::push_heap(intervals_.begin(), intervals_.end());
+		}
+	}
+
+	void push_casefolded_rune(char32_t rune)
+	{
+		push_rune(unicode::tolower(rune));
+		push_rune(unicode::toupper(rune));
+	}
+
+	void push_range(char32_t start, char32_t end)
+	{
+		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
+			ascii_map_.set(static_cast<std::size_t>(rn));
+		if (end >= unicode::ascii_limit) {
+			intervals_.emplace_back((std::max)(start, unicode::ascii_limit), end);
+			std::push_heap(intervals_.begin(), intervals_.end());
+		}
+	}
+
+	void push_casefolded_range(char32_t start, char32_t end)
+	{
+		unicode::ptype p = unicode::query(start).properties();
+		char32_t r1 = start;
+		char32_t r2 = start;
+		for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
+			unicode::ptype const q = unicode::query(rn).properties();
+			if (((p ^ q) & unicode::ptype::Cased) != unicode::ptype::None) {
+				push_uniform_casefolded_range(p, r1, r2);
+				r1 = rn;
+				p = q;
+			}
+		}
+		push_uniform_casefolded_range(p, r1, r2);
+	}
+
+	void push_uniform_casefolded_range(unicode::ptype props, char32_t start, char32_t end)
+	{
+		if ((props & unicode::ptype::Cased) != unicode::ptype::None) {
+			push_range(unicode::tolower(start), unicode::tolower(end));
+			push_range(unicode::toupper(start), unicode::toupper(end));
+		} else {
+			push_range(start, end);
+		}
+	}
+
+public:
+	rune_set_builder& casefold(bool value = true)
+	{
+		casefolded_ = value;
+		return *this;
+	}
+
+	rune_set_builder& negate(bool value = true)
+	{
+		negated_ = value;
+		return *this;
+	}
+
+	rune_set_builder& add_rune(char32_t rune)
+	{
+		if (casefolded_)
+			push_casefolded_rune(rune);
+		else
+			push_rune(rune);
+		return *this;
+	}
+
+	rune_set_builder& add_runes(std::initializer_list<char32_t> runes)
+	{
+		for (char32_t const r : runes)
+			add_rune(r);
+		return *this;
+	}
+
+	rune_set_builder& add_range(char32_t start, char32_t end)
+	{
+		if (start > end)
+			throw bad_character_range{};
+		if (casefolded_)
+			push_casefolded_range(start, end);
+		else
+			push_range(start, end);
+		return *this;
+	}
+
+	rune_set_builder& add_rune_set(rune_set const& set)
+	{
+		ascii_map_ |= set.ascii_map_;
+		std::for_each_n(set.intervals_.get(), set.intervals_size_, [this](auto const& r) {
+			intervals_.emplace_back(r.first, r.second);
+			std::push_heap(intervals_.begin(), intervals_.end());
+		});
+		return *this;
+	}
+
+	[[nodiscard]] rune_set build() &&
+	{
+		if (negated_)
+			ascii_map_.flip();
+		if (intervals_.empty()) {
+			if (negated_)
+				return make_rune_set(ascii_map_, shared_negated_empty_intervals_);
+			else
+				return rune_set{ascii_map_};
+		}
+		std::vector<std::pair<char32_t, char32_t>> optimized;
+		std::sort_heap(intervals_.begin(), intervals_.end());
+		auto out = optimized.end();
+		for (auto const& r : intervals_) {
+			if (out == optimized.end() || r.first < out->first || out->second < r.first)
+				out = optimized.insert(optimized.end(), r);
+			else
+				out->second = out->second < r.second ? r.second : out->second;
+		}
+		if (negated_)
+			return make_rune_set(ascii_map_, negate_intervals(optimized));
+		else
+			return make_rune_set(ascii_map_, optimized);
+	}
+};
 
 struct registers
 {
@@ -137,7 +381,7 @@ struct program
 	std::vector<instruction> instructions;
 	std::vector<char> data;
 	std::vector<std::uint_least64_t> uniforms;
-	std::vector<unicode::rune_set> runesets;
+	std::vector<rune_set> runesets;
 	std::vector<error_handler> handlers;
 	std::vector<syntactic_predicate> predicates;
 	std::vector<semantic_action> actions;
@@ -695,7 +939,7 @@ public:
 	[[nodiscard]] instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
 	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
 	void jump_to_here(std::ptrdiff_t addr) { jump_to_target(addr, here()); }
-	std::uint_least16_t add_rune_set(unicode::rune_set&& runes) { return add_item(program_->runesets, std::move(runes)); }
+	std::uint_least16_t add_rune_set(rune_set&& runes) { return add_item(program_->runesets, std::move(runes)); }
 	std::ptrdiff_t append(instruction instr) { std::ptrdiff_t const addr{here()}; program_->instructions.push_back(instr); return addr; }
 	std::ptrdiff_t append(program const& p) { std::ptrdiff_t const addr{here()}; program_->concatenate(p); return addr; }
 	std::ptrdiff_t encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
@@ -768,7 +1012,7 @@ public:
 			auto const rune = static_cast<char32_t>(static_cast<unsigned char>(c));
 			constexpr auto use_set_mask = unicode::ptype::Alphabetic | unicode::ptype::Ascii;
 			if (auto const properties = unicode::query(rune).properties(); (properties & use_set_mask) == use_set_mask)
-				return encode_min_max(set_op, nmin, nmax, add_rune_set(unicode::sort_and_optimize(unicode::rune_set{rune, unicode::tocasefold(rune)})));
+				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(rune)).build()));
 		}
 		return encode_min_max(octet_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(c)));
 	}
@@ -985,32 +1229,22 @@ template <class Derived> template <class Handler, class>
 	return report_expression<Derived, std::decay_t<Handler>>{derived(), std::forward<Handler>(handler)};
 }
 
-template <class RuneSet>
-inline decltype(auto) add_rune_range(RuneSet&& runes, directives mode, char32_t first, char32_t last)
-{
-	if ((mode & directives::caseless) != directives::none)
-		static_cast<unicode::rune_set&>(runes).push_casefolded_range(first, last);
-	else
-		static_cast<unicode::rune_set&>(runes).push_range(first, last);
-	return std::forward<RuneSet>(runes);
-}
-
 struct bracket_expression : terminal_encoder_expression_interface<bracket_expression>
 {
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_set, d.add_rune_set(make_rune_set(d.mode()))); return m; }
 
-	[[nodiscard]] unicode::rune_set make_rune_set(directives mode) const
+	[[nodiscard]] rune_set make_rune_set(directives mode) const
 	{
-		unicode::rune_set result;
-		bool circumflex{false};
+		rune_set_builder builder;
+		builder.casefold((mode & directives::caseless) != directives::none);
 		bool left_rune_present{false};
 		char32_t left_rune{U'\0'};
 		auto curr = pattern.begin();
 		auto const last = pattern.end();
 		if ((curr != last) && (*curr == '^')) {
-			circumflex = true;
+			builder.negate();
 			++curr;
 		}
 		if (curr == last)
@@ -1021,24 +1255,21 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 				auto const [right, right_rune] = utf8::decode_rune(next, last);
 				if (!left_rune_present)
 					throw bad_character_range{};
-				add_rune_range(std::ref(result), mode, left_rune, right_rune);
+				builder.add_range(left_rune, right_rune);
 				left_rune = U'\0';
 				left_rune_present = false;
 				curr = right;
 			} else {
 				if (left_rune_present)
-					add_rune_range(std::ref(result), mode, left_rune, left_rune);
+					builder.add_rune(left_rune);
 				left_rune = next_rune;
 				left_rune_present = true;
 				curr = next;
 			}
 		}
 		if (left_rune_present)
-			add_rune_range(std::ref(result), mode, left_rune, left_rune);
-		result = unicode::sort_and_optimize(std::move(result));
-		if (circumflex)
-			result = unicode::negate(result);
-		return result;
+			builder.add_rune(left_rune);
+		return std::move(builder).build();
 	}
 };
 
@@ -1069,7 +1300,7 @@ struct char32_range_expression : terminal_encoder_expression_interface<char32_ra
 	char32_t end;
 	constexpr char32_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_set, d.add_rune_set(make_rune_set(d.mode()))); return m; }
-	[[nodiscard]] unicode::rune_set make_rune_set(directives mode) const { return unicode::sort_and_optimize(add_rune_range(unicode::rune_set{}, mode, start, end)); }
+	[[nodiscard]] rune_set make_rune_set(directives mode) const { return std::move(rune_set_builder{}.casefold((mode & directives::caseless) != directives::none).add_range(start, end)).build(); }
 };
 
 template <class Target>
@@ -1856,16 +2087,13 @@ template <class Container, class... As, std::size_t... Is>
 		if constexpr (detail::container_has_emplace_back_v<Container, As...>) {
 			for ( ; !attributes.empty(); attributes.consume_front(seq.size()))
 				(void)container.emplace_back(attributes.template read_front<As, Is>()...);
-		}
-		else if constexpr (detail::container_has_emplace_after_v<Container, As...>) {
+		} else if constexpr (detail::container_has_emplace_after_v<Container, As...>) {
 			for (auto last = container.cbegin(); !attributes.empty(); attributes.consume_front(seq.size()))
 				last = container.emplace_after(last, attributes.template read_front<As, Is>()...);
-		}
-		else if constexpr (detail::container_has_emplace_v<Container, As...>) {
+		} else if constexpr (detail::container_has_emplace_v<Container, As...>) {
 			for ( ; !attributes.empty(); attributes.consume_back(seq.size()))
 				(void)container.emplace(attributes.template read_back<As, Is, sizeof...(Is)>()...);
-		}
-		else {
+		} else {
 			static_assert(detail::always_false_v<Container>, "container type does not support attribute collection");
 		}
 	}
