@@ -19,9 +19,9 @@ double v[26];
 extern rule Expr;
 
 rule BLANK  = noskip[ *" \t"_bx ];
-rule ID     = lexeme[ "a-zA-Z"_bx    <[](syntax m) -> int { return std::tolower(m.str().at(0)) - 'a'; } ];
+rule ID     = lexeme[ "a-zA-Z"_bx    <[](syntax m) -> int { return std::tolower(m.str().front()) - 'a'; } ];
 rule NUMBER = lexeme[ ( ~"+-"_bx > +"0-9"_bx > ~('.' > +"0-9"_bx) )
-                                     <[](syntax m) -> double { return std::stod(std::string{m}); } ];
+                                     <[](syntax m) -> double { return std::stod(m); } ];
 rule Value  = n%NUMBER               <[]{ return n; }
             | i%ID > !"="_sx         <[]{ return v[i]; }
             | '(' > e%Expr > ')'     <[]{ return e; };
