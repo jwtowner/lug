@@ -44,7 +44,7 @@ Building
 As a self-contained header-only library, lug itself does not require any build process.
 To use lug, make sure to include the `lug` header directory in your project's include path.
 Once that is done, you are ready to start using lug in your code.
-To build the sample programs and unit tests both [CMake](https://cmake.org/) and [make](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/make.html) are supported.
+To build the sample programs and unit tests both [CMake](https://cmake.org/) and [make](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html) are supported.
 
 As a baseline, the following compiler versions are known to work with lug.
 
@@ -76,7 +76,7 @@ int main()
     int rhs = 0;
 
     // Define a lexical rule that matches one or more digits and converts them to an integer
-    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
+    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(s); };
 
     // Forward declaration for recursive rules
     rule Expr;

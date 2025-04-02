@@ -6,43 +6,11 @@
 #define LUG_INCLUDE_LUG_IOSTREAM_HPP
 
 #include <lug/lug.hpp>
+#include <lug/stdio.hpp>
 
 #include <iostream>
 
-#ifndef LUG_NO_ISATTY
-#ifdef _MSC_VER
-#ifndef LUG_HAS_ISATTY_MSVC
-#define LUG_HAS_ISATTY_MSVC
-#endif
-#else
-#ifndef LUG_HAS_ISATTY_POSIX
-#ifdef __has_include
-#if __has_include(<unistd.h>)
-#define LUG_HAS_ISATTY_POSIX
-#endif
-#endif
-#endif
-#endif
-#endif // LUG_NO_ISATTY
-
-#if defined LUG_HAS_ISATTY_MSVC
-#include <io.h>
-#elif defined LUG_HAS_ISATTY_POSIX
-#include <unistd.h>
-#endif
-
 namespace lug {
-
-[[nodiscard]] inline bool stdin_isatty() noexcept
-{
-#if defined LUG_HAS_ISATTY_MSVC
-	return _isatty(_fileno(stdin)) != 0;
-#elif defined LUG_HAS_ISATTY_POSIX
-	return isatty(fileno(stdin)) != 0;
-#else
-	return false;
-#endif
-}
 
 template <class CharT, class Traits, class OutputIt>
 std::basic_istream<CharT, Traits>& readsource(std::basic_istream<CharT, Traits>& input, OutputIt output, CharT delim, source_options options = source_options::none)

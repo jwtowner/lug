@@ -7,13 +7,11 @@
 // https://www.dartmouth.edu/basicfifty/commands.html
 
 #include <lug/lug.hpp>
-#include <lug/iostream.hpp>
+#include <lug/stdio.hpp>
 
 #include <cmath>
 #include <cstring>
 #include <charconv>
-#include <fstream>
-#include <iomanip>
 #include <list>
 #include <map>
 #include <random>
@@ -38,7 +36,7 @@ public:
 		rule SP     = noskip[*" \t"_bx];
 		rule NL     = lexeme['\n'_cx | "\r\n"_sx | '\r'_cx];
 		rule Delim  = lexeme[','_cx | ';'_cx];
-		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::cout << " "; }];
+		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::putchar(' '); }];
 		rule LineNo = lexeme[capture(tok_)[+"0-9"_bx]]                   <[this]{ return std::stoi(std::string{tok_}); };
 		rule Real   = lexeme[capture(tok_)[+"0-9"_bx > ~("."_sx > +"0-9"_bx)
 		                     > ~("Ee"_bx > ~"+-"_bx > +"0-9"_bx)]]       <[this]{ return std::stod(std::string{tok_}); };
@@ -97,8 +95,8 @@ public:
 		rule DataEl = r1_%Real                                  <[this]{ data(r1_); };
 		rule ReadEl = ref_%Ref                                  <[this]{ read(*ref_); };
 		rule InptEl = ref_%Ref                                  <[this]{ input(*ref_); };
-		rule PrntEl = txt_%String                               <[this]{ std::cout << txt_; }
-		            | r1_%Expr                                  <[this]{ std::cout << r1_; };
+		rule PrntEl = txt_%String                               <[this]{ std::printf("%.*s", static_cast<int>(txt_.size()), txt_.data()); }
+		            | r1_%Expr                                  <[this]{ std::printf("%.10g", r1_); };
 
 		     Stmnt  = "IF"_isx > r1_%Expr
 		                > rop_%RelOp > r2_%Expr                 <[this]{ if (!(rop_)(r1_, r2_)) { environment_.escape(); } }
@@ -120,7 +118,7 @@ public:
 		            | "READ"_isx > ReadEl > *(Delim > ReadEl)
 		            | "INPUT"_isx > InptEl > *(Delim > InptEl)
 		            | "PRINT"_isx > ~PrntEl > *(PrntDl > PrntEl)
-		                          > (PrntDl | &NL               <[]    { std::cout << "\n"; })
+		                          > (PrntDl | &NL               <[]    { std::putchar('\n'); })
 		            | "GOSUB"_isx > no_%LineNo                  <[this]{ gosub(no_); }
 		            | "RETURN"_isx                              <[this]{ retsub(); }
 		            | "STOP"_isx                                <[this]{ haltline_ = line_; line_ = lines_.end(); }
@@ -130,7 +128,7 @@ public:
 
 		rule Cmnd   = "CLEAR"_isx                               <[this]{ clear(); }
 		            | "CONT"_isx                                <[this]{ cont(); }
-		            | "LIST"_isx                                <[this]{ list(std::cout); }
+		            | "LIST"_isx                                <[this]{ list(stdout); }
 		            | "LOAD"_isx > txt_%String                  <[this]{ load(txt_); }
 		            | "RUN"_isx                                 <[this]{ line_ = lines_.begin(); read_itr_ = data_.cbegin(); }
 		            | "SAVE"_isx > txt_%String                  <[this]{ save(txt_); };
@@ -161,19 +159,18 @@ public:
 				return true;
 			}
 			if (tty_)
-				std::cout << "> " << std::flush;
-			return static_cast<bool>(lug::readsource(std::cin >> std::ws, out, opt));
+				std::printf("> ");
+			return static_cast<bool>(lug::readsource(lug::skipws(stdin), out, opt));
 		}, lug::source_options::interactive);
-		std::cout.precision(10);
 		while (parser.parse()) ;
 	}
 
 	void load(std::string_view name)
 	{
-		if (std::ifstream file{filename_with_ext(name), std::ifstream::in}; file) {
-			while (!file.bad() && !file.eof()) {
+		if (auto const file = lug::fopen_unique(filename_with_ext(name).c_str(), "rt"); file) {
+			while (!std::feof(file.get()) && !std::ferror(file.get())) {
 				std::string line;
-				if (std::getline(file >> std::ws, line)) {
+				if (lug::readline(lug::skipws(file.get()), std::back_inserter(line))) {
 					int lineno{0};
 					if (auto const [ptr, ec] = std::from_chars(line.data(), line.data() + line.size(), lineno); ec == std::errc{}) {
 						auto pos = static_cast<std::size_t>(ptr - line.data());
@@ -184,8 +181,7 @@ public:
 						print_error("ILLEGAL LINE NUMBER");
 					}
 				} else {
-					file.clear();
-					file.ignore(std::numeric_limits<std::streamsize>::max(), file.widen('\n'));
+					lug::skipline(file.get());
 				}
 			}
 		} else {
@@ -213,10 +209,10 @@ private:
 
 	void print_error(std::string_view message)
 	{
-		std::cout << message << "\n";
+		std::printf("%.*s\n", static_cast<int>(message.size()), message.data());
 		if (!fn_eval_) {
 			if (lastline_ != lines_.end())
-				std::cout << "LINE " << lastline_->first << ": " << lastline_->second << std::flush;
+				std::printf("LINE %d: %s\n", lastline_->first, lastline_->second.c_str());
 			line_ = lastline_ = lines_.end();
 			stack_.clear();
 			for_stack_.clear();
@@ -244,18 +240,16 @@ private:
 			print_error("CANNOT CONTINUE");
 	}
 
-	void list(std::ostream& out)
+	void list(std::FILE* out)
 	{
 		for (auto const& [n, l] : lines_)
-			out << n << "\t" << l;
-		out << std::flush;
+			std::fprintf(out, "%d\t%s", n, l.c_str());
 	}
 
 	void save(std::string_view name)
 	{
-		std::ofstream file{filename_with_ext(name), std::ofstream::out};
-		if (file)
-			list(file);
+		if (auto const file = lug::fopen_unique(filename_with_ext(name).c_str(), "wt"))
+			list(file.get());
 		else
 			print_error("UNABLE TO SAVE TO FILE");
 	}
@@ -349,14 +343,16 @@ private:
 
 	void input(double& value)
 	{
-		std::cin >> value;
-		if (std::cin.fail()) {
-			std::cin.clear();
-			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), std::cin.widen('\n'));
+#ifdef _MSC_VER
+		if (scanf_s("%lf", &value) != 1) {
+#else
+		if (std::scanf("%lf", &value) != 1) {
+#endif
+			lug::skipline(stdin);
 			print_error("ILLEGAL INPUT");
 		}
-		if (!(tty_ || std::cin.eof()))
-			std::cout << "\n";
+		if (!(tty_ || std::feof(stdin)))
+			std::putchar('\n');
 	}
 
 	double& at(List& lst, double i)
@@ -480,10 +476,10 @@ int main(int argc, char** argv)
 		interpreter.repl();
 		return 0;
 	} LUG_CATCH (std::exception const& e) {
-		std::cerr << "ERROR: " << e.what() << "\n";
+		std::fprintf(stderr, "ERROR: %s\n", e.what());
 		return 1;
 	} LUG_CATCH_ANY {
-		std::cerr << "UNKNOWN ERROR\n";
+		std::fputs("UNKNOWN ERROR\n", stderr);
 		return 1;
 	}
 }

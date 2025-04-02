@@ -29,7 +29,7 @@
 
 namespace lug {
 
-static inline bool const volatile exceptions_enabled =
+inline bool const volatile exceptions_enabled =
 #ifndef LUG_NO_EXCEPTIONS
 true
 #else

@@ -148,7 +148,7 @@ template <class C> inline constexpr bool container_has_reserve_v = container_has
 struct identity
 {
 	template <class T>
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr T&& operator()( T&& t ) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr T&& operator()(T&& t) const noexcept
 	{
 		return std::forward<T>(t);
 	}
