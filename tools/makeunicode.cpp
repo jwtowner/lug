@@ -1445,7 +1445,11 @@ inline constexpr none_of_fn none_of{};
 {
 	return static_cast<char32_t>(static_cast<std::int_least32_t>(r) + query(r).uppercase_mapping());
 }
+)c++"
 
+// Not used in the current implementation
+#if 0
+<< R"c++(
 namespace detail {
 
 [[nodiscard]] inline std::string normalize_property_label(std::string_view id)
@@ -1516,6 +1520,8 @@ namespace detail {
 	});
 	return labels;
 })
+#endif
+
 << R"c++(
 namespace detail {
 
