@@ -380,17 +380,19 @@ void test_cut_nested()
 }
 
 int main()
-try {
-	test_accept_choice();
-	test_accept_repetition();
-	test_cut_choice();
-	test_cut_repetition();
-	test_cut_nested();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_accept_choice();
+		test_accept_repetition();
+		test_cut_choice();
+		test_cut_repetition();
+		test_cut_nested();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }

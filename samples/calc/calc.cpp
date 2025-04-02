@@ -47,13 +47,15 @@ grammar Grammar = start(Stmt > eoi, BLANK);
 } // namespace samples::calc
 
 int main()
-try {
-    while (lug::parse(samples::calc::Grammar, lug::source_options::interactive)) ;
-    return 0;
-} catch (std::exception const& e) {
-    std::cerr << "ERROR: " << e.what() << "\n";
-    return 1;
-} catch (...) {
-    std::cerr << "UNKNOWN ERROR\n";
-    return 1;
+{
+    LUG_TRY {
+        while (lug::parse(samples::calc::Grammar, lug::source_options::interactive)) ;
+        return 0;
+    } LUG_CATCH (std::exception const& e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+    } LUG_CATCH_ANY {
+        std::cerr << "UNKNOWN ERROR\n";
+        return 1;
+    }
 }

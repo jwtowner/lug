@@ -50,7 +50,7 @@ options parse_options(int argc, char* argv[])
 		} else if (arg == "-q" || arg == "--quiet") {
 			opts.quiet = true;
 		} else if ((arg.size() > 1) && (arg.front() == '-')) {
-			throw std::runtime_error("Unknown option: " + std::string{arg});
+			lug::throw_exception<std::runtime_error>("Unknown option: " + std::string{arg});
 		} else {
 			opts.filename = arg;
 		}
@@ -59,27 +59,29 @@ options parse_options(int argc, char* argv[])
 }
 
 int main(int argc, char* argv[])
-try {
-	auto const opts = parse_options(argc, argv);
-	auto const matched = [&] {
-		if (opts.filename == "-")
-			return xml_matcher{}.match_cin();
-		std::ifstream input_file;
-		input_file.open(opts.filename);
-		if (!input_file.is_open())
-			throw std::runtime_error("Failed to open file: " + opts.filename);
-		return xml_matcher{}.match(input_file);
-	}();
-	if (!matched) {
-		verbose_cout{opts} << "Invalid XML\n";
+{
+	LUG_TRY {
+		auto const opts = parse_options(argc, argv);
+		auto const matched = [&] {
+			if (opts.filename == "-")
+				return xml_matcher{}.match_cin();
+			std::ifstream input_file;
+			input_file.open(opts.filename);
+			if (!input_file.is_open())
+				lug::throw_exception<std::runtime_error>("Failed to open file: " + opts.filename);
+			return xml_matcher{}.match(input_file);
+		}();
+		if (!matched) {
+			verbose_cout{opts} << "Invalid XML\n";
+			return 1;
+		}
+		verbose_cout{opts} << "Valid XML\n";
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "ERROR: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "UNKNOWN ERROR\n";
 		return 1;
 	}
-	verbose_cout{opts} << "Valid XML\n";
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "ERROR: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "UNKNOWN ERROR\n";
-	return 1;
 }

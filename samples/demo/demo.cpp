@@ -20,7 +20,7 @@ int main()
     int rhs = 0;
 
     // Define a lexical rule that matches one or more digits and converts them to an integer
-    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(std::string{s.str()}); };
+    auto Number = lexeme[+digit] <[](syntax s){ return std::stoi(s); };
 
     // Forward declaration for recursive rules
     rule Expr;

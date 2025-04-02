@@ -383,33 +383,35 @@ void test_list()
 }
 
 int main()
-try {
-	test_sequence();
-	test_sequence_with_skip();
-	test_choice();
-	test_choice_with_skip();
-	test_zero_or_one();
-	test_zero_or_one_string();
-	test_zero_or_many();
-	test_zero_or_many_string();
-	test_one_or_many();
-	test_one_or_many_string();
-	test_repeat();
-	test_repeat_string();
-	test_at_least();
-	test_at_least_string();
-	test_at_most();
-	test_at_most_string();
-	test_exactly();
-	test_exactly_string();
-	test_not();
-	test_predicate();
-	test_list();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_sequence();
+		test_sequence_with_skip();
+		test_choice();
+		test_choice_with_skip();
+		test_zero_or_one();
+		test_zero_or_one_string();
+		test_zero_or_many();
+		test_zero_or_many_string();
+		test_one_or_many();
+		test_one_or_many_string();
+		test_repeat();
+		test_repeat_string();
+		test_at_least();
+		test_at_least_string();
+		test_at_most();
+		test_at_most_string();
+		test_exactly();
+		test_exactly_string();
+		test_not();
+		test_predicate();
+		test_list();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }

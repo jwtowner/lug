@@ -57,10 +57,10 @@ options parse_options(int argc, char* argv[])
 			if ((i + 1) < argc) {
 				opts.indent = std::stoi(argv[++i]);
 			} else {
-				throw std::runtime_error("Missing argument for option: " + std::string{arg});
+				lug::throw_exception<std::runtime_error>("Missing argument for option: " + std::string{arg});
 			}
 		} else if ((arg.size() > 1) && (arg.front() == '-')) {
-			throw std::runtime_error("Unknown option: " + std::string{arg});
+			lug::throw_exception<std::runtime_error>("Unknown option: " + std::string{arg});
 		} else {
 			opts.filename = arg;
 		}
@@ -114,28 +114,30 @@ void write_json(std::ostream& os, json_node const& node, int indent = 0, bool pr
 }
 
 int main(int argc, char* argv[])
-try {
-	auto const opts = parse_options(argc, argv);
-	auto const json = [&] {
-		if (opts.filename == "-")
-			return json_parser{}.parse_cin();
-		std::ifstream input_file;
-		input_file.open(opts.filename);
-		if (!input_file.is_open())
-			throw std::runtime_error("Failed to open file: " + opts.filename);
-		return json_parser{}.parse(input_file);
-	}();
-	if (!json) {
-		verbose_cout{opts} << "Invalid JSON\n";
-		return 1;
+{
+	LUG_TRY {
+		auto const opts = parse_options(argc, argv);
+		auto const json = [&] {
+			if (opts.filename == "-")
+				return json_parser{}.parse_cin();
+			std::ifstream input_file;
+			input_file.open(opts.filename);
+			if (!input_file.is_open())
+				lug::throw_exception<std::runtime_error>("Failed to open file: " + opts.filename);
+			return json_parser{}.parse(input_file);
+		}();
+		if (!json) {
+			verbose_cout{opts} << "Invalid JSON\n";
+			return 1;
+		}
+		write_json(std::cout, *json, 0, !opts.compact);
+		std::cout << std::endl;
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "ERROR: " << e.what() << "\n";
+		return -1;
+	} LUG_CATCH_ANY {
+		std::cerr << "UNKNOWN ERROR\n";
+		return -1;
 	}
-	write_json(std::cout, *json, 0, !opts.compact);
-	std::cout << std::endl;
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "ERROR: " << e.what() << "\n";
-	return -1;
-} catch (...) {
-	std::cerr << "UNKNOWN ERROR\n";
-	return -1;
 }

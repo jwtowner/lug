@@ -5,19 +5,51 @@
 #ifndef LUG_INCLUDE_LUG_ERROR_HPP
 #define LUG_INCLUDE_LUG_ERROR_HPP
 
+#include <lug/config.hpp>
+
+#include <cerrno>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
 
+#ifndef LUG_NO_EXCEPTIONS
+#define LUG_TRY try
+#define LUG_CATCH(...) catch (__VA_ARGS__)
+#define LUG_CATCH_ANY catch (...)
+#else
+#define LUG_TRY
+#define LUG_CATCH(...) if ([[maybe_unused]] __VA_ARGS__ = {}; (lug::exceptions_enabled))
+#define LUG_CATCH_ANY if ((lug::exceptions_enabled))
+#endif
+
 namespace lug {
+
+static inline bool const volatile exceptions_enabled =
+#ifndef LUG_NO_EXCEPTIONS
+true
+#else
+false
+#endif
+;
+
+template <class Error, class... Args>
+[[noreturn]] void throw_exception(Args&&... args)
+{
+#ifndef LUG_NO_EXCEPTIONS
+	throw Error{std::forward<Args>(args)...};
+#else
+	errno = ENOTRECOVERABLE;
+	std::perror(Error{std::forward<Args>(args)...}.what());
+	std::abort();
+#endif
+}
 
 class lug_error : public std::runtime_error { using std::runtime_error::runtime_error; };
 class program_limit_error : public lug_error { public: program_limit_error() : lug_error{"length or offset of program exceeds internal limit"} {} };
 class resource_limit_error : public lug_error { public: resource_limit_error() : lug_error{"number of resources exceeds internal limit"} {} };
 class reenterant_parse_error : public lug_error { public: reenterant_parse_error() : lug_error{"parsing is non-reenterant"} {} };
 class reenterant_read_error : public lug_error { public: reenterant_read_error() : lug_error{"attempted to read or modify input source while reading"} {} };
-class parse_context_error : public lug_error { public: parse_context_error() : lug_error{"operation valid only inside calling context of parser::parse" } {} };
-class accept_context_error : public lug_error{ public: accept_context_error() : lug_error{"operation valid only inside calling context of parser::accept"} {} };
 class attribute_stack_error : public lug_error{ public: attribute_stack_error() : lug_error{"incompatible or invalid attribute stack frame"} {} };
 class bad_string_expression : public lug_error { public: explicit bad_string_expression(std::string const& s = "invalid string or bracket expression") : lug_error{s} {} };
 class bad_character_class : public bad_string_expression { public: bad_character_class() : bad_string_expression{"invalid character class"} {} };

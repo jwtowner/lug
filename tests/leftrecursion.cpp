@@ -99,15 +99,17 @@ void test_hidden_left_recursion()
 }*/
 
 int main()
-try {
-	test_direct_left_recursion();
-	test_indirect_left_recursion();
-	test_association_and_precedence();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_direct_left_recursion();
+		test_indirect_left_recursion();
+		test_association_and_precedence();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }

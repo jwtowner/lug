@@ -32,14 +32,16 @@ void test_match_size_predicate()
 }
 
 int main()
-try {
-	test_simple_predicates();
-	test_match_size_predicate();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_simple_predicates();
+		test_match_size_predicate();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }

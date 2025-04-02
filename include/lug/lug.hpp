@@ -18,6 +18,7 @@
 
 namespace lug {
 
+class attribute_collection;
 class encoder;
 class environment;
 class error_context;
@@ -25,18 +26,18 @@ class grammar;
 class multi_input_source;
 class parser_base;
 class rule;
+class rune_set;
+class rune_set_builder;
 class string_input_source;
 class string_view_input_source;
 class syntax;
 struct program;
 struct syntax_position;
 struct syntax_range;
-class attribute_collection;
 template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
 template <class> class recursive_wrapper;
-using parser = basic_parser<multi_input_source>;
 [[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
 
 class rune_set
@@ -236,8 +237,8 @@ public:
 
 	rune_set_builder& add_rune(char32_t rune)
 	{
-		if (rune >= rune_set::unicode_limit)
-			throw bad_character_range{};
+		if LUG_UNLIKELY(rune >= rune_set::unicode_limit)
+			throw_exception<bad_character_range>();
 		if (casefolded_)
 			push_casefolded_rune(rune);
 		else
@@ -254,8 +255,8 @@ public:
 
 	rune_set_builder& add_range(char32_t start, char32_t end)
 	{
-		if ((start > end) || (end >= rune_set::unicode_limit))
-			throw bad_character_range{};
+		if LUG_UNLIKELY((start > end) || (end >= rune_set::unicode_limit))
+			throw_exception<bad_character_range>();
 		if (casefolded_)
 			push_casefolded_range(start, end);
 		else
@@ -322,11 +323,11 @@ enum class opcode : std::uint_least8_t
 	capture_start,  capture_end,    condition_pop,  symbol_end,
 	symbol_pop,
 	match_any,      match_blank,    match_space,    match_eol,      match_eoi,
-	match_octet,    match_set,      match_all_of,   match_any_of,   match_none_of,
+	match_unit,     match_set,      match_all_of,   match_any_of,   match_none_of,
 	repeat_any,     repeat_blank,   repeat_space,   skip_blank,     skip_space,
-	repeat_octet,   repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
+	repeat_unit,    repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
 	test_any,       test_blank,     test_space,     test_eol,       test_eoi,
-	test_octet,     test_set,       test_all_of,    test_any_of,    test_none_of,
+	test_unit,      test_set,       test_all_of,    test_any_of,    test_none_of,
 	match,          match_cf,       condition_test, condition_push,
 	symbol_exists,  symbol_all,     symbol_all_cf,  symbol_any,
 	symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
@@ -712,16 +713,16 @@ public:
 	template <class T>
 	[[nodiscard]] T& top_attribute()
 	{
-		if (attribute_result_stack_.empty())
-			throw attribute_stack_error{};
+		if LUG_UNLIKELY(attribute_result_stack_.empty())
+			throw_exception<attribute_stack_error>();
 		return *detail::guarded_move_only_any_cast<T>(&attribute_result_stack_.back());
 	}
 
 	template <class T>
 	[[nodiscard]] T const& top_attribute() const
 	{
-		if (attribute_result_stack_.empty())
-			throw attribute_stack_error{};
+		if LUG_UNLIKELY(attribute_result_stack_.empty())
+			throw_exception<attribute_stack_error>();
 		return *detail::guarded_move_only_any_cast<T>(&attribute_result_stack_.back());
 	}
 };
@@ -758,15 +759,15 @@ public:
 [[nodiscard]] inline attribute_collection environment::finish_attribute_collection(std::size_t element_multiple)
 {
 	std::size_t const index = detail::guarded_pop_back<attribute_stack_error>(attribute_collection_stack_);
-	if ((index > attribute_result_stack_.size()) || (((attribute_result_stack_.size() - index) % element_multiple) != 0))
-		throw attribute_stack_error{};
+	if LUG_UNLIKELY((index > attribute_result_stack_.size()) || (((attribute_result_stack_.size() - index) % element_multiple) != 0))
+		throw_exception<attribute_stack_error>();
 	return attribute_collection{this, index};
 }
 
 [[nodiscard]] inline attribute_collection environment::tail_attribute_collection(std::size_t element_count)
 {
-	if (element_count > attribute_result_stack_.size())
-		throw attribute_stack_error{};
+	if LUG_UNLIKELY(element_count > attribute_result_stack_.size())
+		throw_exception<attribute_stack_error>();
 	return attribute_collection{this, attribute_result_stack_.size() - element_count};
 }
 
@@ -1016,7 +1017,7 @@ public:
 		}
 	}
 
-	std::ptrdiff_t encode_char_or_set(opcode octet_op, opcode set_op, char c, std::size_t nmin = 0, std::size_t nmax = (std::numeric_limits<std::size_t>::max)())
+	std::ptrdiff_t encode_char_or_set(opcode unit_op, opcode set_op, char c, std::size_t nmin = 0, std::size_t nmax = (std::numeric_limits<std::size_t>::max)())
 	{
 		if ((mode() & directives::caseless) != directives::none) {
 			auto const rune = static_cast<char32_t>(static_cast<unsigned char>(c));
@@ -1024,14 +1025,14 @@ public:
 			if (auto const properties = unicode::query(rune).properties(); (properties & use_set_mask) == use_set_mask)
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(rune)).build()));
 		}
-		return encode_min_max(octet_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(c)));
+		return encode_min_max(unit_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(c)));
 	}
 
 	std::ptrdiff_t match(std::string_view subject)
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
 		if (subject.size() == 1)
-			return encode_char_or_set(opcode::match_octet, opcode::match_set, subject.front());
+			return encode_char_or_set(opcode::match_unit, opcode::match_set, subject.front());
 		if (!subject.empty() && ((mode() & directives::caseless) != directives::none))
 			return encode(opcode::match_cf, utf8::tocasefold(subject));
 		return encode(opcode::match, subject);
@@ -1257,14 +1258,14 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 			builder.negate();
 			++curr;
 		}
-		if (curr == last)
-			throw bad_character_range{};
+		if LUG_UNLIKELY(curr == last)
+			throw_exception<bad_character_range>();
 		while (curr != last) {
 			auto const [next, next_rune] = utf8::decode_rune(curr, last);
 			if ((next_rune == U'-') && (next != last)) {
 				auto const [right, right_rune] = utf8::decode_rune(next, last);
-				if (!left_rune_present)
-					throw bad_character_range{};
+				if LUG_UNLIKELY(!left_rune_present)
+					throw_exception<bad_character_range>();
 				builder.add_range(left_rune, right_rune);
 				left_rune = U'\0';
 				left_rune_present = false;
@@ -1639,14 +1640,14 @@ template <std::size_t NMin, std::size_t NMax, class E>
 		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>)
 			d.encode_min_max(opcode::repeat_space, NMin, NMax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression>)
-			d.encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.c, NMin, NMax);
+			d.encode_char_or_set(opcode::repeat_unit, opcode::repeat_set, e.c, NMin, NMax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char32_range_expression> || std::is_same_v<std::decay_t<E>, bracket_expression>)
 			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
 		if (d.should_skip() || (e.text.size() != 1))
 			return false;
-		d.commit_eps().encode_char_or_set(opcode::repeat_octet, opcode::repeat_set, e.text.front(), NMin, NMax);
+		d.commit_eps().encode_char_or_set(opcode::repeat_unit, opcode::repeat_set, e.text.front(), NMin, NMax);
 		return true;
 	} else {
 		static_assert(detail::always_false_v<E>, "unsupported repetition expression");
@@ -2538,7 +2539,7 @@ template <error_response Response>
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
-	return start(start_rule, language::noskip[language::operator*(language::space)]);
+	return start(start_rule, rule{language::noskip[language::operator*(language::space)]});
 }
 
 enum class source_options : std::uint_least8_t { none = 0, interactive = 1 };
@@ -2593,8 +2594,8 @@ public:
 			|| std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>>>
 	void push_source(InputFunc&& func, source_options opt = source_options::none)
 	{
-		if (reading_)
-			throw reenterant_read_error{};
+		if LUG_UNLIKELY(reading_)
+			throw_exception<reenterant_read_error>();
 		if constexpr (std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>)
 			sources_.emplace_back(std::forward<InputFunc>(func), opt);
 		else
@@ -2670,8 +2671,8 @@ protected:
 	template <class T>
 	[[nodiscard]] LUG_ALWAYS_INLINE T& top_stack_frame()
 	{
-		if (stack_frames_.empty())
-			throw bad_stack{};
+		if LUG_UNLIKELY(stack_frames_.empty())
+			throw_exception<bad_stack>();
 		return std::get<T>(stack_frames_.back());
 	}
 
@@ -3032,7 +3033,7 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_octet(std::size_t& sr, std::uint_least8_t value)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr, std::uint_least8_t value)
 	{
 		std::size_t const i = sr;
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
@@ -3049,15 +3050,15 @@ class basic_parser : public parser_base
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_octet(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t octet)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_unit(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t unit)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_octet), octet);
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
 		} else {
 			std::size_t const i = sr;
 			auto const [first, last] = buffer_range(i);
 			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
-			auto const next = std::find_if(first, tail, [octet](auto const c) { return static_cast<unsigned char>(c) != octet; });
+			auto const next = std::find_if(first, tail, [unit](auto const c) { return static_cast<unsigned char>(c) != unit; });
 			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
 				sr = i + count;
 				return 0;
@@ -3185,8 +3186,8 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
 	{
-		if (stack_frames_.empty())
-			throw bad_stack{};
+		if LUG_UNLIKELY(stack_frames_.empty())
+			throw_exception<bad_stack>();
 		auto ret_result = std::visit([this](auto& frame) -> std::pair<error_response, std::ptrdiff_t> {
 			using frame_type = std::decay_t<decltype(frame)>;
 			if constexpr (std::is_same_v<frame_type, call_frame>) {
@@ -3205,7 +3206,7 @@ class basic_parser : public parser_base
 				accept_or_drain_if_deferred();
 				return std::pair{err_res, std::ptrdiff_t{0}};
 			} else {
-				throw bad_stack{};
+				throw_exception<bad_stack>();
 			}
 		}, stack_frames_.back());
 		if (ret_result.first != error_response::rethrow)
@@ -3392,8 +3393,8 @@ public:
 	bool parse()
 	{
 		detail::reentrancy_sentinel<reenterant_parse_error> const guard{parsing_};
-		if (program_->instructions.empty() || program_->data.empty())
-			throw bad_grammar{};
+		if LUG_UNLIKELY(program_->instructions.empty() || program_->data.empty())
+			throw_exception<bad_grammar>();
 		reset();
 		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
 		std::ptrdiff_t fail_count{0};
@@ -3411,8 +3412,8 @@ public:
 					registers_.ri = (stack_frames_.size() & predicate_frame_mask) | (registers_.ri & ~predicate_frame_mask) | predicate_inhibited_flag;
 				} break;
 				case opcode::commit: {
-					if (stack_frames_.empty())
-						throw bad_stack{};
+					if LUG_UNLIKELY(stack_frames_.empty())
+						throw_exception<bad_stack>();
 					stack_frames_.pop_back();
 					registers_.pc += instr.offset32;
 				} break;
@@ -3537,8 +3538,8 @@ public:
 				case opcode::match_eoi: case opcode::test_eoi: {
 					fail_count = match_eoi(registers_.sr, instr.immediate8);
 				} break;
-				case opcode::match_octet: case opcode::test_octet: {
-					fail_count = match_octet(registers_.sr, instr.immediate8);
+				case opcode::match_unit: case opcode::test_unit: {
+					fail_count = match_unit(registers_.sr, instr.immediate8);
 				} break;
 				case opcode::match_set: case opcode::test_set: {
 					fail_count = match_rune(registers_.sr, make_rune_set_matcher(instr));
@@ -3561,8 +3562,8 @@ public:
 				case opcode::repeat_space: case opcode::skip_space: {
 					fail_count = repeat_space(registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
-				case opcode::repeat_octet: {
-					fail_count = repeat_octet(registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
+				case opcode::repeat_unit: {
+					fail_count = repeat_unit(registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
 				} break;
 				case opcode::repeat_set: {
 					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_rune_set_matcher(instr));
@@ -3640,7 +3641,7 @@ public:
 					environment_->symbols_.swap(top_stack_frame<symbol_table_frame>());
 					stack_frames_.pop_back();
 				} break;
-				default: throw bad_opcode{};
+				default: throw_exception<bad_opcode>();
 			}
 			if (fail_count > 0) {
 				if ((instr.op >= opcode::test_any) && (instr.op <= opcode::test_none_of)) {
@@ -3659,6 +3660,8 @@ public:
 		return true;
 	}
 };
+
+using parser = basic_parser<multi_input_source>;
 
 template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr, environment& envr)

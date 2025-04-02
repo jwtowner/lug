@@ -451,20 +451,22 @@ void test_error_suppression_in_positive_lookahead()
 }
 
 int main()
-try {
-	test_simple_error_no_recovery();
-	test_simple_error_recovery();
-	test_simple_error_handling();
-	test_calculator_errors_no_recovery();
-	test_calculator_errors_with_recovery_resume();
-	test_calculator_errors_with_recovery_accept();
-	test_error_suppression_in_negative_lookahead();
-	test_error_suppression_in_positive_lookahead();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Error: Unknown exception\n";
-	return 1;
+{
+	LUG_TRY {
+		test_simple_error_no_recovery();
+		test_simple_error_recovery();
+		test_simple_error_handling();
+		test_calculator_errors_no_recovery();
+		test_calculator_errors_with_recovery_resume();
+		test_calculator_errors_with_recovery_accept();
+		test_error_suppression_in_negative_lookahead();
+		test_error_suppression_in_positive_lookahead();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Error: Unknown exception\n";
+		return 1;
+	}
 }

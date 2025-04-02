@@ -5,6 +5,7 @@
 #ifndef LUG_INCLUDE_LUG_DETAIL_HPP
 #define LUG_INCLUDE_LUG_DETAIL_HPP
 
+#include <lug/config.hpp>
 #include <lug/error.hpp>
 
 #include <cstddef>
@@ -18,47 +19,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#ifndef LUG_NO_RTTI
-#if defined __GNUC__
-#ifndef __GXX_RTTI
-#define LUG_NO_RTTI
-#endif
-#elif defined _MSC_VER
-#ifndef _CPPRTTI
-#define LUG_NO_RTTI
-#endif
-#endif
-#endif // LUG_NO_RTTI
-
-#ifndef LUG_ALWAYS_INLINE
-#if !defined LUG_DEBUG && !defined _DEBUG
-#if defined __GNUC__
-#define LUG_ALWAYS_INLINE [[gnu::always_inline]]
-#elif defined _MSC_VER
-#define LUG_ALWAYS_INLINE __forceinline
-#else
-#define LUG_ALWAYS_INLINE
-#endif
-#else
-#define LUG_ALWAYS_INLINE
-#endif
-#endif // LUG_ALWAYS_INLINE
-
-#ifdef __GNUC__
-#define LUG_DIAGNOSTIC_PUSH_AND_IGNORE \
-_Pragma("GCC diagnostic push") \
-_Pragma("GCC diagnostic ignored \"-Wparentheses\"") \
-_Pragma("GCC diagnostic ignored \"-Wlogical-not-parentheses\"") \
-_Pragma("GCC diagnostic ignored \"-Wuninitialized\"") \
-_Pragma("GCC diagnostic ignored \"-Wunused-variable\"")
-_Pragma("GCC diagnostic ignored \"-Wunused-but-set-variable\"")
-#define LUG_DIAGNOSTIC_POP \
-_Pragma("GCC diagnostic pop")
-#else
-#define LUG_DIAGNOSTIC_PUSH_AND_IGNORE
-#define LUG_DIAGNOSTIC_POP
-#endif
 
 namespace lug {
 
@@ -272,8 +232,8 @@ public:
 	constexpr explicit reentrancy_sentinel(bool& x)
 		: value_{x}
 	{
-		if (value_.get())
-			throw Error();
+		if LUG_UNLIKELY(value_.get())
+			lug::throw_exception<Error>();
 		value_.get() = true;
 	}
 
@@ -360,8 +320,8 @@ scope_fail(Fn) -> scope_fail<std::decay_t<Fn>>;
 template <class Error, class T, class U, class V, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<U> && std::is_integral_v<V>>>
 constexpr void assure_in_range(T x, U minval, V maxval)
 {
-	if (!((minval <= x) && (x <= maxval)))
-		throw Error();
+	if LUG_UNLIKELY(!((minval <= x) && (x <= maxval)))
+		lug::throw_exception<Error>();
 }
 
 template <class T, class Error, class S, class U, class V, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<S> && std::is_integral_v<U> && std::is_integral_v<V>>>
@@ -380,8 +340,8 @@ template <class T, class Error, class S, class = std::enable_if_t<std::is_integr
 template <class Error, class T, class U, class = std::enable_if_t<std::is_integral_v<T> && std::is_integral_v<U>>>
 [[nodiscard]] constexpr auto checked_add(T x, U y)
 {
-	if (((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
-		throw Error();
+	if LUG_UNLIKELY(((std::numeric_limits<decltype(x + y)>::max)() - x) < y)
+		lug::throw_exception<Error>();
 	return x + y;
 }
 
@@ -419,8 +379,8 @@ template <class Sequence>
 template <class Error, class Sequence>
 [[nodiscard]] constexpr auto guarded_pop_back(Sequence& s) -> typename Sequence::value_type
 {
-	if (s.empty())
-		throw Error();
+	if LUG_UNLIKELY(s.empty())
+		lug::throw_exception<Error>();
 	return detail::pop_back(s);
 }
 
@@ -436,6 +396,9 @@ template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
 		return static_cast<T>(shifted | sign_mask);
 	}
 }
+
+template <class T> struct type_info_tag { constexpr type_info_tag() noexcept = default; };
+template <class T> inline constexpr type_info_tag<T> type_info_tag_v{};
 
 constexpr std::size_t move_only_any_buffer_align = alignof(std::max_align_t);
 constexpr std::size_t move_only_any_buffer_size = 6 * sizeof(void*);
@@ -471,9 +434,9 @@ struct move_only_any_vtable_operations
 		}
 	}
 
-	static constexpr std::type_info const& type() noexcept
+	static constexpr void const* type() noexcept
 	{
-		return typeid(T);
+		return &type_info_tag_v<T>;
 	}
 };
 
@@ -482,14 +445,14 @@ struct move_only_any_vtable_operations<void>
 {
 	static constexpr void destroy(void* /*data*/) noexcept {}
 	static constexpr void* move(void* /*to*/, void* /*from*/) noexcept { return nullptr; }
-	static constexpr std::type_info const& type() noexcept { return typeid(void); }
+	static constexpr void const* type() noexcept { return &type_info_tag_v<void>; }
 };
 
 struct move_only_any_vtable
 {
 	using destroy_fn = void (*)(void*) noexcept;
 	using move_fn = void* (*)(void*, void*) noexcept;
-	using type_fn = std::type_info const& (*)() noexcept;
+	using type_fn = void const* (*)() noexcept;
 	destroy_fn destroy;
 	move_fn move;
 	type_fn type;
@@ -585,16 +548,17 @@ public:
 		return data_ != nullptr;
 	}
 
-	[[nodiscard]] std::type_info const& type() const noexcept
+	template <class T>
+	[[nodiscard]] bool is_type() const noexcept
 	{
-		return vtable_->type();
+		return vtable_->type() == &type_info_tag_v<T>;
 	}
 };
 
 template <class T>
 [[nodiscard]] inline T* move_only_any_cast(move_only_any* operand) noexcept
 {
-	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
+	if LUG_UNLIKELY(!operand || !operand->is_type<std::decay_t<T>>())
 		return nullptr;
 	return static_cast<T*>(operand->data_);
 }
@@ -602,7 +566,7 @@ template <class T>
 template <class T>
 [[nodiscard]] inline T const* move_only_any_cast(move_only_any const* operand) noexcept
 {
-	if (!operand || !operand->has_value() || operand->type() != typeid(std::decay_t<T>))
+	if LUG_UNLIKELY(!operand || !operand->is_type<std::decay_t<T>>())
 		return nullptr;
 	return static_cast<const T*>(operand->data_);
 }
@@ -611,8 +575,8 @@ template <class T>
 [[nodiscard]] inline T* guarded_move_only_any_cast(move_only_any* operand)
 {
 	T* const p = detail::move_only_any_cast<T>(operand);
-	if (p == nullptr)
-		throw bad_move_only_any_cast{};
+	if LUG_UNLIKELY(p == nullptr)
+		lug::throw_exception<bad_move_only_any_cast>();
 	return p;
 }
 
@@ -620,8 +584,8 @@ template <class T>
 [[nodiscard]] inline T const* guarded_move_only_any_cast(move_only_any const* operand)
 {
 	T const* const p = detail::move_only_any_cast<T>(operand);
-	if (p == nullptr)
-		throw bad_move_only_any_cast{};
+	if LUG_UNLIKELY(p == nullptr)
+		lug::throw_exception<bad_move_only_any_cast>();
 	return p;
 }
 

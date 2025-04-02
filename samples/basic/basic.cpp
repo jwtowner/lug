@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <charconv>
 #include <fstream>
 #include <iomanip>
 #include <list>
@@ -173,17 +174,14 @@ public:
 			while (!file.bad() && !file.eof()) {
 				std::string line;
 				if (std::getline(file >> std::ws, line)) {
-					try {
-						std::size_t pos = 0;
-						int const lineno = std::stoi(line, &pos);
+					int lineno{0};
+					if (auto const [ptr, ec] = std::from_chars(line.data(), line.data() + line.size(), lineno); ec == std::errc{}) {
+						auto pos = static_cast<std::size_t>(ptr - line.data());
 						while ((pos < line.size()) && std::isspace(line[pos]))
 							++pos;
 						update_line(lineno, line.substr(pos) + "\n");
-					} catch (std::out_of_range const&) {
+					} else if (ec ==  std::errc::result_out_of_range) {
 						print_error("ILLEGAL LINE NUMBER");
-						return;
-					} catch (...) {
-						// ignore lines without a line number
 					}
 				} else {
 					file.clear();
@@ -459,30 +457,33 @@ private:
 };
 
 int main(int argc, char** argv)
-try {
-	basic_interpreter interpreter;
-	for (int i = 1; i < argc; ++i) {
-		if (std::string_view const arg{argv[i]}; arg == "-s" || arg == "--seed") {
-			if ((i + 1) < argc) {
-				try {
-					interpreter.seed(std::stoi(argv[i + 1]));
-					i++;
-				} catch (std::exception const&) {
-					throw std::runtime_error{"Invalid seed value for random number generator"};
+{
+	LUG_TRY {
+		basic_interpreter interpreter;
+		for (int i = 1; i < argc; ++i) {
+			if (std::string_view const arg{argv[i]}; arg == "-s" || arg == "--seed") {
+				if ((i + 1) < argc) {
+					int seed{0};
+					std::string_view const seed_arg{argv[i + 1]};
+					auto const [ptr, ec] = std::from_chars(seed_arg.data(), seed_arg.data() + seed_arg.size(), seed);
+					if ((ec != std::errc{}) || (ptr != (seed_arg.data() + seed_arg.size())))
+						lug::throw_exception<std::runtime_error>("Invalid seed value for random number generator");
+					interpreter.seed(seed);
+					++i;
+				} else {
+					lug::throw_exception<std::runtime_error>("No seed value provided for random number generator");
 				}
-			} else {
-				throw std::runtime_error{"No seed value provided for random number generator"};
+			} else if (arg != "-") {
+				interpreter.load(argv[i]);
 			}
-		} else if (arg != "-") {
-			interpreter.load(argv[i]);
 		}
+		interpreter.repl();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "ERROR: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "UNKNOWN ERROR\n";
+		return 1;
 	}
-	interpreter.repl();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "ERROR: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "UNKNOWN ERROR\n";
-	return 1;
 }

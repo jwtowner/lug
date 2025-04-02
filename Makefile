@@ -22,7 +22,7 @@ CXX = c++
 CXXSTD = -std=c++17
 CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
 CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
-CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) -Iinclude
+CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) $(CXXEXTRAFLAGS) -Iinclude
 LDFLAGS = $(CXXSTD) -s
 CLANGTIDY = clang-tidy
 SHELLCHECK = shellcheck
@@ -116,18 +116,19 @@ unicode: tools
 
 options:
 	@echo lug build options:
-	@echo "CXX          = $(CXX)"
-	@echo "CXXSTD       = $(CXXSTD)"
-	@echo "CXXWARNFLAGS = $(CXXWARNFLAGS)"
-	@echo "CXXOPTFLAGS  = $(CXXOPTFLAGS)"
-	@echo "CXXFLAGS     = $(CXXFLAGS)"
-	@echo "LDFLAGS      = $(LDFLAGS)"
-	@echo "CLANGTIDY    = $(CLANGTIDY)"
-	@echo "SHELLCHECK   = $(SHELLCHECK)"
-	@echo "DESTDIR      = $(DESTDIR)"
-	@echo "PREFIX       = $(PREFIX)"
-	@echo "VERSION      = $(VERSION)"
-	@echo "UCD_VERSION  = $(UCD_VERSION)"
+	@echo "CXX           = $(CXX)"
+	@echo "CXXSTD        = $(CXXSTD)"
+	@echo "CXXWARNFLAGS  = $(CXXWARNFLAGS)"
+	@echo "CXXOPTFLAGS   = $(CXXOPTFLAGS)"
+	@echo "CXXEXTRAFLAGS = $(CXXEXTRAFLAGS)"
+	@echo "CXXFLAGS      = $(CXXFLAGS)"
+	@echo "LDFLAGS       = $(LDFLAGS)"
+	@echo "CLANGTIDY     = $(CLANGTIDY)"
+	@echo "SHELLCHECK    = $(SHELLCHECK)"
+	@echo "DESTDIR       = $(DESTDIR)"
+	@echo "PREFIX        = $(PREFIX)"
+	@echo "VERSION       = $(VERSION)"
+	@echo "UCD_VERSION   = $(UCD_VERSION)"
 
 clean:
 	@echo cleaning

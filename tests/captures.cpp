@@ -248,17 +248,19 @@ void test_capture_arithmetic_expressions()
 }
 
 int main()
-try {
-	test_capture_email_syntax();
-	test_capture_url_syntax();
-	test_capture_comma_delimited_list();
-	test_capture_nested_calls();
-	test_capture_arithmetic_expressions();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_capture_email_syntax();
+		test_capture_url_syntax();
+		test_capture_comma_delimited_list();
+		test_capture_nested_calls();
+		test_capture_arithmetic_expressions();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }

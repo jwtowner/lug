@@ -83,14 +83,16 @@ void test_nested_arithmetic_with_attributes()
 }
 
 int main()
-try {
-	test_addition_with_attributes();
-	test_nested_arithmetic_with_attributes();
-	return 0;
-} catch (std::exception const& e) {
-	std::cerr << "Error: " << e.what() << "\n";
-	return 1;
-} catch (...) {
-	std::cerr << "Unknown Error\n";
-	return 1;
+{
+	LUG_TRY {
+		test_addition_with_attributes();
+		test_nested_arithmetic_with_attributes();
+		return 0;
+	} LUG_CATCH (std::exception const& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+	} LUG_CATCH_ANY {
+		std::cerr << "Unknown Error\n";
+		return 1;
+	}
 }
