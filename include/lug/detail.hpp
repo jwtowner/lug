@@ -115,6 +115,10 @@ namespace detail {
 
 template <class T> inline constexpr bool always_false_v = false;
 
+template <class T, class U = T, class = void> struct is_equality_comparable : std::false_type {};
+template <class T, class U> struct is_equality_comparable<T, U, std::void_t<decltype(std::declval<T>() == std::declval<U>())>> : std::true_type {};
+template <class T, class U = T> inline constexpr bool is_equality_comparable_v = is_equality_comparable<T, U>::value;
+
 template <class V, class R, class Fn, class... Args> struct is_invocable_r_exact_impl : std::false_type {};
 template <class R, class Fn, class... Args> struct is_invocable_r_exact_impl<std::void_t<std::enable_if_t<std::is_same_v<R, std::invoke_result_t<Fn, Args...>>>>, R, Fn, Args...> : std::true_type {};
 template <class R, class Fn, class... Args> struct is_invocable_r_exact : is_invocable_r_exact_impl<void, R, Fn, Args...> {};
@@ -393,6 +397,16 @@ template <class InputIt, class UnaryPredicate>
 			break;
 	}
 	return last;
+}
+
+template <class Sequence, class T, class Predicate = std::equal_to<typename Sequence::value_type>>
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::size_t push_back_unique(Sequence& s, T&& value, Predicate pred = Predicate{})
+{
+	for (std::size_t i = 0; i < s.size(); ++i)
+		if (pred(s[i], value))
+			return i;
+	s.push_back(std::forward<T>(value));
+	return s.size() - 1;
 }
 
 template <class Sequence>

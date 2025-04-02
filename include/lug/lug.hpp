@@ -138,6 +138,11 @@ public:
 		intervals_.swap(other.intervals_);
 		std::swap(intervals_size_, other.intervals_size_);
 	}
+
+	friend void swap(rune_set& lhs, rune_set& rhs) noexcept
+	{
+		lhs.swap(rhs);
+	}
 };
 
 class rune_set_builder
@@ -391,8 +396,6 @@ struct program
 	void concatenate(program const& src)
 	{
 		std::size_t const data_offset = data.size();
-		std::size_t const uniforms_offset = uniforms.size();
-		std::size_t const runesets_offset = runesets.size();
 		std::size_t const handlers_offset = handlers.size();
 		std::size_t const predicates_offset = predicates.size();
 		std::size_t const actions_offset = actions.size();
@@ -406,10 +409,10 @@ struct program
 					case opcode::match_any_of: case opcode::match_all_of: case opcode::match_none_of:
 					case opcode::test_any_of: case opcode::test_all_of: case opcode::test_none_of:
 					case opcode::repeat_any_of: case opcode::repeat_all_of: case opcode::repeat_none_of:
-						object = instr.immediate16 + uniforms_offset;
+						object = detail::push_back_unique(uniforms, src.uniforms[instr.immediate16]);
 						break;
 					case opcode::match_set: case opcode::test_set: case opcode::repeat_set:
-						object = instr.immediate16 + runesets_offset;
+						object = detail::push_back_unique(runesets, src.runesets[instr.immediate16]);
 						break;
 					case opcode::report_push: object = instr.immediate16 + handlers_offset; break;
 					case opcode::predicate: object = instr.immediate16 + predicates_offset; break;
@@ -426,8 +429,6 @@ struct program
 			instructions.push_back(new_instr);
 		}
 		data.insert(data.end(), src.data.begin(), src.data.end());
-		uniforms.insert(uniforms.end(), src.uniforms.begin(), src.uniforms.end());
-		runesets.insert(runesets.end(), src.runesets.begin(), src.runesets.end());
 		handlers.insert(handlers.end(), src.handlers.begin(), src.handlers.end());
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
@@ -902,8 +903,12 @@ class encoder
 	template <class Item, class ItemValue, class = std::enable_if_t<std::is_constructible_v<Item, ItemValue&&>>>
 	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, ItemValue&& item)
 	{
-		items.push_back(std::forward<ItemValue>(item));
-		return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
+		if constexpr (detail::is_equality_comparable_v<Item>) {
+			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(detail::push_back_unique(items, std::forward<ItemValue>(item)));
+		} else {
+			items.push_back(std::forward<ItemValue>(item));
+			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
+		}
 	}
 
 	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> add_string(std::string_view str)
