@@ -62,12 +62,62 @@ namespace lug {
 	return file_isatty(stdin);
 }
 
+class std_file_locker
+{
+	std::FILE* file_{nullptr};
+
+public:
+	explicit std_file_locker(std::FILE* file) noexcept
+		: file_{file}
+	{
+		if LUG_LIKELY(file_ != nullptr) {
+#if defined LUG_HAS_FLOCKFILE_POSIX
+			flockfile(file_);
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+			_lock_file(file_);
+#endif
+		}
+	}
+
+	~std_file_locker() noexcept
+	{
+		unlock();
+	}
+
+	[[nodiscard]] bool is_locked() const noexcept
+	{
+		return file_ != nullptr;
+	}
+
+	void unlock() noexcept
+	{
+		if (file_ != nullptr) {
+	#if defined LUG_HAS_FLOCKFILE_POSIX
+			funlockfile(file_);
+	#elif defined LUG_HAS_LOCK_FILE_MSVC
+			_unlock_file(file_);
+	#endif
+			file_ = nullptr;
+		}
+	}
+
+	std::FILE* release() noexcept
+	{
+		return std::exchange(file_, nullptr);
+	}
+
+	std_file_locker(std_file_locker const&) = delete;
+	std_file_locker(std_file_locker&&) = delete;
+	std_file_locker& operator=(std_file_locker const&) = delete;
+	std_file_locker& operator=(std_file_locker&& other) = delete;
+};
+
 struct std_file_deleter
 {
 	void operator()(std::FILE* file) const noexcept
 	{
 		if (file != nullptr)
-			std::fclose(file);
+			(void)std::fclose(file); // NOLINT(cppcoreguidelines-owning-memory)
 	}
 };
 
@@ -76,7 +126,7 @@ using std_file_ptr = std::unique_ptr<std::FILE, std_file_deleter>;
 [[nodiscard]] inline std_file_ptr fopen_unique(char const* filename, char const* mode) noexcept
 {
 #ifdef _MSC_VER
-	std::FILE* file = nullptr;
+	std::FILE* file{nullptr};
 	if (errno_t const err = fopen_s(&file, filename, mode); err != 0)
 		return nullptr;
 	return std_file_ptr{file};
@@ -85,25 +135,34 @@ using std_file_ptr = std::unique_ptr<std::FILE, std_file_deleter>;
 #endif
 }
 
+[[nodiscard]] inline int fgetc_unlocked(std::FILE* input) noexcept
+{
+#if defined LUG_HAS_FLOCKFILE_POSIX
+	return getc_unlocked(input); // NOLINT(concurrency-mt-unsafe)
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+	return _getc_nolock(input); // NOLINT(concurrency-mt-unsafe)
+#else
+	return std::fgetc(input);
+#endif
+}
+
+[[nodiscard]] inline std::size_t fread_unlocked_s(void* buffer, [[maybe_unused]] std::size_t buffer_size, std::size_t element_size, std::size_t count, std::FILE* input) noexcept
+{
+#if defined LUG_HAS_FLOCKFILE_POSIX
+	return fread_unlocked(buffer, element_size, count, input); // NOLINT(concurrency-mt-unsafe)
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+	return _fread_nolock_s(buffer, buffer_size, element_size, count, input); // NOLINT(concurrency-mt-unsafe)
+#else
+	return std::fread(buffer, element_size, count, input);
+#endif
+}
+
 inline std::FILE* skipline(std::FILE* input, int delim = '\n') noexcept
 {
 	if LUG_LIKELY(input != nullptr) {
-#if defined LUG_HAS_FLOCKFILE_POSIX
-		flockfile(input);
-		detail::scope_exit const unlock{[input]() noexcept { funlockfile(input); }};
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-		_lock_file(input);
-		detail::scope_exit const unlock{[input]() noexcept { _unlock_file(input); }};
-#endif
+		lug::std_file_locker const lock{input};
 		for (;;) {
-			int const ch =
-#if defined LUG_HAS_FLOCKFILE_POSIX
-			getc_unlocked(input);
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-			_getc_nolock(input);
-#else
-			std::fgetc(input);
-#endif
+			int const ch{lug::fgetc_unlocked(input)};
 			if ((ch == delim) || (ch == EOF))
 				break;
 		}
@@ -114,33 +173,21 @@ inline std::FILE* skipline(std::FILE* input, int delim = '\n') noexcept
 inline std::FILE* skipws(std::FILE* input) noexcept
 {
 	if LUG_LIKELY(input != nullptr) {
-#if defined LUG_HAS_FLOCKFILE_POSIX
-		flockfile(input);
-		detail::scope_exit unlock{[input]() noexcept { funlockfile(input); }};
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-		_lock_file(input);
-		detail::scope_exit const unlock{[input]() noexcept { _unlock_file(input); }};
-#endif
+		lug::std_file_locker lock{input};
 		for (;;) {
-			int const ch =
-#if defined LUG_HAS_FLOCKFILE_POSIX
-			getc_unlocked(input);
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-			_getc_nolock(input);
-#else
-			std::fgetc(input);
-#endif
+			int const ch{lug::fgetc_unlocked(input)};
 			if (ch == EOF)
 				break;
-			if (!std::isspace(ch)) {
+			if (std::isspace(ch) == 0) {
 #if defined LUG_HAS_FLOCKFILE_POSIX
-				unlock.release();
-				funlockfile(input);
-				ungetc(ch, input);
+				lock.unlock();
+				(void)ungetc(ch, input);
 #elif defined LUG_HAS_LOCK_FILE_MSVC
-				_ungetc_nolock(ch, input);
+				(void)_ungetc_nolock(ch, input); // NOLINT(concurrency-mt-unsafe)
+				lock.unlock();
 #else
-				std::ungetc(ch, input);
+				lock.unlock();
+				(void)std::ungetc(ch, input);
 #endif
 				break;
 			}
@@ -154,24 +201,11 @@ bool readline(std::FILE* input, OutputIt output, int delim = '\n')
 {
 	if LUG_UNLIKELY(input == nullptr)
 		return false;
-#if defined LUG_HAS_FLOCKFILE_POSIX
-	flockfile(input);
-	detail::scope_exit const unlock{[input]() noexcept { funlockfile(input); }};
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-	_lock_file(input);
-	detail::scope_exit const unlock{[input]() noexcept { _unlock_file(input); }};
-#endif
-	constexpr std::size_t max_count = (std::numeric_limits<std::size_t>::max)() / 2;
-	std::size_t count = 0;
+	constexpr std::size_t max_count{(std::numeric_limits<std::size_t>::max)() / 2};
+	std::size_t count{0};
+	lug::std_file_locker const lock{input};
 	while (count <= max_count) {
-		int const ch =
-#if defined LUG_HAS_FLOCKFILE_POSIX
-		getc_unlocked(input);
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-		_getc_nolock(input);
-#else
-		std::fgetc(input);
-#endif
+		int const ch = lug::fgetc_unlocked(input);
 		if (ch == EOF)
 			break;
 		*output = static_cast<char>(ch);
@@ -188,28 +222,16 @@ bool readfile(std::FILE* input, OutputIt output)
 {
 	if LUG_UNLIKELY(input == nullptr)
 		return false;
-#if defined LUG_HAS_FLOCKFILE_POSIX
-	flockfile(input);
-	detail::scope_exit const unlock{[input]() noexcept { funlockfile(input); }};
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-	_lock_file(input);
-	detail::scope_exit const unlock{[input]() noexcept { _unlock_file(input); }};
-#endif
-	constexpr std::size_t max_count = (std::numeric_limits<std::size_t>::max)() / 2;
-	std::size_t count = 0;
-	char buffer[4096];
+	constexpr std::size_t max_count{(std::numeric_limits<std::size_t>::max)() / 2};
+	std::size_t count{0};
+	constexpr std::size_t buffer_size{4096};
+	std::array<char, buffer_size> buffer{};
+	lug::std_file_locker const lock{input};
 	while (count <= max_count) {
-		std::size_t const n =
-#if defined LUG_HAS_FLOCKFILE_POSIX
-		fread_unlocked(buffer, 1, sizeof(buffer), input);
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-		_fread_nolock_s(buffer, sizeof(buffer), 1, sizeof(buffer), input);
-#else
-		std::fread(buffer, 1, sizeof(buffer), input);
-#endif
+		std::size_t const n{lug::fread_unlocked_s(buffer.data(), buffer.size(), 1, buffer.size(), input)};
 		if (n == 0)
 			break;
-		output = std::copy_n(buffer, n, output);
+		output = std::copy_n(buffer.begin(), n, output);
 		count += n;
 		if (count < n)
 			break;

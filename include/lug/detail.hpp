@@ -258,7 +258,7 @@ class scope_exit
 
 public:
 	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
-	constexpr explicit scope_exit( Fn&& fn ) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
+	constexpr explicit scope_exit(Fn&& fn) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
 		: destructor_{std::forward<Fn>(fn)}
 	{}
 
@@ -292,7 +292,7 @@ class scope_fail
 
 public:
 	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
-	constexpr explicit scope_fail( Fn&& fn ) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
+	constexpr explicit scope_fail(Fn&& fn) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
 		: destructor_{std::forward<Fn>(fn)}
 		, uncaught_on_construction_(std::uncaught_exceptions())
 	{}
