@@ -5,6 +5,8 @@
 #ifndef LUG_INCLUDE_LUG_CONFIG_HPP
 #define LUG_INCLUDE_LUG_CONFIG_HPP
 
+// NOLINTBEGIN(cppcoreguidelines-macro-to-enum,cppcoreguidelines-macro-usage,modernize-macro-to-enum)
+
 #define LUG_VERSION 0x000600
 #define LUG_VERSION_MAJOR 0
 #define LUG_VERSION_MINOR 6
@@ -54,7 +56,7 @@
 #define LUG_LIKELY(...) (__VA_ARGS__) [[likely]]
 #else
 #ifdef __GNUC__
-#define LUG_LIKELY(...) (__builtin_expect(!!(__VA_ARGS__), 1))
+#define LUG_LIKELY(...) (__builtin_expect((__VA_ARGS__), 1))
 #else
 #define LUG_LIKELY(...) (__VA_ARGS__)
 #endif
@@ -66,7 +68,7 @@
 #define LUG_UNLIKELY(...) (__VA_ARGS__) [[unlikely]]
 #else
 #ifdef __GNUC__
-#define LUG_UNLIKELY(...) (__builtin_expect(!!(__VA_ARGS__), 0))
+#define LUG_UNLIKELY(...) (__builtin_expect((__VA_ARGS__), 0))
 #else
 #define LUG_UNLIKELY(...) (__VA_ARGS__)
 #endif
@@ -94,5 +96,7 @@ _Pragma("GCC diagnostic ignored \"-Wunused-but-set-variable\"")
 #define LUG_DIAGNOSTIC_POP
 #endif
 #endif // LUG_DIAGNOSTIC_POP
+
+// NOLINTEND(cppcoreguidelines-macro-to-enum,cppcoreguidelines-macro-usage,modernize-macro-to-enum)
 
 #endif // LUG_INCLUDE_LUG_CONFIG_HPP

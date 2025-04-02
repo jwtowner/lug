@@ -49,13 +49,14 @@ class rune_set
 	using ascii_bitset = std::bitset<static_cast<std::size_t>(ascii_limit)>;
 
 	ascii_bitset ascii_map_;
-	std::unique_ptr<std::pair<char32_t, char32_t>[]> intervals_;
+	std::unique_ptr<std::pair<char32_t, char32_t>[]> intervals_; // NOLINT(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
 	std::size_t intervals_size_{0};
 
 	constexpr explicit rune_set(ascii_bitset const& ascii_map) noexcept
 		: ascii_map_{ascii_map}
 	{}
 
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
 	rune_set(ascii_bitset const& ascii_map, std::unique_ptr<std::pair<char32_t, char32_t>[]>&& intervals, std::size_t size) noexcept
 		: ascii_map_{ascii_map}
 		, intervals_{std::move(intervals)}
@@ -70,6 +71,7 @@ public:
 		, intervals_size_{other.intervals_size_}
 	{
 		if (intervals_size_ > 0) {
+			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
 			intervals_ = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals_size_);
 			std::copy_n(other.intervals_.get(), intervals_size_, intervals_.get());
 		}
@@ -165,6 +167,7 @@ class rune_set_builder
 	{
 		if (intervals.empty())
 			return rune_set{ascii_map};
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
 		auto interval_array = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals.size());
 		std::copy(intervals.begin(), intervals.end(), interval_array.get());
 		return rune_set{ascii_map, std::move(interval_array), intervals.size()};
@@ -287,8 +290,7 @@ public:
 		}
 		if (negated_)
 			return make_rune_set(~ascii_map_, negate_intervals(optimized));
-		else
-			return make_rune_set(ascii_map_, optimized);
+		return make_rune_set(ascii_map_, optimized);
 	}
 };
 

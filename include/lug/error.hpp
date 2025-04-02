@@ -13,6 +13,8 @@
 #include <string>
 #include <typeinfo>
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 #ifndef LUG_NO_EXCEPTIONS
 #define LUG_TRY try
 #define LUG_CATCH(...) catch (__VA_ARGS__)
@@ -22,6 +24,8 @@
 #define LUG_CATCH(...) if ([[maybe_unused]] __VA_ARGS__ = {}; (lug::exceptions_enabled))
 #define LUG_CATCH_ANY if ((lug::exceptions_enabled))
 #endif
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 namespace lug {
 
