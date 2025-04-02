@@ -11,20 +11,19 @@
 
 #include <lug/detail.hpp>
 
-#include <cctype>
 #include <cstdint>
-
 #include <array>
 #include <memory>
 #include <optional>
 
 namespace lug::unicode {
 
-static constexpr char32_t ascii_limit = 0x80U;
+static constexpr char32_t max_ascii_code_point = 0x7FU;
+static constexpr char32_t max_code_point = 0x10FFFFU;
 
 [[nodiscard]] constexpr bool is_ascii(char32_t r) noexcept
 {
-	return r < ascii_limit;
+	return r <= max_ascii_code_point;
 }
 
 // NOLINTBEGIN(hicpp-signed-bitwise)

@@ -1171,9 +1171,7 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 
 #include <lug/detail.hpp>
 
-#include <cctype>
 #include <cstdint>
-
 #include <array>
 #include <memory>
 #include <optional>
@@ -1447,8 +1445,11 @@ inline constexpr none_of_fn none_of{};
 }
 )c++"
 
-// Not used in the current implementation
-#if 0
+// NOTE: Not used in the current implementation. There is no need to parse
+// property enumerator values from strings as the old basic regular expression
+// combinators have been removed.
+#ifdef LUG_UNICODE_ENABLE_PROPERTY_PARSERS
+
 << R"c++(
 namespace detail {
 
@@ -1520,7 +1521,8 @@ namespace detail {
 	});
 	return labels;
 })
-#endif
+
+#endif // LUG_UNICODE_ENABLE_PROPERTY_PARSERS
 
 << R"c++(
 namespace detail {

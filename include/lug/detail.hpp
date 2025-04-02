@@ -8,7 +8,6 @@
 #include <lug/error.hpp>
 
 #include <cstddef>
-
 #include <algorithm>
 #include <functional>
 #include <iterator>

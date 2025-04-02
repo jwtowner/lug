@@ -36,39 +36,26 @@ template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
 template <class> class recursive_wrapper;
-enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
-using error_handler = std::function<error_response(error_context&)>;
-using semantic_action = std::function<void(environment&)>;
-using semantic_capture_action = std::function<void(environment&, syntax const&)>;
-using syntactic_predicate = std::function<bool(environment&)>;
 using parser = basic_parser<multi_input_source>;
-
-struct encoder_expression_trait_tag {};
-template <class E, class = void> struct is_encoder_expression : std::false_type {};
-template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
-template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
-template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
-template <class E> inline constexpr bool is_recovery_expression_v = is_encoder_expression_v<E> || std::is_same_v<rule, std::decay_t<E>>;
-template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_v<std::decay_t<H>, error_context&>;
-template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
-template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
-template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
-
 [[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
 
 class rune_set
 {
 	friend class rune_set_builder;
 
-	std::bitset<128> ascii_map_;
+	static constexpr char32_t ascii_limit = U'\x80';
+	static constexpr char32_t unicode_limit = U'\x10FFFF';
+	using ascii_bitset = std::bitset<static_cast<std::size_t>(ascii_limit)>;
+
+	ascii_bitset ascii_map_;
 	std::unique_ptr<std::pair<char32_t, char32_t>[]> intervals_;
 	std::size_t intervals_size_{0};
 
-	constexpr explicit rune_set(std::bitset<128> const& ascii_map) noexcept
+	constexpr explicit rune_set(ascii_bitset const& ascii_map) noexcept
 		: ascii_map_{ascii_map}
 	{}
 
-	rune_set(std::bitset<128> const& ascii_map, std::unique_ptr<std::pair<char32_t, char32_t>[]>&& intervals, std::size_t size) noexcept
+	rune_set(ascii_bitset const& ascii_map, std::unique_ptr<std::pair<char32_t, char32_t>[]>&& intervals, std::size_t size) noexcept
 		: ascii_map_{ascii_map}
 		, intervals_{std::move(intervals)}
 		, intervals_size_{size}
@@ -121,7 +108,7 @@ public:
 
 	[[nodiscard]] bool contains(char32_t rune) const noexcept
 	{
-		if (rune < unicode::ascii_limit)
+		if (rune < ascii_limit)
 			return ascii_map_[static_cast<std::size_t>(rune)];
 		auto const interval = std::lower_bound(intervals_.get(), intervals_.get() + intervals_size_, rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
 		return (interval != intervals_.get() + intervals_size_) && (interval->first <= rune) && (rune <= interval->second);
@@ -147,30 +134,36 @@ public:
 
 class rune_set_builder
 {
-	std::bitset<128> ascii_map_;
+	using ascii_bitset = rune_set::ascii_bitset;
+
+	ascii_bitset ascii_map_;
 	std::vector<std::pair<char32_t, char32_t>> intervals_;
 	bool casefolded_{false};
 	bool negated_{false};
 
-	static inline std::vector<std::pair<char32_t, char32_t>> shared_negated_empty_intervals_{{unicode::ascii_limit, U'\xFFFFFFFF'}};
-
 	[[nodiscard]] static std::vector<std::pair<char32_t, char32_t>> negate_intervals(std::vector<std::pair<char32_t, char32_t>> const& intervals)
 	{
 		std::vector<std::pair<char32_t, char32_t>> result;
-		if (char32_t const front = intervals.front().first; unicode::ascii_limit < front)
-			result.emplace_back(unicode::ascii_limit, front - 1);
-		if (intervals.size() > 1) {
-			auto const last = intervals.cend();
-			for (auto left = intervals.cbegin(), right = left + 1; right != last; ++left, ++right)
-				result.emplace_back(left->second + 1, right->first - 1);
+		if (!intervals.empty()) {
+			if (char32_t const front = intervals.front().first; rune_set::ascii_limit < front)
+				result.emplace_back(rune_set::ascii_limit, front - 1);
+			if (intervals.size() > 1) {
+				auto const last = intervals.cend();
+				for (auto left = intervals.cbegin(), right = left + 1; right != last; ++left, ++right)
+					result.emplace_back(left->second + 1, right->first - 1);
+			}
+			if (char32_t const back = intervals.back().second; back < rune_set::unicode_limit)
+				result.emplace_back(back + 1, rune_set::unicode_limit);
+		} else {
+			result.emplace_back(rune_set::ascii_limit, rune_set::unicode_limit);
 		}
-		if (char32_t const back = intervals.back().second; back < U'\xFFFFFFFF')
-			result.emplace_back(back + 1, U'\xFFFFFFFF');
 		return result;
 	}
 
-	[[nodiscard]] static rune_set make_rune_set(std::bitset<128> const& ascii_map, std::vector<std::pair<char32_t, char32_t>> const& intervals)
+	[[nodiscard]] static rune_set make_rune_set(ascii_bitset const& ascii_map, std::vector<std::pair<char32_t, char32_t>> const& intervals)
 	{
+		if (intervals.empty())
+			return rune_set{ascii_map};
 		auto interval_array = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals.size());
 		std::copy(intervals.begin(), intervals.end(), interval_array.get());
 		return rune_set{ascii_map, std::move(interval_array), intervals.size()};
@@ -178,7 +171,7 @@ class rune_set_builder
 
 	void push_rune(char32_t rune)
 	{
-		if (rune < unicode::ascii_limit) {
+		if (rune < rune_set::ascii_limit) {
 			ascii_map_.set(static_cast<std::size_t>(rune));
 		} else {
 			intervals_.emplace_back(rune, rune);
@@ -194,10 +187,10 @@ class rune_set_builder
 
 	void push_range(char32_t start, char32_t end)
 	{
-		for (char32_t rn = start; rn <= end && rn < unicode::ascii_limit; ++rn)
+		for (char32_t rn = start; rn <= end && rn < rune_set::ascii_limit; ++rn)
 			ascii_map_.set(static_cast<std::size_t>(rn));
-		if (end >= unicode::ascii_limit) {
-			intervals_.emplace_back((std::max)(start, unicode::ascii_limit), end);
+		if (end >= rune_set::ascii_limit) {
+			intervals_.emplace_back((std::max)(start, rune_set::ascii_limit), end);
 			std::push_heap(intervals_.begin(), intervals_.end());
 		}
 	}
@@ -243,6 +236,8 @@ public:
 
 	rune_set_builder& add_rune(char32_t rune)
 	{
+		if (rune >= rune_set::unicode_limit)
+			throw bad_character_range{};
 		if (casefolded_)
 			push_casefolded_rune(rune);
 		else
@@ -259,7 +254,7 @@ public:
 
 	rune_set_builder& add_range(char32_t start, char32_t end)
 	{
-		if (start > end)
+		if ((start > end) || (end >= rune_set::unicode_limit))
 			throw bad_character_range{};
 		if (casefolded_)
 			push_casefolded_range(start, end);
@@ -280,14 +275,6 @@ public:
 
 	[[nodiscard]] rune_set build() &&
 	{
-		if (negated_)
-			ascii_map_.flip();
-		if (intervals_.empty()) {
-			if (negated_)
-				return make_rune_set(ascii_map_, shared_negated_empty_intervals_);
-			else
-				return rune_set{ascii_map_};
-		}
 		std::vector<std::pair<char32_t, char32_t>> optimized;
 		std::sort_heap(intervals_.begin(), intervals_.end());
 		auto out = optimized.end();
@@ -298,11 +285,13 @@ public:
 				out->second = out->second < r.second ? r.second : out->second;
 		}
 		if (negated_)
-			return make_rune_set(ascii_map_, negate_intervals(optimized));
+			return make_rune_set(~ascii_map_, negate_intervals(optimized));
 		else
 			return make_rune_set(ascii_map_, optimized);
 	}
 };
+
+enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
 
 struct registers
 {
@@ -376,10 +365,25 @@ struct alignas(std::uint_least64_t) instruction
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
 static_assert(alignof(instruction) == alignof(std::uint_least64_t), "expected instruction alignment to be same size as std::uint_least64_t");
 
+struct encoder_expression_trait_tag {};
+template <class E, class = void> struct is_encoder_expression : std::false_type {};
+template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
+template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
+template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+template <class E> inline constexpr bool is_recovery_expression_v = is_encoder_expression_v<E> || std::is_same_v<rule, std::decay_t<E>>;
+template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_v<std::decay_t<H>, error_context&>;
+template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_convertible_v<std::decay_t<E>, std::string_view> || std::is_invocable_r_v<bool, std::decay_t<E>, environment&>;
+template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
+template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
+
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
 template <> inline constexpr bool is_flag_enum_v<directives> = true;
 
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
+using error_handler = std::function<error_response(error_context&)>;
+using semantic_action = std::function<void(environment&)>;
+using semantic_capture_action = std::function<void(environment&, syntax const&)>;
+using syntactic_predicate = std::function<bool(environment&)>;
 
 struct program
 {
@@ -903,7 +907,7 @@ class encoder
 	template <class Item, class ItemValue, class = std::enable_if_t<std::is_constructible_v<Item, ItemValue&&>>>
 	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, ItemValue&& item)
 	{
-		if constexpr (detail::is_equality_comparable_v<Item>) {
+		if constexpr (std::is_same_v<std::decay_t<Item>, std::decay_t<ItemValue>> && detail::is_equality_comparable_v<std::decay_t<Item>>) {
 			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(detail::push_back_unique(items, std::forward<ItemValue>(item)));
 		} else {
 			items.push_back(std::forward<ItemValue>(item));
@@ -967,7 +971,8 @@ public:
 	{
 		if (auto const& p = r.program_; allow_inlining && (prec <= 0) && !r.currently_encoding_ && r.callees_.empty() &&
 										(!p.instructions.empty() && (p.instructions.size() <= inline_max_instructions)) &&
-										((p.runesets.size() + p.actions.size() + p.captures.size() + p.predicates.size()) <= inline_max_objects))
+										((p.uniforms.size() + p.runesets.size() + p.handlers.size() + p.actions.size() +
+										  p.captures.size() + p.predicates.size()) <= inline_max_objects))
 			return skip(p.entry_mode, directives::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
