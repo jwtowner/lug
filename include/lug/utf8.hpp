@@ -302,7 +302,7 @@ struct utf8_tocasefold_fn
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
-	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
 		result.reserve(rng.size());
@@ -341,7 +341,7 @@ struct utf8_tolower_fn
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
-	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
 		result.reserve(rng.size());
@@ -380,7 +380,7 @@ struct utf8_toupper_fn
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
-	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
 		result.reserve(rng.size());
