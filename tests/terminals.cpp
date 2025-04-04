@@ -35,9 +35,9 @@ void test_eol()
 	assert(lug::parse("\v", G));
 	assert(!lug::parse("\t", G));
 	assert(!lug::parse("\b", G));
-	assert(lug::parse("\u0085", G)); // U+0085 NEL Next Line
-	assert(lug::parse("\u2028", G)); // U+2028 LS Line Separator
-	assert(lug::parse("\u2029", G)); // U+2029 PS Paragraph Separator
+	assert(!lug::parse("\u0085", G)); // U+0085 NEL Next Line
+	assert(!lug::parse("\u2028", G)); // U+2028 LS Line Separator
+	assert(!lug::parse("\u2029", G)); // U+2029 PS Paragraph Separator
 
 	// Test token before eol
 	assert(!lug::parse("a\n", G));

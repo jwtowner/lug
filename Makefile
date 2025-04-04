@@ -47,7 +47,7 @@ TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # header dependencies
-HEADER_NAMES = config detail error iostream stdio unicode utf8 lug
+HEADER_NAMES = ascii config detail error iostream stdio unicode utf8 lug
 HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
 # shell scripts
@@ -148,6 +148,8 @@ install: all
 	@mkdir -p $(DESTDIR)$(PREFIX)/include/lug
 	@cp -f include/lug/lug.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@cp -f include/lug/ascii.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/ascii.hpp
 	@cp -f include/lug/config.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/config.hpp
 	@cp -f include/lug/detail.hpp $(DESTDIR)$(PREFIX)/include/lug
@@ -166,6 +168,7 @@ install: all
 uninstall:
 	@echo removing header files from $(DESTDIR)$(PREFIX)/include/lug
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/lug.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/ascii.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/config.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/error.hpp

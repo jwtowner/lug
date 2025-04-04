@@ -79,7 +79,7 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 } // namespace detail
 
-struct is_ascii_fn
+struct utf8_is_ascii_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
@@ -87,9 +87,9 @@ struct is_ascii_fn
 	}
 };
 
-inline constexpr is_ascii_fn is_ascii{};
+inline constexpr utf8_is_ascii_fn is_ascii{};
 
-struct is_lead_fn
+struct utf8_is_lead_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
@@ -97,9 +97,9 @@ struct is_lead_fn
 	}
 };
 
-inline constexpr is_lead_fn is_lead{};
+inline constexpr utf8_is_lead_fn is_lead{};
 
-struct is_lead_or_ascii_fn
+struct utf8_is_lead_or_ascii_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
 	{
@@ -107,7 +107,7 @@ struct is_lead_or_ascii_fn
 	}
 };
 
-inline constexpr is_lead_or_ascii_fn is_lead_or_ascii{};
+inline constexpr utf8_is_lead_or_ascii_fn is_lead_or_ascii{};
 
 template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
 [[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune(InputIt first, InputIt last)
@@ -121,6 +121,19 @@ template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<In
 			break;
 	}
 	return std::make_pair(std::find_if(first, last, lug::utf8::is_lead_or_ascii), detail::utf32_replacement);
+}
+
+template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
+[[nodiscard]] constexpr std::pair<InputIt, char32_t> decode_rune_rest(char head, InputIt rest, InputIt last)
+{
+	char32_t rune = U'\0';
+	detail::decode_state state = utf8::detail::decode_rune_octet(rune, head, detail::decode_state::accept);
+	if (state == detail::decode_state::accept)
+		return std::make_pair(rest, rune);
+	while ((state != detail::decode_state::reject) && (rest != last))
+		if (state = utf8::detail::decode_rune_octet(rune, *rest++, state); state == detail::decode_state::accept)
+			return std::make_pair(rest, rune);
+	return std::make_pair(std::find_if(rest, last, lug::utf8::is_lead_or_ascii), detail::utf32_replacement);
 }
 
 template <class InputIt, class = lug::detail::enable_if_char_input_iterator_t<InputIt>>
@@ -153,8 +166,6 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return {dst, true};
 }
 
-// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-
 [[nodiscard]] inline std::string encode_rune(char32_t rune)
 {
 	std::string result;
@@ -162,10 +173,41 @@ inline std::pair<OutputIt, bool> encode_rune(OutputIt dst, char32_t rune)
 	return result;
 }
 
-struct match_blank_unicode_fn
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+
+struct utf8_match_space_fn
 {
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
-	[[nodiscard]] InputIt operator()(InputIt first, InputIt last) const
+	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
+	{
+		if (first != last) {
+			auto const c = *first;
+			if ((c == ' ') || (('\t' <= c) && (c <= '\r'))) {
+				++first;
+				return first;
+			}
+			if (utf8::is_lead(c)) {
+				auto const [next, rune] = utf8::decode_rune_rest(c, std::next(first), last);
+				if ((unicode::query(rune).compatibility() & unicode::ctype::space) != unicode::ctype::none)
+					return next;
+			}
+		}
+		return std::nullopt;
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng));
+	}
+};
+
+inline constexpr utf8_match_space_fn match_space{};
+
+struct utf8_match_blank_fn
+{
+	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
 		if (first != last) {
 			auto const c = *first;
@@ -174,24 +216,24 @@ struct match_blank_unicode_fn
 				return first;
 			}
 			if (utf8::is_lead(c)) {
-				auto const [next, rune] = utf8::decode_rune(first, last);
+				auto const [next, rune] = utf8::decode_rune_rest(c, std::next(first), last);
 				if ((unicode::query(rune).compatibility() & unicode::ctype::blank) != unicode::ctype::none)
 					return next;
 			}
 		}
-		return first;
+		return std::nullopt;
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		return (*this)(std::begin(rng), std::end(rng));
 	}
 };
 
-inline constexpr match_blank_unicode_fn match_blank{};
+inline constexpr utf8_match_blank_fn match_blank{};
 
-struct match_eol_unicode_fn
+struct utf8_match_eol_fn
 {
 	static constexpr char nel0 = static_cast<char>(0xc2);
 	static constexpr char nel1 = static_cast<char>(0x85);
@@ -201,7 +243,7 @@ struct match_eol_unicode_fn
 	static constexpr char ps2 = static_cast<char>(0xa9);
 
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
-	[[nodiscard]] constexpr InputIt operator()(InputIt first, InputIt last) const
+	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
 		if (first != last) {
 			auto next = first;
@@ -228,51 +270,22 @@ struct match_eol_unicode_fn
 				}
 			}
 		}
-		return first;
+		return std::nullopt;
 	}
 
 	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		return (*this)(std::begin(rng), std::end(rng));
 	}
 };
 
-inline constexpr match_eol_unicode_fn match_eol{};
+inline constexpr utf8_match_eol_fn match_eol{};
 
-struct match_space_unicode_fn
-{
-	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
-	[[nodiscard]] InputIt operator()(InputIt first, InputIt last) const
-	{
-		if (first != last) {
-			auto const c = *first;
-			if ((c == ' ') || (('\t' <= c) && (c <= '\r'))) {
-				++first;
-				return first;
-			}
-			if (utf8::is_lead(c)) {
-				auto const [next, rune] = utf8::decode_rune(first, last);
-				if ((unicode::query(rune).compatibility() & unicode::ctype::space) != unicode::ctype::none)
-					return next;
-			}
-		}
-		return first;
-	}
-
-	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] auto operator()(InputRng&& rng) const -> decltype(std::begin(rng)) // NOLINT(cppcoreguidelines-missing-std-forward)
-	{
-		return (*this)(std::begin(rng), std::end(rng));
-	}
-};
-
-inline constexpr match_space_unicode_fn match_space{};
-
-struct tocasefold_unicode_fn
+struct utf8_tocasefold_fn
 {
 	template <class InputIt, class OutputIt>
-	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -282,21 +295,36 @@ struct tocasefold_unicode_fn
 		return dst;
 	}
 
-	[[nodiscard]] std::string operator()(std::string_view src) const
+	template <class InputRng, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	constexpr auto operator()(InputRng&& rng, OutputIt dst) const -> OutputIt // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng), dst);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
-		result.reserve(src.size());
-		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		result.reserve(rng.size());
+		(*this)(std::begin(rng), std::end(rng), std::back_inserter(result));
+		return result;
+	}
+
+	[[nodiscard]] auto operator()(std::string_view str) const -> std::string
+	{
+		std::string result;
+		result.reserve(str.size());
+		(*this)(std::begin(str), std::end(str), std::back_inserter(result));
 		return result;
 	}
 };
 
-inline constexpr tocasefold_unicode_fn tocasefold{};
+inline constexpr utf8_tocasefold_fn tocasefold{};
 
-struct tolower_unicode_fn
+struct utf8_tolower_fn
 {
 	template <class InputIt, class OutputIt>
-	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -306,21 +334,36 @@ struct tolower_unicode_fn
 		return dst;
 	}
 
-	[[nodiscard]] std::string operator()(std::string_view src) const
+	template <class InputRng, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	constexpr auto operator()(InputRng&& rng, OutputIt dst) const -> OutputIt // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng), dst);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
-		result.reserve(src.size());
-		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		result.reserve(rng.size());
+		(*this)(std::begin(rng), std::end(rng), std::back_inserter(result));
+		return result;
+	}
+
+	[[nodiscard]] auto operator()(std::string_view str) const -> std::string
+	{
+		std::string result;
+		result.reserve(str.size());
+		(*this)(std::begin(str), std::end(str), std::back_inserter(result));
 		return result;
 	}
 };
 
-inline constexpr tolower_unicode_fn tolower{};
+inline constexpr utf8_tolower_fn tolower{};
 
-struct toupper_unicode_fn
+struct utf8_toupper_fn
 {
 	template <class InputIt, class OutputIt>
-	OutputIt operator()(InputIt first, InputIt last, OutputIt dst) const
+	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
 	{
 		while (first != last) {
 			auto [next, rune] = lug::utf8::decode_rune(first, last);
@@ -330,16 +373,31 @@ struct toupper_unicode_fn
 		return dst;
 	}
 
-	[[nodiscard]] std::string operator()(std::string_view src) const
+	template <class InputRng, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	constexpr auto operator()(InputRng&& rng, OutputIt dst) const -> OutputIt // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng), dst);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
+	[[nodiscard]] constexpr auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
 	{
 		std::string result;
-		result.reserve(src.size());
-		(*this)(std::begin(src), std::end(src), std::back_inserter(result));
+		result.reserve(rng.size());
+		(*this)(std::begin(rng), std::end(rng), std::back_inserter(result));
+		return result;
+	}
+
+	[[nodiscard]] auto operator()(std::string_view str) const -> std::string
+	{
+		std::string result;
+		result.reserve(str.size());
+		(*this)(std::begin(str), std::end(str), std::back_inserter(result));
 		return result;
 	}
 };
 
-inline constexpr toupper_unicode_fn toupper{};
+inline constexpr utf8_toupper_fn toupper{};
 
 } // namespace lug::utf8
 

@@ -37,9 +37,9 @@ public:
 		rule NL     = lexeme['\n'_cx | "\r\n"_sx | '\r'_cx];
 		rule Delim  = lexeme[','_cx | ';'_cx];
 		rule PrntDl = lexeme[','_cx | ';'_cx <[]{ std::putchar(' '); }];
-		rule LineNo = lexeme[capture(tok_)[+"0-9"_bx]]                   <[this]{ return std::stoi(std::string{tok_}); };
+		rule LineNo = lexeme[capture(tok_)[+"0-9"_bx]]                   <[this]{ return std::stoi(tok_); };
 		rule Real   = lexeme[capture(tok_)[+"0-9"_bx > ~("."_sx > +"0-9"_bx)
-		                     > ~("Ee"_bx > ~"+-"_bx > +"0-9"_bx)]]       <[this]{ return std::stod(std::string{tok_}); };
+		                     > ~("Ee"_bx > ~"+-"_bx > +"0-9"_bx)]]       <[this]{ return std::stod(tok_); };
 		rule String = lexeme["\"" > capture(tok_)[*"^\""_bx] > "\""]     <[this]{ return tok_.str(); };
 		rule Var    = lexeme[capture(tok_)["A-Za-z"_bx > ~"0-9"_bx]]     <[this]{ return lug::utf8::toupper(tok_); };
 		rule Fn     = lexeme["FN"_isx > capture(tok_)["A-Za-z"_bx]]      <[this]{ return lug::utf8::toupper(tok_); };

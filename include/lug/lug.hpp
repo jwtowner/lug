@@ -5,6 +5,7 @@
 #ifndef LUG_INCLUDE_LUG_LUG_HPP
 #define LUG_INCLUDE_LUG_LUG_HPP
 
+#include <lug/ascii.hpp>
 #include <lug/utf8.hpp>
 
 #include <bitset>
@@ -63,6 +64,10 @@ class rune_set
 		, intervals_size_{size}
 	{}
 
+	static rune_set build_blank();
+	static rune_set build_space();
+	static rune_set build_eol();
+
 public:
 	constexpr rune_set() noexcept = default;
 
@@ -109,6 +114,41 @@ public:
 		return !(*this == rhs);
 	}
 
+	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
+	{
+		if (first != last) {
+			if (auto const c = *first++; utf8::is_ascii(c)) {
+				if (ascii_map_[static_cast<std::size_t>(static_cast<unsigned char>(c))])
+					return first;
+			} else {
+				auto const [next, rune] = utf8::decode_rune_rest(c, first, last);
+				auto const interval = std::lower_bound(intervals_.get(), intervals_.get() + intervals_size_, rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
+				if ((interval != intervals_.get() + intervals_size_) && (interval->first <= rune) && (rune <= interval->second))
+					return next;
+			}
+		}
+		return std::nullopt;
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE auto operator()(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng));
+	}
+
+	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE auto match(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
+	{
+		return match(first, last);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE auto match(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return match(std::begin(rng), std::end(rng));
+	}
+
 	[[nodiscard]] bool contains(char32_t rune) const noexcept
 	{
 		if (rune < ascii_limit)
@@ -132,6 +172,24 @@ public:
 	friend void swap(rune_set& lhs, rune_set& rhs) noexcept
 	{
 		lhs.swap(rhs);
+	}
+
+	static rune_set const& blank()
+	{
+		static rune_set const blankset = build_blank();
+		return blankset;
+	}
+
+	static rune_set const& space()
+	{
+		static rune_set const spaceset = build_space();
+		return spaceset;
+	}
+
+	static rune_set const& eol()
+	{
+		static rune_set const eolset = build_eol();
+		return eolset;
 	}
 };
 
@@ -267,6 +325,18 @@ public:
 		return *this;
 	}
 
+	rune_set_builder& add_range(std::pair<char32_t, char32_t> const& range)
+	{
+		return add_range(range.first, range.second);
+	}
+
+	rune_set_builder& add_ranges(std::initializer_list<std::pair<char32_t, char32_t>> ranges)
+	{
+		for (auto const& range : ranges)
+			add_range(range);
+		return *this;
+	}
+
 	rune_set_builder& add_rune_set(rune_set const& set)
 	{
 		ascii_map_ |= set.ascii_map_;
@@ -293,6 +363,30 @@ public:
 		return make_rune_set(ascii_map_, optimized);
 	}
 };
+
+inline rune_set rune_set::build_blank()
+{
+	rune_set_builder builder;
+	builder.add_runes({U'\u0009', U'\u0020', U'\u00A0', U'\u1680', U'\u202F', U'\u205F', U'\u3000'});
+	builder.add_range(U'\u2000', U'\u200A');
+	return std::move(builder).build();
+}
+
+inline rune_set rune_set::build_space()
+{
+	rune_set_builder builder;
+	builder.add_runes({U'\u0020', U'\u0085', U'\u00A0', U'\u1680', U'\u2028', U'\u2029', U'\u202F', U'\u205F', U'\u3000'});
+	builder.add_ranges({{U'\u0009', U'\u000D'}, {U'\u2000', U'\u200A'}});
+	return std::move(builder).build();
+}
+
+inline rune_set rune_set::build_eol()
+{
+	rune_set_builder builder;
+	builder.add_runes({U'\u0085', U'\u2028', U'\u2029'});
+	builder.add_range(U'\u000A', U'\u000D');
+	return std::move(builder).build();
+}
 
 enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
 
@@ -951,7 +1045,7 @@ public:
 	[[nodiscard]] instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
 	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
 	void jump_to_here(std::ptrdiff_t addr) { jump_to_target(addr, here()); }
-	std::uint_least16_t add_rune_set(rune_set&& runes) { return add_item(program_->runesets, std::move(runes)); }
+	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>> std::uint_least16_t add_rune_set(RS&& runes) { return add_item(program_->runesets, std::forward<RS>(runes)); }
 	std::ptrdiff_t append(instruction instr) { std::ptrdiff_t const addr{here()}; program_->instructions.push_back(instr); return addr; }
 	std::ptrdiff_t append(program const& p) { std::ptrdiff_t const addr{here()}; program_->concatenate(p); return addr; }
 	std::ptrdiff_t encode(opcode op) { return append(instruction{op, 0, 0, 0}); }
@@ -1030,6 +1124,12 @@ public:
 		return encode_min_max(unit_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<unsigned char>(c)));
 	}
 
+	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	std::ptrdiff_t encode_class(T properties)
+	{
+		return encode(Op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
+	}
+
 	std::ptrdiff_t match(std::string_view subject)
 	{
 		skip(!subject.empty() ? directives::eps : directives::none);
@@ -1043,7 +1143,7 @@ public:
 	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
 	std::ptrdiff_t match_class(T properties)
 	{
-		return skip().encode(Op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
+		return skip().encode_class<Op>(properties);
 	}
 
 	void dpsh(directives enable, directives disable)
@@ -2655,11 +2755,6 @@ protected:
 	bool success_{false};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
-	[[nodiscard]] LUG_ALWAYS_INLINE auto make_rune_set_matcher(instruction const& instr) const noexcept
-	{
-		return [&set = program_->runesets[instr.immediate16]](char32_t rune) noexcept { return set.contains(rune); };
-	}
-
 	template <class Predicate>
 	[[nodiscard]] LUG_ALWAYS_INLINE auto make_property_matcher(Predicate const& pred, instruction const& instr) const noexcept
 	{
@@ -2900,13 +2995,13 @@ class basic_parser : public parser_base
 		return subject.compare(0, sn, str) == 0;
 	}
 
-	template <class MatchFn, class... ExtraArgs>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match, ExtraArgs const&... extra_args)
+	template <class MatchOneFn, class... ExtraArgs>
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchOneFn const& match_one, ExtraArgs const&... extra_args)
 	{
 		std::size_t const i = sr;
 		std::size_t n = 0;
 		for ( ; n <= nmax; ++n)
-			if (match(*this, sr, extra_args...) != 0)
+			if (match_one(*this, sr, extra_args...) != 0)
 				break;
 		if (n >= nmin)
 			return 0;
@@ -2923,9 +3018,9 @@ class basic_parser : public parser_base
 		auto curr = first;
 		for ( ; n <= nmax; ++n) {
 			auto const next = match(curr, last);
-			if (next == curr)
+			if (!next)
 				break;
-			curr = next;
+			curr = *next;
 		}
 		if (n >= nmin) {
 			sr = i + static_cast<std::size_t>(curr - first);
@@ -2939,8 +3034,8 @@ class basic_parser : public parser_base
 	{
 		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
-			if (auto const next = match(curr, last); next != curr) {
-				sr = i + static_cast<std::size_t>(next - curr);
+			if (auto const next = match(curr, last); next) {
+				sr = i + static_cast<std::size_t>(*next - curr);
 				return 0;
 			}
 		}
@@ -2967,38 +3062,41 @@ class basic_parser : public parser_base
 				sr = input_source_.buffer().size();
 				return 0;
 			}
-			return repeat_match_buffered(sr, nmin, nmax, [](auto first, auto last) {
-				if (first == last)
-					return first;
-				return std::find_if(first + 1, last, utf8::is_lead_or_ascii);
+			return repeat_match_buffered(sr, nmin, nmax, [](auto first, auto last) -> std::optional<std::decay_t<decltype(first)>> {
+				if (first != last) {
+					auto const next = std::find_if(first + 1, last, utf8::is_lead_or_ascii);
+					if (next != first)
+						return next;
+				}
+				return std::nullopt;
 			});
 		}
 	}
 
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr)
 	{
-		return match_with(sr, utf8::match_blank);
+		return match_with(sr, ascii::match_blank);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
 		else
-			return repeat_match_buffered(sr, nmin, nmax, utf8::match_blank);
+			return repeat_match_buffered(sr, nmin, nmax, ascii::match_blank);
 	}
 
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr)
 	{
-		return match_with(sr, utf8::match_space);
+		return match_with(sr, ascii::match_space);
 	}
 
-	[[nodiscard]] std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
 		else
-			return repeat_match_buffered(sr, nmin, nmax, utf8::match_space);
+			return repeat_match_buffered(sr, nmin, nmax, ascii::match_space);
 	}
 
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
@@ -3006,7 +3104,7 @@ class basic_parser : public parser_base
 		std::size_t i = sr;
 		if (mode != 0)
 			(void)repeat_blank(i, 0, forever);
-		if (std::ptrdiff_t const eol_fail_count = match_with(i, utf8::match_eol); eol_fail_count != 0)
+		if (std::ptrdiff_t const eol_fail_count = match_with(i, ascii::match_eol); eol_fail_count != 0)
 			return eol_fail_count;
 		sr = i;
 		return 0;
@@ -3018,7 +3116,7 @@ class basic_parser : public parser_base
 		if constexpr (detail::input_source_has_options<InputSource>::value) {
 			if ((input_source_.options() & source_options::interactive) != source_options::none) {
 				if (mode != 0)
-					(void)repeat_match_buffered(i, 0, forever, utf8::match_space);
+					(void)repeat_match_buffered(i, 0, forever, ascii::match_space);
 				if (i >= input_source_.buffer().size()) {
 					sr = i;
 					return 0;
@@ -3069,21 +3167,36 @@ class basic_parser : public parser_base
 		}
 	}
 
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_set(std::size_t& sr, rune_set const& set)
+	{
+		return match_with(sr, set);
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_set(std::size_t& sr, std::size_t nmin, std::size_t nmax, rune_set const& set)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_set), set);
+		else
+			return repeat_match_buffered(sr, nmin, nmax, set);
+	}
+
 	template <class InputIt, class MatchFn>
-	[[nodiscard]] static InputIt decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match)
+	[[nodiscard]] static auto decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match) -> std::optional<std::decay_t<InputIt>>
 	{
 		auto const [next, rune] = utf8::decode_rune(first, last);
-		if (next == first)
-			return first;
-		bool matched = false;
-		if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
-			matched = match(unicode::query(rune));
-		} else if constexpr(std::is_invocable_v<MatchFn const&, char32_t>) {
-			matched = match(rune);
-		} else {
-			static_assert(detail::always_false_v<MatchFn>, "unsupported match operation");
+		if (next != first) {
+			bool matched = false;
+			if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
+				matched = match(unicode::query(rune));
+			} else if constexpr(std::is_invocable_v<MatchFn const&, char32_t>) {
+				matched = match(rune);
+			} else {
+				static_assert(detail::always_false_v<MatchFn>, "unsupported match operation");
+			}
+			if (matched)
+				return next;
 		}
-		return matched ? next : first;
+		return std::nullopt;
 	}
 
 	template <class MatchFn>
@@ -3091,8 +3204,8 @@ class basic_parser : public parser_base
 	{
 		if (std::size_t const i = sr; available(i)) {
 			auto const [curr, last] = buffer_range(i);
-			if (auto const next = decode_and_match_rune(curr, last, match); next != curr) {
-				sr = i + static_cast<std::size_t>(next - curr);
+			if (auto const next = decode_and_match_rune(curr, last, match); next) {
+				sr = i + static_cast<std::size_t>(*next - curr);
 				return 0;
 			}
 		}
@@ -3105,7 +3218,7 @@ class basic_parser : public parser_base
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
 		else
-			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last){ return decode_and_match_rune(first, last, match); });
+			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last) { return decode_and_match_rune(first, last, match); });
 	}
 
 	template <class Compare>
@@ -3544,7 +3657,7 @@ public:
 					fail_count = match_unit(registers_.sr, instr.immediate8);
 				} break;
 				case opcode::match_set: case opcode::test_set: {
-					fail_count = match_rune(registers_.sr, make_rune_set_matcher(instr));
+					fail_count = match_set(registers_.sr, program_->runesets[instr.immediate16]);
 				} break;
 				case opcode::match_all_of: case opcode::test_all_of: {
 					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr));
@@ -3568,7 +3681,7 @@ public:
 					fail_count = repeat_unit(registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
 				} break;
 				case opcode::repeat_set: {
-					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_rune_set_matcher(instr));
+					fail_count = repeat_set(registers_.sr, instr.unpack_min(), instr.unpack_max(), program_->runesets[instr.immediate16]);
 				} break;
 				case opcode::repeat_all_of: {
 					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::all_of, instr));
