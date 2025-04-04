@@ -3408,10 +3408,10 @@ class basic_parser : public parser_base
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		do {
 			error_response const fail_result = fail_one();
-			if (fail_result >= error_response::backtrack)
-				continue;
 			if LUG_UNLIKELY(fail_result == error_response::halt)
 				return false;
+			if (fail_result >= error_response::backtrack)
+				continue;
 			if (fail_result < error_response::accept)
 				success_ = false;
 			--fail_count;
