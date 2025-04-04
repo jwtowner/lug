@@ -15,7 +15,7 @@ struct ascii_match_space_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			char const c = *first;
 			if ((c == ' ') || (('\t' <= c) && (c <= '\r'))) {
 				++first;
@@ -39,7 +39,7 @@ struct ascii_match_blank_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			char const c = *first;
 			if ((c == ' ') || (c == '\t')) {
 				++first;
@@ -63,7 +63,7 @@ struct ascii_match_eol_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			char const c = *first;
 			if (('\n' <= c) && (c <= '\f')) {
 				++first;

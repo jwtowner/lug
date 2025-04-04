@@ -180,7 +180,7 @@ struct utf8_match_space_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			auto const c = *first;
 			if ((c == ' ') || (('\t' <= c) && (c <= '\r'))) {
 				++first;
@@ -209,7 +209,7 @@ struct utf8_match_blank_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			auto const c = *first;
 			if ((c == ' ') || (c == '\t')) {
 				++first;
@@ -245,7 +245,7 @@ struct utf8_match_eol_fn
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] constexpr auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			auto next = first;
 			auto const c1 = *next;
 			++next;

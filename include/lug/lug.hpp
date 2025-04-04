@@ -117,7 +117,7 @@ public:
 	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	[[nodiscard]] LUG_ALWAYS_INLINE auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
 	{
-		if (first != last) {
+		if LUG_LIKELY(first != last) {
 			if (auto const c = *first++; utf8::is_ascii(c)) {
 				if (ascii_map_[static_cast<std::size_t>(static_cast<unsigned char>(c))])
 					return first;
@@ -376,7 +376,7 @@ inline rune_set rune_set::build_space()
 {
 	rune_set_builder builder;
 	builder.add_runes({U'\u0020', U'\u0085', U'\u00A0', U'\u1680', U'\u2028', U'\u2029', U'\u202F', U'\u205F', U'\u3000'});
-	builder.add_ranges({{U'\u0009', U'\u000D'}, {U'\u2000', U'\u200A'}});
+	builder.add_range(U'\u0009', U'\u000D').add_range(U'\u2000', U'\u200A');
 	return std::move(builder).build();
 }
 
@@ -404,7 +404,7 @@ struct registers
 	std::size_t cd{0}; // call depth counter
 	std::size_t ci{0}; // accept/cut inhibited register
 	std::size_t ri{0}; // raise inhibited register
-	std::ptrdiff_t pc{-1}; // program counter
+	std::ptrdiff_t pc{0}; // program counter
 	std::ptrdiff_t eh{-1}; // error handler register
 	std::ptrdiff_t rh{-1}; // recovery handler register
 	error_response rr{error_response::resume}; // recovery response latch register
@@ -648,6 +648,7 @@ class environment
 	std::uint_least32_t tab_width_{default_tab_width};
 	std::uint_least32_t tab_alignment_{default_tab_alignment};
 	bool should_reset_on_parse_{true};
+	bool needs_reset_{false};
 
 	virtual void on_reset() {}
 	virtual void on_drain() {}
@@ -657,13 +658,16 @@ class environment
 	void reset(std::string_view sub)
 	{
 		if (should_reset_on_parse_) {
-			call_depth_ = 0;
-			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
-			origin_ = position_at(match_.size());
-			set_match_and_subject(sub.substr(0, 0), sub);
-			attribute_frame_stack_.clear();
-			attribute_result_stack_.clear();
-			attribute_collection_stack_.clear();
+			if (needs_reset_) {
+				call_depth_ = 0;
+				prune_depth_ = (std::numeric_limits<std::size_t>::max)();
+				origin_ = position_at(match_.size());
+				set_match_and_subject(sub.substr(0, 0), sub);
+				attribute_frame_stack_.clear();
+				attribute_result_stack_.clear();
+				attribute_collection_stack_.clear();
+			}
+			needs_reset_ = true;
 			on_reset();
 		}
 	}
@@ -2751,8 +2755,9 @@ protected:
 	std::vector<stack_frame> stack_frames_;
 	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
 	lug::registers registers_;
+	bool needs_reset_{false};
 	bool parsing_{false};
-	bool success_{false};
+	bool success_{true};
 	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
 	template <class Predicate>
@@ -2915,20 +2920,23 @@ protected:
 
 	void do_reset(std::string_view sub)
 	{
-		success_ = true;
-		registers_.sr = 0;
-		registers_.mr = 0;
-		registers_.rc = 0;
-		registers_.cd = 0;
-		registers_.ci = 0;
-		registers_.ri = 0;
-		registers_.pc = 0;
-		registers_.eh = -1;
-		registers_.rh = -1;
-		registers_.rr = error_response::resume;
-		casefolded_subjects_.clear();
-		responses_.clear();
-		stack_frames_.clear();
+		if (needs_reset_) {
+			needs_reset_ = false;
+			success_ = true;
+			registers_.sr = 0;
+			registers_.mr = 0;
+			registers_.rc = 0;
+			registers_.cd = 0;
+			registers_.ci = 0;
+			registers_.ri = 0;
+			registers_.pc = 0;
+			registers_.eh = -1;
+			registers_.rh = -1;
+			registers_.rr = error_response::resume;
+			casefolded_subjects_.clear();
+			responses_.clear();
+			stack_frames_.clear();
+		}
 		environment_->reset(sub);
 	}
 
@@ -2953,30 +2961,45 @@ class basic_parser : public parser_base
 {
 	InputSource input_source_;
 
-	[[nodiscard]] bool available(std::size_t sr, std::size_t sn = 1)
+	[[nodiscard]] bool available(std::size_t position, std::size_t min_size = 1)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
 			for (;;) {
 				std::size_t const buffer_size = input_source_.buffer().size();
-				std::size_t const buffer_remaining = buffer_size - sr;
-				if (sr < buffer_size) {
-					if (sn <= buffer_remaining)
-						break;
+				std::size_t const buffer_remaining = buffer_size - position;
+				if LUG_LIKELY(position < buffer_size) {
+					if LUG_LIKELY(min_size <= buffer_remaining)
+						return true;
 					if constexpr (detail::input_source_has_options<InputSource>::value)
 						if ((input_source_.options() & source_options::interactive) != source_options::none)
 							return false;
 				}
-				if (!input_source_.fill_buffer(sn - buffer_remaining))
+				if LUG_UNLIKELY(!input_source_.fill_buffer(min_size - buffer_remaining))
 					return false;
 			}
-			return true;
 		} else {
 			std::size_t const buffer_size = input_source_.buffer().size();
-			return (sr < buffer_size) && (sn <= (buffer_size - sr));
+			return (position < buffer_size) && (min_size <= (buffer_size - position));
 		}
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE auto buffer_range(std::size_t position = 0) const noexcept
+	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer(std::size_t position, [[maybe_unused]] std::size_t min_size = 1)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			if LUG_LIKELY(available(position, min_size)) {
+				auto const buffer = input_source_.buffer();
+				return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+			} else {
+				auto const buffer = input_source_.buffer();
+				return std::pair{buffer.cend(), buffer.cend()};
+			}
+		} else {
+			auto const buffer = input_source_.buffer();
+			return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer_no_fill(std::size_t position) const noexcept
 	{
 		auto const buffer = input_source_.buffer();
 		return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
@@ -3014,7 +3037,7 @@ class basic_parser : public parser_base
 	{
 		std::size_t const i = sr;
 		std::size_t n = 0;
-		auto const [first, last] = buffer_range(i);
+		auto const [first, last] = input_buffer_no_fill(i);
 		auto curr = first;
 		for ( ; n <= nmax; ++n) {
 			auto const next = match(curr, last);
@@ -3032,20 +3055,20 @@ class basic_parser : public parser_base
 	template <class MatchFn>
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
 	{
-		if (std::size_t const i = sr; available(i)) {
-			auto const [curr, last] = buffer_range(i);
-			if (auto const next = match(curr, last); next) {
-				sr = i + static_cast<std::size_t>(*next - curr);
-				return 0;
-			}
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if (auto const next = match(curr, last); next) {
+			sr = i + static_cast<std::size_t>(*next - curr);
+			return 0;
 		}
 		return 1;
 	}
 
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr)
 	{
-		if (std::size_t const i = sr; available(i)) {
-			auto const [curr, last] = buffer_range(i);
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if LUG_LIKELY(curr != last) {
 			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
 			sr = i + static_cast<std::size_t>(next - curr);
 			return 0;
@@ -3062,10 +3085,10 @@ class basic_parser : public parser_base
 				sr = input_source_.buffer().size();
 				return 0;
 			}
-			return repeat_match_buffered(sr, nmin, nmax, [](auto first, auto last) -> std::optional<std::decay_t<decltype(first)>> {
-				if (first != last) {
-					auto const next = std::find_if(first + 1, last, utf8::is_lead_or_ascii);
-					if (next != first)
+			return repeat_match_buffered(sr, nmin, nmax, [](auto curr, auto last) -> std::optional<std::decay_t<decltype(curr)>> {
+				if LUG_LIKELY(curr != last) {
+					auto const next = std::find_if(curr + 1, last, utf8::is_lead_or_ascii);
+					if (next != curr)
 						return next;
 				}
 				return std::nullopt;
@@ -3136,13 +3159,9 @@ class basic_parser : public parser_base
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr, std::uint_least8_t value)
 	{
 		std::size_t const i = sr;
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			if (available(i) && (static_cast<unsigned char>(input_source_.buffer()[i]) == value)) {
-				sr = i + 1;
-				return 0;
-			}
-		} else {
-			if (auto const buffer = input_source_.buffer(); (i < buffer.size()) && (static_cast<unsigned char>(buffer[i]) == value)) {
+		auto const [curr, last] = input_buffer(i);
+		if LUG_LIKELY(curr != last) {
+			if (static_cast<unsigned char>(*curr) == value) {
 				sr = i + 1;
 				return 0;
 			}
@@ -3156,7 +3175,7 @@ class basic_parser : public parser_base
 			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
 		} else {
 			std::size_t const i = sr;
-			auto const [first, last] = buffer_range(i);
+			auto const [first, last] = input_buffer_no_fill(i);
 			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
 			auto const next = std::find_if(first, tail, [unit](auto const c) { return static_cast<unsigned char>(c) != unit; });
 			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
@@ -3184,7 +3203,7 @@ class basic_parser : public parser_base
 	[[nodiscard]] static auto decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match) -> std::optional<std::decay_t<InputIt>>
 	{
 		auto const [next, rune] = utf8::decode_rune(first, last);
-		if (next != first) {
+		if LUG_LIKELY(next != first) {
 			bool matched = false;
 			if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
 				matched = match(unicode::query(rune));
@@ -3202,12 +3221,11 @@ class basic_parser : public parser_base
 	template <class MatchFn>
 	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
 	{
-		if (std::size_t const i = sr; available(i)) {
-			auto const [curr, last] = buffer_range(i);
-			if (auto const next = decode_and_match_rune(curr, last, match); next) {
-				sr = i + static_cast<std::size_t>(*next - curr);
-				return 0;
-			}
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if (auto const next = decode_and_match_rune(curr, last, match); next) {
+			sr = i + static_cast<std::size_t>(*next - curr);
+			return 0;
 		}
 		return 1;
 	}
@@ -3331,7 +3349,7 @@ class basic_parser : public parser_base
 
 	[[nodiscard]] error_response fail_one()
 	{
-		if (stack_frames_.empty())
+		if LUG_UNLIKELY(stack_frames_.empty())
 			return error_response::halt;
 		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
 			using frame_type = std::decay_t<decltype(frame)>;
@@ -3392,7 +3410,7 @@ class basic_parser : public parser_base
 			error_response const fail_result = fail_one();
 			if (fail_result >= error_response::backtrack)
 				continue;
-			if (fail_result == error_response::halt)
+			if LUG_UNLIKELY(fail_result == error_response::halt)
 				return false;
 			if (fail_result < error_response::accept)
 				success_ = false;
@@ -3407,7 +3425,7 @@ class basic_parser : public parser_base
 		registers_.mr = (std::max)(registers_.mr, registers_.sr);
 		for (std::size_t i = 0; i < unwind_count; ++i) {
 			error_response const fail_result = fail_one();
-			if (fail_result == error_response::halt)
+			if LUG_UNLIKELY(fail_result == error_response::halt)
 				return false;
 			if (fail_result < error_response::accept)
 				success_ = false;
@@ -3511,6 +3529,7 @@ public:
 		if LUG_UNLIKELY(program_->instructions.empty() || program_->data.empty())
 			throw_exception<bad_grammar>();
 		reset();
+		needs_reset_ = true;
 		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
 		std::ptrdiff_t fail_count{0};
 		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < program_->instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
@@ -3554,7 +3573,7 @@ public:
 				} break;
 				case opcode::ret: {
 					auto const [ret_response, ret_fail_count] = return_from_call();
-					if (ret_response == error_response::halt)
+					if LUG_UNLIKELY(ret_response == error_response::halt)
 						return false;
 					if (ret_response < error_response::accept)
 						success_ = false;
@@ -3570,7 +3589,7 @@ public:
 						stack_frames_.pop_back();
 					}
 					if ((registers_.ri & lug::registers::inhibited_flag) != 0) {
-						if (!unwind((stack_frames_.size() - (registers_.ri & lug::registers::count_mask))))
+						if LUG_UNLIKELY(!unwind((stack_frames_.size() - (registers_.ri & lug::registers::count_mask))))
 							return false;
 						fail_count = 1;
 						break;
@@ -3624,7 +3643,7 @@ public:
 					auto const sr1 = registers_.sr;
 					stack_frames_.pop_back();
 					--registers_.ci;
-					if (sr0 > sr1) {
+					if LUG_UNLIKELY(sr0 > sr1) {
 						fail_count = 1;
 						break;
 					}
@@ -3739,7 +3758,7 @@ public:
 					auto const sr1 = registers_.sr;
 					auto const name = symbol.name;
 					stack_frames_.pop_back();
-					if (sr0 > sr1) {
+					if LUG_UNLIKELY(sr0 > sr1) {
 						fail_count = 1;
 						break;
 					}
@@ -3762,7 +3781,7 @@ public:
 				if ((instr.op >= opcode::test_any) && (instr.op <= opcode::test_none_of)) {
 					registers_.pc += instr.offset32;
 				} else {
-					if (!fail(fail_count))
+					if LUG_UNLIKELY(!fail(fail_count))
 						return false;
 					accept_or_drain_if_deferred();
 				}
