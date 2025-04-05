@@ -65,7 +65,7 @@ class rune_set
 		, intervals_size_{size}
 	{}
 
-	static rune_set build_all();
+	static rune_set build_full();
 	static rune_set build_blank();
 	static rune_set build_eol();
 	static rune_set build_space();
@@ -176,10 +176,10 @@ public:
 		lhs.swap(rhs);
 	}
 
-	static rune_set const& all()
+	static rune_set const& full()
 	{
-		static rune_set const all_{build_all()};
-		return all_;
+		static rune_set const full_{build_full()};
+		return full_;
 	}
 
 	static rune_set const& blank()
@@ -384,7 +384,7 @@ public:
 	}
 };
 
-inline rune_set rune_set::build_all()
+inline rune_set rune_set::build_full()
 {
 	return std::move(rune_set_builder{}.negate()).build();
 }
@@ -392,24 +392,21 @@ inline rune_set rune_set::build_all()
 inline rune_set rune_set::build_blank()
 {
 	rune_set_builder builder;
-	builder.add_runes({U'\u0009', U'\u0020', U'\u00A0', U'\u1680', U'\u202F', U'\u205F', U'\u3000'});
-	builder.add_range(U'\u2000', U'\u200A');
+	builder.add_runes({U'\u0009', U'\u0020', U'\u00A0', U'\u1680', U'\u202F', U'\u205F', U'\u3000'}).add_range(U'\u2000', U'\u200A');
 	return std::move(builder).build();
 }
 
 inline rune_set rune_set::build_space()
 {
 	rune_set_builder builder;
-	builder.add_runes({U'\u0020', U'\u0085', U'\u00A0', U'\u1680', U'\u2028', U'\u2029', U'\u202F', U'\u205F', U'\u3000'});
-	builder.add_range(U'\u0009', U'\u000D').add_range(U'\u2000', U'\u200A');
+	builder.add_runes({U'\u0020', U'\u0085', U'\u00A0', U'\u1680', U'\u2028', U'\u2029', U'\u202F', U'\u205F', U'\u3000'}).add_range(U'\u0009', U'\u000D').add_range(U'\u2000', U'\u200A');
 	return std::move(builder).build();
 }
 
 inline rune_set rune_set::build_eol()
 {
 	rune_set_builder builder;
-	builder.add_runes({U'\u0085', U'\u2028', U'\u2029'});
-	builder.add_range(U'\u000A', U'\u000D');
+	builder.add_runes({U'\u0085', U'\u2028', U'\u2029'}).add_range(U'\u000A', U'\u000D');
 	return std::move(builder).build();
 }
 
@@ -502,6 +499,10 @@ template <class E> inline constexpr bool is_expression_v = is_encoder_expression
 
 enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
 template <> inline constexpr bool is_flag_enum_v<directives> = true;
+enum class effect_traits : std::uint_least8_t { none = 0, captures = 1, cuts = 2, raises = 4, all = captures | cuts | raises };
+template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
+enum class match_traits : std::uint_least8_t { none = 0, nullable = 1, nofail = 2, all = nullable | nofail };
+template <> inline constexpr bool is_flag_enum_v<match_traits> = true;
 
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 using error_handler = std::function<error_response(error_context&)>;
@@ -520,9 +521,14 @@ struct program
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture_action> captures;
 	directives entry_mode{directives::eps};
+	effect_traits first_etraits{effect_traits::none};
+	effect_traits follow_etraits{effect_traits::none};
+	match_traits first_mtraits{match_traits::nullable | match_traits::nofail};
+	match_traits follow_mtraits{match_traits::nullable | match_traits::nofail};
 
 	void concatenate(program const& src)
 	{
+		bool const was_empty = instructions.empty();
 		std::size_t const data_offset = data.size();
 		std::size_t const handlers_offset = handlers.size();
 		std::size_t const predicates_offset = predicates.size();
@@ -562,6 +568,15 @@ struct program
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
 		entry_mode = (entry_mode & ~directives::eps) | (entry_mode & src.entry_mode & directives::eps);
+		if (was_empty) {
+			first_etraits = src.first_etraits;
+			follow_etraits = src.follow_etraits;
+			first_mtraits = src.first_mtraits;
+			follow_mtraits = src.follow_mtraits;
+		} else {
+			follow_etraits |= src.first_etraits | src.follow_etraits;
+			follow_mtraits &= src.first_mtraits & src.follow_mtraits;
+		}
 	}
 
 	void swap(program& p) noexcept
@@ -575,7 +590,16 @@ struct program
 		actions.swap(p.actions);
 		captures.swap(p.captures);
 		std::swap(entry_mode, p.entry_mode);
+		std::swap(first_etraits, p.first_etraits);
+		std::swap(follow_etraits, p.follow_etraits);
+		std::swap(first_mtraits, p.first_mtraits);
+		std::swap(follow_mtraits, p.follow_mtraits);
 	}
+
+	[[nodiscard]] effect_traits first_effects() const noexcept { return first_etraits; }
+	[[nodiscard]] effect_traits follow_effects() const noexcept { return follow_etraits; }
+	[[nodiscard]] match_traits first_matches() const noexcept { return first_mtraits; }
+	[[nodiscard]] match_traits follow_matches() const noexcept { return follow_mtraits; }
 };
 
 class rule
@@ -584,6 +608,10 @@ class rule
 	friend grammar start(rule const& start_rule, rule const& skip_rule);
 	program program_;
 	program_callees callees_;
+	effect_traits first_etraits_{effect_traits::captures | effect_traits::cuts};
+	effect_traits follow_etraits_{effect_traits::captures | effect_traits::cuts};
+	match_traits first_mtraits_{match_traits::none};
+	match_traits follow_mtraits_{match_traits::none};
 	bool currently_encoding_{false};
 public:
 	rule() noexcept = default;
@@ -598,6 +626,10 @@ public:
 	template <class Recovery> [[nodiscard]] auto operator[](failure<Recovery> const& reason) const;
 	template <class Recovery> [[nodiscard]] auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] auto operator^=(Handler&& handler) const;
+	[[nodiscard]] effect_traits first_effects() const noexcept { return first_etraits_; }
+	[[nodiscard]] effect_traits follow_effects() const noexcept { return follow_etraits_; }
+	[[nodiscard]] match_traits first_matches() const noexcept { return first_mtraits_; }
+	[[nodiscard]] match_traits follow_matches() const noexcept { return follow_mtraits_; }
 };
 
 class grammar
@@ -609,6 +641,10 @@ public:
 	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
+	[[nodiscard]] effect_traits first_effects() const noexcept { return program_.first_effects(); }
+	[[nodiscard]] effect_traits follow_effects() const noexcept { return program_.follow_effects(); }
+	[[nodiscard]] match_traits first_matches() const noexcept { return program_.first_matches(); }
+	[[nodiscard]] match_traits follow_matches() const noexcept { return program_.follow_matches(); }
 };
 
 struct syntax_position
@@ -1240,7 +1276,13 @@ struct common_encoder_expression_interface
 };
 
 template <class Derived>
-struct terminal_encoder_expression_interface : common_encoder_expression_interface<Derived> {};
+struct terminal_encoder_expression_interface : common_encoder_expression_interface<Derived>
+{
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::none; }
+	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return (this->derived().effects() & mask) != effect_traits::none; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
+};
 
 template <class Derived, class E1>
 struct unary_encoder_expression_interface : common_encoder_expression_interface<Derived>
@@ -1248,6 +1290,10 @@ struct unary_encoder_expression_interface : common_encoder_expression_interface<
 	E1 e1;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr explicit unary_encoder_expression_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects(); }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches(); }
+	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return this->e1.has_effects(mask); }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return this->e1.head_optimizable(); }
 };
 
 template <class Derived, class E1, class E2>
@@ -1257,6 +1303,8 @@ struct binary_encoder_expression_interface : common_encoder_expression_interface
 	E2 e2;
 	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
 	constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | this->e2.effects(); }
+	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { if (this->e1.has_effects(mask)) return true; return this->e2.has_effects(mask); }
 };
 
 template <class Recovery>
@@ -1264,12 +1312,8 @@ struct raise_expression : terminal_encoder_expression_interface<raise_expression
 {
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
-
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
-	{
-		return d.raise_failure(m, reason);
-	}
+	template <class M> [[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const { return d.raise_failure(m, reason); }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::raises; }
 };
 
 template <class E1, class Recovery>
@@ -1279,6 +1323,7 @@ struct expect_expression : unary_encoder_expression_interface<expect_expression<
 	failure<Recovery> reason;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr expect_expression(X1&& x1, failure<Recovery> const& fail) : base_type{std::forward<X1>(x1)}, reason{fail} {}
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::raises; }
 
 	template <class M>
 	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
@@ -1329,13 +1374,8 @@ struct recover_response_expression : terminal_encoder_expression_interface<recov
 {
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
-
-	template <class M>
-	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
-	{
-		d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response));
-		return m;
-	}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); return m; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
 template <class E1, class Handler>
@@ -1386,6 +1426,7 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1430,6 +1471,8 @@ struct string_expression : terminal_encoder_expression_interface<string_expressi
 	std::string_view text;
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(text); return m; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return text.empty() ? (match_traits::nullable | match_traits::nofail) : match_traits::none; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return !text.empty(); }
 };
 
 struct char_expression : terminal_encoder_expression_interface<char_expression>
@@ -1437,6 +1480,7 @@ struct char_expression : terminal_encoder_expression_interface<char_expression>
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(std::string_view{&c, 1}); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct rune_expression : terminal_encoder_expression_interface<rune_expression>
@@ -1444,6 +1488,7 @@ struct rune_expression : terminal_encoder_expression_interface<rune_expression>
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct rune_range_expression : terminal_encoder_expression_interface<rune_range_expression>
@@ -1452,6 +1497,7 @@ struct rune_range_expression : terminal_encoder_expression_interface<rune_range_
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1465,6 +1511,7 @@ struct rune_set_expression : terminal_encoder_expression_interface<rune_set_expr
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1478,13 +1525,13 @@ template <class Target>
 struct callable_expression : terminal_encoder_expression_interface<callable_expression<Target>>
 {
 	std::reference_wrapper<Target> target;
+	std::uint_least16_t prec{0};
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), 0); }
+	constexpr explicit callable_expression(Target& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), prec); }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_effects() | target.get().follow_effects(); }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return target.get().first_matches() & target.get().follow_matches(); }
 };
-
-template <class T> struct is_callable_encoder_expression : std::false_type {};
-template <class T> struct is_callable_encoder_expression<callable_expression<T>> : std::true_type {};
-template <class T> inline constexpr bool is_callable_encoder_expression_v = is_callable_encoder_expression<T>::value;
 
 template <class Pred>
 struct predicate_expression : terminal_encoder_expression_interface<predicate_expression<Pred>>
@@ -1531,17 +1578,9 @@ inline rule::rule(rule const& r)
 	rule_encoder.call(r, 1);
 }
 
-struct rule_precedence_expression : terminal_encoder_expression_interface<rule_precedence_expression>
-{
-	std::reference_wrapper<rule const> target;
-	std::uint_least16_t prec;
-	rule_precedence_expression(rule const& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
-	template <class M> [[nodiscard]] auto evaluate(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), prec); }
-};
-
 [[nodiscard]] inline auto rule::operator[](std::uint_least16_t prec) const noexcept
 {
-	return rule_precedence_expression{*this, prec};
+	return callable_expression<rule const>{*this, prec};
 }
 
 template <class Recovery>
@@ -1600,11 +1639,32 @@ struct directive_modifier
 	}
 };
 
-struct accept_expression : terminal_encoder_expression_interface<accept_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::ignore_errors_flag >> registers::ignore_errors_shift)); return m; } };
-struct cut_expression : terminal_encoder_expression_interface<cut_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, static_cast<std::uint_least8_t>(registers::inhibited_flag >> registers::ignore_errors_shift)); return m; } };
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); return m; } };
-struct eol_expression : terminal_encoder_expression_interface<eol_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); return m; } };
-struct eps_expression : terminal_encoder_expression_interface<eps_expression> { template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; } };
+struct accept_cut_expression : terminal_encoder_expression_interface<accept_cut_expression>
+{
+	std::uint_least8_t imm8;
+	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, imm8); return m; }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::cuts; }
+};
+
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression>
+{
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); return m; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
+};
+
+struct eol_expression : terminal_encoder_expression_interface<eol_expression>
+{
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
+};
+
+struct eps_expression : terminal_encoder_expression_interface<eps_expression>
+{
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+};
 
 template <opcode Op, class Property>
 struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Op, Property>>
@@ -1624,12 +1684,14 @@ struct match_class_combinator
 struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator<opcode::match_any_of>
 {
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_any); return m; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 template <unicode::ctype Property>
 struct ctype_expression : terminal_encoder_expression_interface<ctype_expression<Property>>
 {
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
+	template <class M>
+	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
 	{
 		if constexpr (Property == unicode::ctype::blank)
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
@@ -1649,6 +1711,7 @@ struct condition_test_combinator
 		std::string_view name;
 		constexpr explicit condition_test_expression(std::string_view n) noexcept : name{n} {}
 		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::condition_test, name, Value ? 1 : 0); return m; }
+		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
 	[[nodiscard]] constexpr condition_test_expression operator()(std::string_view name) const noexcept { return condition_test_expression{name}; }
@@ -1697,6 +1760,7 @@ struct symbol_exists_combinator
 		std::string_view name;
 		constexpr explicit symbol_exists_expression(std::string_view n) noexcept : name{n} {}
 		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::symbol_exists, name, Value ? 1 : 0); return m; }
+		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
 	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name}; }
@@ -1749,6 +1813,9 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<negati
 		d.jump_to_here(choice);
 		return m2;
 	}
+
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return (this->e1.matches() & ~match_traits::nofail) | match_traits::nullable; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 };
 
 template <class E1>
@@ -1769,6 +1836,8 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 		d.encode(opcode::fail, 0, 1);
 		return m2;
 	}
+
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches() | match_traits::nullable; }
 };
 
 inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)();
@@ -1838,7 +1907,7 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 		auto const loop_body = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
 		auto m2 = this->e1.evaluate(d, m);
-		d.dpop(NMin > 0 ? directives::eps : directives::none);
+		d.dpop(directives::eps);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (std::size_t i = 0; i < NMin; ++i)
@@ -1920,6 +1989,8 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 	static_assert((NMax > 0) && (NMax <= max_repetitions));
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	template <class M>
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
@@ -1952,6 +2023,9 @@ struct repetition_expression<E1, 0, 0> : unary_encoder_expression_interface<repe
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 	template <class M> [[nodiscard]] decltype(auto) evaluate([[maybe_unused]] encoder& /*d*/, M const& m) const { return m; }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 };
 
 template <class E1>
@@ -1959,6 +2033,8 @@ struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repe
 {
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	template <class M>
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
@@ -1982,6 +2058,8 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 {
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	template <class M>
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
@@ -2095,6 +2173,21 @@ struct choice_expression : binary_encoder_expression_interface<choice_expression
 		d.jump_to_here(commit);
 		return m3;
 	}
+
+	[[nodiscard]] constexpr match_traits matches() const noexcept
+	{
+		auto const mtraits1 = this->e1.matches();
+		if (mtraits1 == match_traits::all)
+			return match_traits::all;
+		return mtraits1 | this->e2.matches();
+	}
+
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept
+	{
+		if (!this->e1.head_optimizable())
+			return false;
+		return this->e2.head_optimizable();
+	}
 };
 
 template <class E1, class E2>
@@ -2112,6 +2205,21 @@ struct sequence_expression : binary_encoder_expression_interface<sequence_expres
 		d.dpop(directives::eps);
 		return m3;
 	}
+
+	[[nodiscard]] constexpr match_traits matches() const noexcept
+	{
+		auto const mtraits1 = this->e1.matches();
+		if (mtraits1 == match_traits::none)
+			return match_traits::none;
+		return mtraits1 & this->e2.matches();
+	}
+
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept
+	{
+		if ((this->e2.matches() & match_traits::nofail) == match_traits::none)
+			return false;
+		return this->e1.head_optimizable();
+	}
 };
 
 template <class Derived, class E1, class Operand>
@@ -2125,9 +2233,9 @@ struct attribute_action_expression : unary_encoder_expression_interface<Derived,
 	template <class M>
 	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const
 	{
-		if constexpr (is_callable_encoder_expression_v<std::decay_t<E1>> && (std::tuple_size_v<typename M::attribute_frame_type> != 0)) {
+		if constexpr (detail::is_template_instantiation_of_v<std::decay_t<E1>, callable_expression> && (std::tuple_size_v<typename M::attribute_frame_type> != 0)) {
 			d.encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_attribute_frame(frame); }});
-			static_cast<Derived const&>(*this).do_prologue(d); d.call(this->e1.target, 0); static_cast<Derived const&>(*this).do_epilogue_inlined(d, m); return m;
+			static_cast<Derived const&>(*this).do_prologue(d); d.call(this->e1.target, this->e1.prec); static_cast<Derived const&>(*this).do_epilogue_inlined(d, m); return m;
 		} else {
 			static_cast<Derived const&>(*this).do_prologue(d); auto m2 = this->e1.evaluate(d, m); static_cast<Derived const&>(*this).do_epilogue(d); return m2;
 		}
@@ -2160,6 +2268,7 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1, class Target>
@@ -2180,6 +2289,7 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
 	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1>
@@ -2189,6 +2299,7 @@ struct symbol_assign_expression : unary_encoder_expression_interface<symbol_assi
 	std::string_view name;
 	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : base_type{std::forward<X1>(x1)}, name{n} {}
 	template <class M> [[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const { d.skip().encode(opcode::symbol_start, name); auto m2 = this->e1.evaluate(d, m); d.encode(opcode::symbol_end); return m2; }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1>
@@ -2423,7 +2534,7 @@ inline constexpr directive_modifier<directives::caseless, directives::none, dire
 inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
 inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
 inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
-inline constexpr accept_expression accept{}; inline constexpr cut_expression cut{};
+inline constexpr accept_cut_expression accept{lug::registers::ignore_errors_flag}; inline constexpr accept_cut_expression cut{lug::registers::inhibited_flag};
 inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator<opcode::match_all_of> all{}; inline constexpr match_class_combinator<opcode::match_none_of> none{};
 inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
