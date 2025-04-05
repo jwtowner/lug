@@ -1179,10 +1179,10 @@ public:
 		}
 	}
 
-	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	std::ptrdiff_t encode_class(T properties)
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	std::ptrdiff_t encode_class(opcode op, T properties)
 	{
-		return encode(Op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
+		return encode(op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
 	}
 
 	template <class T, class = std::enable_if_t<std::is_same_v<std::decay_t<T>, char> || std::is_same_v<std::decay_t<T>, char32_t>>>
@@ -1209,10 +1209,10 @@ public:
 		return encode(opcode::match, pattern);
 	}
 
-	template <opcode Op, class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
-	std::ptrdiff_t match_class(T properties)
+	template <class T, class = std::enable_if_t<unicode::is_property_enum_v<T>>>
+	std::ptrdiff_t match_class(opcode op, T properties)
 	{
-		return skip().encode_class<Op>(properties);
+		return skip().encode_class(op, properties);
 	}
 
 	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>>
@@ -1666,23 +1666,26 @@ struct eps_expression : terminal_encoder_expression_interface<eps_expression>
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
-template <opcode Op, class Property>
-struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Op, Property>>
+template <class Property>
+struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Property>>
 {
+	opcode mop;
 	Property property;
-	constexpr explicit match_class_expression(Property p) noexcept : property{p} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class<Op>(property); return m; }
+	constexpr match_class_expression(opcode op, Property prop) noexcept : mop{op}, property{prop} {}
+	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class(mop, property); return m; }
 };
 
-template <opcode Op>
 struct match_class_combinator
 {
+	opcode mop;
+	constexpr explicit match_class_combinator(opcode op) noexcept : mop{op} {}
 	template <class Property, class = std::enable_if_t<unicode::is_property_enum_v<Property>>>
-	[[nodiscard]] constexpr match_class_expression<Op,std::decay_t<Property>> operator()(Property p) const { return match_class_expression<Op, std::decay_t<Property>>{p}; }
+	[[nodiscard]] constexpr match_class_expression<std::decay_t<Property>> operator()(Property prop) const { return match_class_expression<std::decay_t<Property>>{mop, prop}; }
 };
 
-struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator<opcode::match_any_of>
+struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator
 {
+	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
 	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_any); return m; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
@@ -1698,40 +1701,46 @@ struct ctype_expression : terminal_encoder_expression_interface<ctype_expression
 		else if constexpr (Property == unicode::ctype::space)
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
 		else
-			d.match_class<opcode::match_any_of>(Property);
+			d.match_class(opcode::match_any_of, Property);
 		return m;
 	}
 };
 
-template <bool Value>
 struct condition_test_combinator
 {
+	std::uint_least8_t imm8;
+	constexpr explicit condition_test_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
+
 	struct condition_test_expression : terminal_encoder_expression_interface<condition_test_expression>
 	{
 		std::string_view name;
-		constexpr explicit condition_test_expression(std::string_view n) noexcept : name{n} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::condition_test, name, Value ? 1 : 0); return m; }
+		std::uint_least8_t imm8;
+		constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::condition_test, name, imm8); return m; }
 		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
-	[[nodiscard]] constexpr condition_test_expression operator()(std::string_view name) const noexcept { return condition_test_expression{name}; }
+	[[nodiscard]] constexpr condition_test_expression operator()(std::string_view name) const noexcept { return condition_test_expression{name, imm8}; }
 };
 
-template <bool Value>
 struct condition_block_combinator
 {
+	std::uint_least8_t imm8;
+	constexpr explicit condition_block_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
+
 	template <class E1>
 	struct condition_block_expression : unary_encoder_expression_interface<condition_block_expression<E1>, E1>
 	{
 		using base_type = unary_encoder_expression_interface<condition_block_expression<E1>, E1>;
 		using base_type::base_type;
 		std::string_view name;
-		constexpr condition_block_expression(E1 const& x1, std::string_view n) noexcept : base_type{x1}, name{n} {}
+		std::uint_least8_t imm8;
+		constexpr condition_block_expression(E1 const& x1, std::string_view n, std::uint_least8_t i) noexcept : base_type{x1}, name{n}, imm8{i} {}
 
 		template <class M>
 		[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
 		{
-			d.encode(opcode::condition_push, name, Value ? 1 : 0);
+			d.encode(opcode::condition_push, name, imm8);
 			auto m2 = this->e1.evaluate(d, m);
 			d.encode(opcode::condition_pop);
 			return m2;
@@ -1741,58 +1750,73 @@ struct condition_block_combinator
 	struct condition_block_group
 	{
 		std::string_view name;
+		std::uint_least8_t imm8;
+		constexpr condition_block_group(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 
 		template <class E, class = std::enable_if_t<is_expression_v<E>>>
 		[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 		{
-			return condition_block_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e), name};
+			return condition_block_expression<std::decay_t<decltype(make_expression(e))>>{make_expression(e), name, imm8};
 		}
 	};
 
-	[[nodiscard]] constexpr condition_block_group operator()(std::string_view name) const noexcept { return condition_block_group{name}; }
+	[[nodiscard]] constexpr condition_block_group operator()(std::string_view name) const noexcept { return condition_block_group{name, imm8}; }
 };
 
-template <bool Value>
 struct symbol_exists_combinator
 {
+	std::uint_least8_t imm8;
+	constexpr explicit symbol_exists_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
+
 	struct symbol_exists_expression : terminal_encoder_expression_interface<symbol_exists_expression>
 	{
 		std::string_view name;
-		constexpr explicit symbol_exists_expression(std::string_view n) noexcept : name{n} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::symbol_exists, name, Value ? 1 : 0); return m; }
+		std::uint_least8_t imm8;
+		constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::symbol_exists, name, imm8); return m; }
 		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
-	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name}; }
+	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name, imm8}; }
 };
 
-template <opcode Op, opcode OpCf>
 struct symbol_match_combinator
 {
+	opcode mop;
+	opcode mopcf;
+	constexpr symbol_match_combinator(opcode op, opcode opcf) noexcept : mop{op}, mopcf{opcf} {}
+
 	struct symbol_match_expression : terminal_encoder_expression_interface<symbol_match_expression>
 	{
+		opcode mop;
+		opcode mopcf;
 		std::string_view name;
-		constexpr explicit symbol_match_expression(std::string_view n) noexcept : name{n} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name); return m; }
+		constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name); return m; }
 	};
 
-	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{name}; }
+	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{mop, mopcf, name}; }
 };
 
-template <opcode Op, opcode OpCf>
 struct symbol_match_offset_combinator
 {
+	opcode mop;
+	opcode mopcf;
+	constexpr symbol_match_offset_combinator(opcode op, opcode opcf) noexcept : mop{op}, mopcf{opcf} {}
+
 	struct symbol_match_offset_expression : terminal_encoder_expression_interface<symbol_match_offset_expression>
 	{
+		opcode mop;
+		opcode mopcf;
 		std::string_view name;
 		std::uint_least8_t offset;
-		constexpr symbol_match_offset_expression(std::string_view n, std::uint_least8_t o) noexcept : name{n}, offset{o} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? OpCf : Op, name, offset); return m; }
+		constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
+		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); return m; }
 	};
 
 	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
 	{
-		return symbol_match_offset_expression{name, detail::checked_cast<std::uint_least8_t, resource_limit_error>(offset)};
+		return symbol_match_offset_expression{mop, mopcf, name, detail::checked_cast<std::uint_least8_t, resource_limit_error>(offset)};
 	}
 };
 
@@ -1859,30 +1883,30 @@ inline constexpr bool is_repetition_expression_optimizable_v =
 	is_repetition_expression_always_optimizable_v<E> ||
 	std::is_same_v<E, string_expression>;
 
-template <std::size_t NMin, std::size_t NMax, class E>
-[[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, [[maybe_unused]] encoder& d)
+template <class E>
+[[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, encoder& d, std::size_t nmin, std::size_t nmax)
 {
 	if constexpr (is_repetition_expression_always_optimizable_v<std::decay_t<E>>) {
 		if (d.should_skip())
 			return false;
 		d.commit_eps();
 		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>)
-			d.encode_min_max(opcode::repeat_any, NMin, NMax);
+			d.encode_min_max(opcode::repeat_any, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::blank>>)
-			d.encode_min_max(opcode::repeat_blank, NMin, NMax);
+			d.encode_min_max(opcode::repeat_blank, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>)
-			d.encode_min_max(opcode::repeat_space, NMin, NMax);
+			d.encode_min_max(opcode::repeat_space, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression> || std::is_same_v<std::decay_t<E>, rune_expression>)
-			d.encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.c, NMin, NMax);
+			d.encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.c, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, rune_range_expression> ||
 							std::is_same_v<std::decay_t<E>, rune_set_expression> ||
 							std::is_same_v<std::decay_t<E>, bracket_expression>)
-			d.encode_min_max(opcode::repeat_set, NMin, NMax, d.add_rune_set(e.make_rune_set(d.mode())));
+			d.encode_min_max(opcode::repeat_set, nmin, nmax, d.add_rune_set(e.make_rune_set(d.mode())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
 		if (d.should_skip() || (e.text.size() != 1))
 			return false;
-		d.commit_eps().encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.text.front(), NMin, NMax);
+		d.commit_eps().encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.text.front(), nmin, nmax);
 		return true;
 	} else {
 		static_assert(detail::always_false_v<E>, "unsupported repetition expression");
@@ -1900,7 +1924,7 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<NMin, NMax>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
 				return m;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
@@ -1934,7 +1958,7 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<NCount, NCount>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
 				return m;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
@@ -1961,7 +1985,7 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<NMin, forever>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, NMin, forever))
 				return m;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
@@ -1996,7 +2020,7 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<0, NMax>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, 0, NMax))
 				return m;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
@@ -2040,7 +2064,7 @@ struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repe
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<0, 1>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, 0, 1))
 				return m;
 		auto const choice = d.encode(opcode::choice);
 		d.dpsh(directives::none, directives::none);
@@ -2065,7 +2089,7 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<0, forever>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, 0, forever))
 				return m;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const choice = d.encode(opcode::choice);
@@ -2098,7 +2122,7 @@ struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repe
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<1, 2>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, 1, 2))
 				return m;
 		(void)this->e1.evaluate(d, m);
 		auto const choice = d.encode(opcode::choice);
@@ -2122,7 +2146,7 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
-			if (repetition_encode_optimized<1, forever>(this->e1, d))
+			if (repetition_encode_optimized(this->e1, d, 1, forever))
 				return m;
 		(void)this->e1.evaluate(d, m);
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2536,19 +2560,19 @@ inline constexpr directive_modifier<directives::lexeme | directives::noskip, dir
 inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
 inline constexpr accept_cut_expression accept{lug::registers::ignore_errors_flag}; inline constexpr accept_cut_expression cut{lug::registers::inhibited_flag};
 inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
-inline constexpr match_any_expression any{}; inline constexpr match_class_combinator<opcode::match_all_of> all{}; inline constexpr match_class_combinator<opcode::match_none_of> none{};
+inline constexpr match_any_expression any{}; inline constexpr match_class_combinator all{opcode::match_all_of}; inline constexpr match_class_combinator none{opcode::match_none_of};
 inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
 inline constexpr ctype_expression<ctype::upper> upper{}; inline constexpr ctype_expression<ctype::digit> digit{}; inline constexpr ctype_expression<ctype::xdigit> xdigit{};
 inline constexpr ctype_expression<ctype::space> space{}; inline constexpr ctype_expression<ctype::blank> blank{}; inline constexpr ctype_expression<ctype::punct> punct{};
 inline constexpr ctype_expression<ctype::graph> graph{}; inline constexpr ctype_expression<ctype::print> print{}; inline constexpr ctype_expression<ctype::cntrl> cntrl{};
-inline constexpr condition_test_combinator<true> when{}; inline constexpr condition_test_combinator<false> unless{};
-inline constexpr condition_block_combinator<true> on{}; inline constexpr condition_block_combinator<false> off{};
-inline constexpr symbol_exists_combinator<true> exists{}; inline constexpr symbol_exists_combinator<false> missing{};
-inline constexpr symbol_match_offset_combinator<opcode::symbol_head, opcode::symbol_head_cf> match_front{};
-inline constexpr symbol_match_offset_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match_back{};
-inline constexpr symbol_match_combinator<opcode::symbol_all, opcode::symbol_all_cf> match_all{};
-inline constexpr symbol_match_combinator<opcode::symbol_any, opcode::symbol_any_cf> match_any{};
-inline constexpr symbol_match_combinator<opcode::symbol_tail, opcode::symbol_tail_cf> match{};
+inline constexpr condition_test_combinator when{true}; inline constexpr condition_test_combinator unless{false};
+inline constexpr condition_block_combinator on{true}; inline constexpr condition_block_combinator off{false};
+inline constexpr symbol_exists_combinator exists{true}; inline constexpr symbol_exists_combinator missing{false};
+inline constexpr symbol_match_offset_combinator match_front{opcode::symbol_head, opcode::symbol_head_cf};
+inline constexpr symbol_match_offset_combinator match_back{opcode::symbol_tail, opcode::symbol_tail_cf};
+inline constexpr symbol_match_combinator match_all{opcode::symbol_all, opcode::symbol_all_cf};
+inline constexpr symbol_match_combinator match_any{opcode::symbol_any, opcode::symbol_any_cf};
+inline constexpr symbol_match_combinator match{opcode::symbol_tail, opcode::symbol_tail_cf};
 template <std::size_t NMin, std::size_t NMax> inline constexpr repetition_combinator<NMin, NMax> repeat{};
 template <std::size_t NMin> inline constexpr repetition_combinator<NMin, forever> at_least{};
 template <std::size_t NMax> inline constexpr repetition_combinator<0, NMax> at_most{};
