@@ -24,7 +24,7 @@ using json_string = std::string;
 using json_array = std::vector<json_node>;
 using json_object = std::map<std::string, json_node>;
 
-// JSON node
+// JSON tree node structure
 struct json_node
 {
 	std::variant<json_null, json_bool, json_number, json_string, lug::recursive_wrapper<json_array>, lug::recursive_wrapper<json_object>> value;
@@ -32,8 +32,7 @@ struct json_node
 	json_node() = default;
 
 	template <typename T, class = std::enable_if_t<!std::is_same_v<json_node, std::decay_t<T>>>>
-	explicit json_node(T&& v)
-		: value(std::forward<T>(v)) {}
+	explicit json_node(T&& v) : value(std::forward<T>(v)) {}
 
 	bool is_null() const noexcept { return std::holds_alternative<json_null>(value); }
 	bool is_bool() const noexcept { return std::holds_alternative<json_bool>(value); }
