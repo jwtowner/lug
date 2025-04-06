@@ -635,6 +635,8 @@ public:
 	LUG_NONNULL(2) void destroy(std::byte* buffer) const noexcept { (*desc_->destroy)(buffer, desc_); }
 	LUG_NONNULL(2) void persist(std::byte* buffer) const { (*desc_->persist)(buffer, desc_); }
 	LUG_NONNULL(2) void restore(std::byte* buffer) const { (*desc_->restore)(buffer, desc_); }
+	[[nodiscard]] bool operator==(attribute_frame_handle const& other) const noexcept { return info_ == other.info_ && desc_ == other.desc_; }
+	[[nodiscard]] bool operator!=(attribute_frame_handle const& other) const noexcept { return !(*this == other); }
 };
 
 [[nodiscard]] inline attribute_frame_handle attribute_frame_info::handle() const
@@ -837,8 +839,7 @@ class environment
 		attribute_frame_instance* next;
 		std::byte* buffer;
 		attribute_frame_handle frame;
-		attribute_frame_instance(attribute_frame_instance* np, std::byte* bp, attribute_frame_handle fh) noexcept
-			: next{np}, buffer{bp}, frame{std::move(fh)} {}
+		attribute_frame_instance(attribute_frame_instance* np, std::byte* bp, attribute_frame_handle fh) noexcept : next{np}, buffer{bp}, frame{std::move(fh)} {}
 	};
 
 	static inline std::vector<std::string> const empty_symbols_{};
@@ -864,19 +865,23 @@ class environment
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
+	attribute_frame_instance* pop_attribute_frame_instance(attribute_frame_instance* instance)
+	{
+		attribute_frame_instance* const next_instance{instance->next};
+		std::byte* const buffer{instance->buffer};
+		attribute_frame_handle const frame{std::move(instance->frame)};
+		std::destroy_at(instance);
+		attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
+		frame.restore(buffer);
+		attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+		return next_instance;
+	}
+
 	void reset_attribute_frame_stack()
 	{
 		attribute_frame_instance* instance{attribute_frame_stack_};
-		while (instance != nullptr) {
-			attribute_frame_instance* const next_instance{instance->next};
-			std::byte* const buffer{instance->buffer};
-			attribute_frame_handle const frame{std::move(instance->frame)};
-			std::destroy_at(instance);
-			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
-			frame.restore(buffer);
-			attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
-			instance = next_instance;
-		}
+		while (instance != nullptr)
+			instance = pop_attribute_frame_instance(instance);
 		attribute_frame_stack_ = nullptr;
 	}
 
@@ -1014,33 +1019,19 @@ public:
 	void push_attribute_frame(attribute_frame_handle const& frame)
 	{
 		std::byte* const buffer{static_cast<std::byte*>(attribute_frame_allocator_.allocate(frame.size_bytes(), frame.alignment()))};
-		LUG_TRY {
-			frame.persist(buffer);
-			LUG_TRY {
-				void* const instance_storage{attribute_frame_allocator_.allocate(sizeof(attribute_frame_instance), alignof(attribute_frame_instance))};
-				attribute_frame_stack_ = ::new(instance_storage) attribute_frame_instance{attribute_frame_stack_, buffer, frame}; // NOLINT(cppcoreguidelines-owning-memory)
-			} LUG_CATCH_ANY {
-				frame.destroy(buffer);
-				LUG_RETHROW;
-			}
-		} LUG_CATCH_ANY {
-			attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
-			LUG_RETHROW;
-		}
+		detail::scope_fail const buffer_cleanup{[this, &frame, buffer]() noexcept { attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment()); }};
+		frame.persist(buffer);
+		detail::scope_fail const frame_cleanup{[&frame, buffer]() noexcept { frame.destroy(buffer); }};
+		void* const instance_storage{attribute_frame_allocator_.allocate(sizeof(attribute_frame_instance), alignof(attribute_frame_instance))};
+		attribute_frame_stack_ = ::new(instance_storage) attribute_frame_instance{attribute_frame_stack_, buffer, frame}; // NOLINT(cppcoreguidelines-owning-memory)
 	}
 
 	void pop_attribute_frame(attribute_frame_handle const& frame)
 	{
 		attribute_frame_instance* const instance{attribute_frame_stack_};
-		if LUG_UNLIKELY(!instance)
+		if LUG_UNLIKELY(!instance || (instance->frame != frame))
 			throw_exception<attribute_stack_error>();
-		attribute_frame_instance* const next_instance{instance->next};
-		std::byte* const buffer{instance->buffer};
-		std::destroy_at(instance);
-		attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
-		frame.restore(buffer);
-		attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
-		attribute_frame_stack_ = next_instance;
+		attribute_frame_stack_ = pop_attribute_frame_instance(instance);
 	}
 
 	template <class T>
@@ -1275,6 +1266,10 @@ public:
 	encoder& operator=(encoder&& e) noexcept { encoder{std::move(e)}.swap(*this); return *this; }
 	~encoder() { if (program_ != nullptr) { program_->entry_mode = entry_mode(); } if (rule_ != nullptr) { rule_->currently_encoding_ = false; } }
 	void swap(encoder& e) noexcept { std::swap(rule_, e.rule_); std::swap(program_, e.program_); std::swap(callees_, e.callees_); mode_.swap(e.mode_); std::swap(entry_mode_, e.entry_mode_); }
+	[[nodiscard]] bool is_frame_empty() const noexcept { return attribute_frame_info_->empty(); }
+	[[nodiscard]] attribute_frame_handle get_frame_handle() const noexcept { return attribute_frame_info_->handle(); }
+	[[nodiscard]] std::uint_least16_t get_frame_handle_index() { return add_item(program_->frames, attribute_frame_info_->handle()); }
+	template <class Target, class = std::enable_if_t<is_attribute_frame_persistable_v<Target>>> LUG_NONNULL(2) void add_to_frame(Target* target) { attribute_frame_info_->add(target); }
 	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
 	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
 	[[nodiscard]] std::ptrdiff_t here() const noexcept { return static_cast<std::ptrdiff_t>(program_->instructions.size()); }
@@ -1292,7 +1287,6 @@ public:
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
 	std::ptrdiff_t encode_min_max(opcode op, std::size_t nmin, std::size_t nmax, std::uint_least16_t imm16 = 0, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, instruction::pack_min_max(nmin, nmax)}); }
-	[[nodiscard]] std::uint_least16_t add_frame_handle() { return add_item(program_->frames, attribute_frame_info_->handle()); }
 	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>> [[nodiscard]] std::uint_least16_t add_rune_set(RS&& runes) { return add_item(program_->runesets, std::forward<RS>(runes)); }
 
 	std::ptrdiff_t call(program const& p, std::uint_least16_t prec, [[maybe_unused]] bool allow_inlining = true)
@@ -1315,7 +1309,7 @@ public:
 	{
 		std::uint_least16_t handle_index{0};
 		if (!attribute_frame_info_->empty()) {
-			handle_index = add_frame_handle();
+			handle_index = get_frame_handle_index();
 			encode(opcode::attribute_push, handle_index);
 		}
 		std::ptrdiff_t const call_addr{call(std::forward<T>(target), prec, std::forward<Args>(args)...)};
@@ -1323,10 +1317,6 @@ public:
 			encode(opcode::attribute_pop, handle_index);
 		return call_addr;
 	}
-
-	[[nodiscard]] bool is_frame_empty() const noexcept { return attribute_frame_info_->empty(); }
-	[[nodiscard]] attribute_frame_handle get_frame_handle() const noexcept { return attribute_frame_info_->handle(); }
-	template <class Target> LUG_NONNULL(2) void add_to_frame(Target* target) { attribute_frame_info_->add(target); }
 
 	std::ptrdiff_t recover_push_call(rule const& r)
 	{
@@ -1369,7 +1359,7 @@ public:
 		}
 		if constexpr (std::is_same_v<std::decay_t<T>, char32_t>)
 			if (!unicode::is_ascii(value))
-				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(value)).build()));
+				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.add_rune(value)).build()));
 		return encode_min_max(unit_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<std::make_unsigned_t<T>>(value)));
 	}
 
@@ -2422,7 +2412,7 @@ struct action_expression : attribute_action_expression<action_expression<E1, Act
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
-	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 };
 
@@ -2433,7 +2423,7 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
-	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); d.skip().encode(opcode::capture_start); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
@@ -2445,7 +2435,7 @@ struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
-	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
 };
 
@@ -2456,7 +2446,7 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
-	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); d.skip().encode(opcode::capture_start); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
@@ -2778,7 +2768,7 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] c
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator&(E const& e) { return positive_lookahead_expression{make_expression(e)}; } // NOLINT(google-runtime-operator)
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator*(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, forever>{make_expression(e)}; }
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>> [[nodiscard]] constexpr auto operator>>(E1 const& e1, E2 const& e2) { return e1 > *(e2 > e1); }
-template <class T, class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
+template <class T, class E, class = std::enable_if_t<is_attribute_frame_persistable_v<T> && is_expression_v<E>>> [[nodiscard]] constexpr auto operator%(T& target, E const& e) { return assign_to_expression{make_expression(e), std::addressof(target)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 1, forever>{make_expression(e)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, 1>{make_expression(e)}; }

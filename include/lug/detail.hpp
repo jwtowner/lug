@@ -604,18 +604,20 @@ class stack_allocator
 {
 	struct page
 	{
-		page* next{nullptr};
-		std::uintptr_t current{0};
-		std::uintptr_t begin{0};
-		std::uintptr_t end{0};
+		page* next;
+		std::uintptr_t current;
+		std::uintptr_t begin;
+		std::uintptr_t end;
 	};
 
 	struct large_object
 	{
-		large_object* next{nullptr};
-		void* begin{nullptr};
-		std::size_t size{0};
-		std::size_t align{0};
+		large_object* next;
+		void* begin;
+		std::size_t size;
+		std::size_t align;
+		constexpr large_object(large_object* n, void* b, std::size_t sz, std::size_t al) noexcept
+			: next{n}, begin{b}, size{sz}, align{al} {}
 	};
 
 	std::size_t page_size_{0};
@@ -626,7 +628,7 @@ class stack_allocator
 
 public:
 	static constexpr std::size_t default_page_size{16384};
-	static constexpr std::size_t default_page_align{256};
+	static constexpr std::size_t default_page_align{alignof(std::max_align_t)};
 	static constexpr std::size_t default_large_object_threshold{4096};
 
 	stack_allocator()
@@ -671,7 +673,7 @@ public:
 		while (large_objects_ != nullptr) {
 			auto const next{large_objects_->next};
 			::operator delete[](large_objects_->begin, std::align_val_t{large_objects_->align});
-			delete large_objects_;
+			delete large_objects_; // NOLINT(cppcoreguidelines-owning-memory)
 			large_objects_ = next;
 		}
 	}
@@ -680,8 +682,8 @@ public:
 	{
 		std::swap(page_size_, other.page_size_);
 		std::swap(page_align_, other.page_align_);
-		std::swap(head_, other.head_);
 		std::swap(large_object_threshold_, other.large_object_threshold_);
+		std::swap(head_, other.head_);
 		std::swap(large_objects_, other.large_objects_);
 	}
 
@@ -706,17 +708,8 @@ public:
 			return reinterpret_cast<void*>(new_addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
 		}
 		auto const ptr{::operator new[](size, std::align_val_t{align})};
-		large_object* obj{nullptr};
-		LUG_TRY {
-			obj = new large_object(); // NOLINT(cppcoreguidelines-owning-memory)
-		} LUG_CATCH_ANY {
-			::operator delete[](ptr, std::align_val_t{align});
-			LUG_RETHROW;
-		}
-		obj->next = std::exchange(large_objects_, obj);
-		obj->begin = ptr;
-		obj->size = size;
-		obj->align = align;
+		scope_fail const cleanup{[ptr, align]() noexcept { ::operator delete[](ptr, std::align_val_t{align}); }};
+		large_objects_ = new large_object(large_objects_, ptr, size, align); // NOLINT(cppcoreguidelines-owning-memory)
 		return ptr;
 	}
 

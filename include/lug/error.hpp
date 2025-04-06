@@ -31,7 +31,12 @@
 
 namespace lug {
 
-inline bool const volatile exceptions_enabled =
+#ifdef _PREFAST_
+inline bool const volatile
+#else 
+constexpr bool
+#endif
+exceptions_enabled =
 #ifndef LUG_NO_EXCEPTIONS
 true
 #else
