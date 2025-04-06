@@ -434,12 +434,11 @@ struct registers
 
 enum class opcode : std::uint_least8_t
 {
-	jump,           choice,         commit,         commit_back,
-	commit_partial, accept,         call,           ret,
-	fail,           recover_push,   recover_pop,    recover_resp,
-	report_push,    report_pop,     predicate,      action,
-	capture_start,  capture_end,    condition_pop,  symbol_end,
-	symbol_pop,
+	jump,           choice,         commit,         commit_back,    commit_partial,
+	rewind,         accept,         call,           ret,            fail,
+	recover_push,   recover_pop,    recover_resp,   report_push,    report_pop,
+	predicate,      action,         capture_start,  capture_end,    capture_full,
+	attribute_push, attribute_pop,  condition_pop,  symbol_end,     symbol_pop,
 	match_any,      match_blank,    match_space,    match_eol,      match_eoi,
 	match_unit,     match_set,      match_all_of,   match_any_of,   match_none_of,
 	repeat_any,     repeat_blank,   repeat_space,   skip_blank,     skip_space,
@@ -497,11 +496,11 @@ template <class A> inline constexpr bool is_capture_action_v = std::is_invocable
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
 template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || is_primitive_expression_v<E> || is_predicate_v<E>;
 
-enum class directives : std::uint_least8_t { none = 0, caseless = 1, eps = 2, lexeme = 4, noskip = 8, preskip = 16, postskip = 32 };
+enum class directives : std::uint_least8_t { none = 0U, caseless = 1U, eps = 2U, lexeme = 4U, noskip = 8U, preskip = 16U, postskip = 32U };
 template <> inline constexpr bool is_flag_enum_v<directives> = true;
-enum class effect_traits : std::uint_least8_t { none = 0, captures = 1, cuts = 2, raises = 4, all = captures | cuts | raises };
+enum class effect_traits : std::uint_least8_t { none = 0U, captures = 1U, cuts = 2U, raises = 4U, all = 7U };
 template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
-enum class match_traits : std::uint_least8_t { none = 0, nullable = 1, nofail = 2, all = nullable | nofail };
+enum class match_traits : std::uint_least8_t { none = 0U, nullable = 1U, nofail = 2U, all = 3U };
 template <> inline constexpr bool is_flag_enum_v<match_traits> = true;
 
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
@@ -509,6 +508,139 @@ using error_handler = std::function<error_response(error_context&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
+
+template <class T>
+inline constexpr bool is_attribute_frame_persistable_v =
+	!std::is_const_v<T> &&
+	std::is_object_v<T> &&
+	std::is_copy_constructible_v<T> &&
+	std::is_move_assignable_v<T> &&
+	std::is_nothrow_destructible_v<T>;
+
+class attribute_frame_handle;
+
+class attribute_frame_info : public std::enable_shared_from_this<attribute_frame_info>
+{
+	friend class attribute_frame_handle;
+
+	struct descriptor
+	{
+		using destroy_fn = void (*)(std::byte*, descriptor const*);
+		using persist_fn = void (*)(std::byte*, descriptor const*);
+		using restore_fn = void (*)(std::byte*, descriptor const*);
+		std::unique_ptr<descriptor> next;
+		destroy_fn destroy;
+		persist_fn persist;
+		restore_fn restore;
+		std::size_t offset;
+		void* target;
+		descriptor(destroy_fn dfn, persist_fn pfn, restore_fn rfn, std::size_t off, void* tar) noexcept
+			: destroy{dfn}, persist{pfn}, restore{rfn}, offset{off}, target{tar} {}
+	};
+
+	template <class T>
+	struct descriptor_operations
+	{
+		static void destroy(std::byte* buffer, descriptor const* desc)
+		{
+			std::destroy_at(static_cast<T*>(static_cast<void*>(buffer + desc->offset))); // NOLINT(bugprone-casting-through-void)
+			descriptor const* next = desc->next.get();
+			if (next == nullptr)
+				return;
+			LUG_MUSTTAIL return (*next->destroy)(buffer, next); // NOLINT(readability-avoid-return-with-void-value)
+		}
+
+		static void persist(std::byte* buffer, descriptor const* desc)
+		{
+			::new(buffer + desc->offset) T{*static_cast<T const*>(desc->target)};
+			descriptor const* next = desc->next.get();
+			if (next == nullptr)
+				return;
+			LUG_MUSTTAIL return (*next->persist)(buffer, next); // NOLINT(readability-avoid-return-with-void-value)
+		}
+
+		static void restore(std::byte* buffer, descriptor const* desc)
+		{
+			auto* const from = static_cast<T*>(static_cast<void*>(buffer + desc->offset)); // NOLINT(bugprone-casting-through-void)
+			*static_cast<T*>(desc->target) = static_cast<T&&>(*from);
+			std::destroy_at(from);
+			descriptor const* next = desc->next.get();
+			if (next == nullptr)
+				return;
+			LUG_MUSTTAIL return (*next->restore)(buffer, next); // NOLINT(readability-avoid-return-with-void-value)
+		}
+	};
+
+	std::unique_ptr<descriptor> descriptors_;
+	std::size_t align_bytes_{1};
+	std::size_t size_bytes_{0};
+
+	[[nodiscard]] bool is_target_unique(descriptor::persist_fn pfn, void* target) const
+	{
+		descriptor const* desc = descriptors_.get();
+		while (desc != nullptr) {
+			if (desc->target == target) {
+				if LUG_UNLIKELY(desc->persist != pfn)
+					lug::throw_exception<attribute_stack_error>();
+				return false;
+			}
+			desc = desc->next.get();
+		}
+		return true;
+	}
+
+public:
+	attribute_frame_info() noexcept = default;
+	~attribute_frame_info() = default;
+	attribute_frame_info(attribute_frame_info const&) = delete;
+	attribute_frame_info(attribute_frame_info&&) = delete;
+	attribute_frame_info& operator=(attribute_frame_info const&) = delete;
+	attribute_frame_info& operator=(attribute_frame_info&&) = delete;
+	[[nodiscard]] bool empty() const noexcept { return !descriptors_; }
+	[[nodiscard]] std::size_t alignment() const noexcept { return align_bytes_; }
+	[[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
+	[[nodiscard]] attribute_frame_handle handle() const;
+
+	template <class T, class = std::enable_if_t<is_attribute_frame_persistable_v<T>>>
+	LUG_NONNULL(2) void add(T* target)
+	{
+		using U = std::remove_cv_t<T>;
+		if (is_target_unique(&descriptor_operations<U>::persist, target)) {
+			std::size_t const offset{(size_bytes_ + (alignof(U) - 1)) & ~(alignof(U) - 1)};
+			auto desc{std::make_unique<descriptor>(&descriptor_operations<U>::destroy, &descriptor_operations<U>::persist, &descriptor_operations<U>::restore, offset, target)};
+			desc->next = std::move(descriptors_);
+			descriptors_ = std::move(desc);
+			align_bytes_ = (std::max)(align_bytes_, alignof(U));
+			size_bytes_ = offset + sizeof(U);
+		}
+	}
+};
+
+class attribute_frame_handle
+{
+	friend class attribute_frame_info;
+	std::shared_ptr<attribute_frame_info const> info_;
+	attribute_frame_info::descriptor const* desc_{nullptr};
+	attribute_frame_handle(std::shared_ptr<attribute_frame_info const> info, attribute_frame_info::descriptor const* desc) noexcept : info_{std::move(info)}, desc_{desc} {}
+public:
+	constexpr attribute_frame_handle() noexcept = default;
+	attribute_frame_handle(attribute_frame_handle const&) noexcept = default;
+	attribute_frame_handle(attribute_frame_handle&&) noexcept = default;
+	attribute_frame_handle& operator=(attribute_frame_handle const&) noexcept = default;
+	attribute_frame_handle& operator=(attribute_frame_handle&&) noexcept = default;
+	~attribute_frame_handle() noexcept = default;
+	[[nodiscard]] bool empty() const noexcept { return info_->empty(); }
+	[[nodiscard]] std::size_t alignment() const noexcept { return info_->alignment(); }
+	[[nodiscard]] std::size_t size_bytes() const noexcept { return info_->size_bytes(); }
+	LUG_NONNULL(2) void destroy(std::byte* buffer) const noexcept { (*desc_->destroy)(buffer, desc_); }
+	LUG_NONNULL(2) void persist(std::byte* buffer) const { (*desc_->persist)(buffer, desc_); }
+	LUG_NONNULL(2) void restore(std::byte* buffer) const { (*desc_->restore)(buffer, desc_); }
+};
+
+[[nodiscard]] inline attribute_frame_handle attribute_frame_info::handle() const
+{
+	return attribute_frame_handle{shared_from_this(), descriptors_.get()};
+}
 
 struct program
 {
@@ -520,6 +652,7 @@ struct program
 	std::vector<syntactic_predicate> predicates;
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture_action> captures;
+	std::vector<attribute_frame_handle> frames;
 	directives entry_mode{directives::eps};
 	effect_traits first_etraits{effect_traits::none};
 	effect_traits follow_etraits{effect_traits::none};
@@ -534,6 +667,7 @@ struct program
 		std::size_t const predicates_offset = predicates.size();
 		std::size_t const actions_offset = actions.size();
 		std::size_t const captures_offset = captures.size();
+		std::size_t const attribute_frames_offset = frames.size();
 		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
 		for (auto const& instr : src.instructions) {
 			instruction new_instr{instr};
@@ -551,7 +685,8 @@ struct program
 					case opcode::report_push: object = instr.immediate16 + handlers_offset; break;
 					case opcode::predicate: object = instr.immediate16 + predicates_offset; break;
 					case opcode::action: object = instr.immediate16 + actions_offset; break;
-					case opcode::capture_end: object = instr.immediate16 + captures_offset; break;
+					case opcode::capture_end: case opcode::capture_full: object = instr.immediate16 + captures_offset; break;
+					case opcode::attribute_push: case opcode::attribute_pop: object = instr.immediate16 + attribute_frames_offset; break;
 					default: break;
 				}
 				if (object.has_value())
@@ -567,6 +702,7 @@ struct program
 		predicates.insert(predicates.end(), src.predicates.begin(), src.predicates.end());
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
+		frames.insert(frames.end(), src.frames.begin(), src.frames.end());
 		entry_mode = (entry_mode & ~directives::eps) | (entry_mode & src.entry_mode & directives::eps);
 		if (was_empty) {
 			first_etraits = src.first_etraits;
@@ -696,8 +832,18 @@ class environment
 	friend class parser_base;
 	template <class> friend class basic_parser;
 
+	struct attribute_frame_instance
+	{
+		attribute_frame_instance* next;
+		std::byte* buffer;
+		attribute_frame_handle frame;
+		attribute_frame_instance(attribute_frame_instance* np, std::byte* bp, attribute_frame_handle fh) noexcept
+			: next{np}, buffer{bp}, frame{std::move(fh)} {}
+	};
+
 	static inline std::vector<std::string> const empty_symbols_{};
-	std::vector<detail::move_only_any> attribute_frame_stack_;
+	detail::stack_allocator attribute_frame_allocator_;
+	attribute_frame_instance* attribute_frame_stack_{nullptr};
 	std::vector<detail::move_only_any> attribute_result_stack_;
 	std::vector<std::size_t> attribute_collection_stack_;
 	std::unordered_set<std::string_view> conditions_;
@@ -718,6 +864,22 @@ class environment
 	virtual void on_accept_started() {}
 	virtual void on_accept_ended() {}
 
+	void reset_attribute_frame_stack()
+	{
+		attribute_frame_instance* instance{attribute_frame_stack_};
+		while (instance != nullptr) {
+			attribute_frame_instance* const next_instance{instance->next};
+			std::byte* const buffer{instance->buffer};
+			attribute_frame_handle const frame{std::move(instance->frame)};
+			std::destroy_at(instance);
+			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
+			frame.restore(buffer);
+			attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+			instance = next_instance;
+		}
+		attribute_frame_stack_ = nullptr;
+	}
+
 	void reset(std::string_view sub)
 	{
 		if (should_reset_on_parse_) {
@@ -726,7 +888,7 @@ class environment
 				prune_depth_ = (std::numeric_limits<std::size_t>::max)();
 				origin_ = position_at(match_.size());
 				set_match_and_subject(sub.substr(0, 0), sub);
-				attribute_frame_stack_.clear();
+				reset_attribute_frame_stack();
 				attribute_result_stack_.clear();
 				attribute_collection_stack_.clear();
 			}
@@ -780,7 +942,7 @@ public:
 	environment(environment&&) noexcept = default;
 	environment& operator=(environment const&) = delete;
 	environment& operator=(environment&&) noexcept = default;
-	virtual ~environment() = default;
+	virtual ~environment() { reset_attribute_frame_stack(); }
 	[[nodiscard]] bool should_reset_on_parse() const noexcept { return should_reset_on_parse_; }
 	void should_reset_on_parse(bool should_reset) noexcept { should_reset_on_parse_ = should_reset; }
 	[[nodiscard]] std::uint_least32_t tab_width() const noexcept { return tab_width_; }
@@ -849,16 +1011,36 @@ public:
 		return positions_.insert(pos, std::make_pair(index, position))->second;
 	}
 
-	template <class Frame>
-	void push_attribute_frame(Frame const& frame)
+	void push_attribute_frame(attribute_frame_handle const& frame)
 	{
-		attribute_frame_stack_.emplace_back(std::in_place_type<detail::remove_cvref_from_tuple_t<Frame>>, frame);
+		std::byte* const buffer{static_cast<std::byte*>(attribute_frame_allocator_.allocate(frame.size_bytes(), frame.alignment()))};
+		LUG_TRY {
+			frame.persist(buffer);
+			LUG_TRY {
+				void* const instance_storage{attribute_frame_allocator_.allocate(sizeof(attribute_frame_instance), alignof(attribute_frame_instance))};
+				attribute_frame_stack_ = ::new(instance_storage) attribute_frame_instance{attribute_frame_stack_, buffer, frame}; // NOLINT(cppcoreguidelines-owning-memory)
+			} LUG_CATCH_ANY {
+				frame.destroy(buffer);
+				LUG_RETHROW;
+			}
+		} LUG_CATCH_ANY {
+			attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+			LUG_RETHROW;
+		}
 	}
 
-	template <class Frame>
-	void pop_attribute_frame(Frame& frame)
+	void pop_attribute_frame(attribute_frame_handle const& frame)
 	{
-		frame = detail::move_only_any_cast<detail::remove_cvref_from_tuple_t<Frame>>(detail::guarded_pop_back<attribute_stack_error>(attribute_frame_stack_));
+		attribute_frame_instance* const instance{attribute_frame_stack_};
+		if LUG_UNLIKELY(!instance)
+			throw_exception<attribute_stack_error>();
+		attribute_frame_instance* const next_instance{instance->next};
+		std::byte* const buffer{instance->buffer};
+		std::destroy_at(instance);
+		attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
+		frame.restore(buffer);
+		attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+		attribute_frame_stack_ = next_instance;
 	}
 
 	template <class T>
@@ -1043,20 +1225,6 @@ public:
 template <class R, class = std::enable_if_t<is_recovery_expression_v<R>>> failure(std::string_view, R&&) -> failure<std::decay_t<R>>;
 failure(std::string_view) -> failure<void>;
 
-template <class AttributeFrameType = std::tuple<>>
-struct encoder_metadata
-{
-	using attribute_frame_type = AttributeFrameType;
-	attribute_frame_type attribute_frame;
-	template <class Frame = attribute_frame_type, class = std::enable_if_t<std::is_default_constructible_v<Frame>>>
-	constexpr encoder_metadata() noexcept : attribute_frame{} {}
-	template <class Frame, class = std::enable_if_t<std::is_constructible_v<attribute_frame_type, Frame&&>>>
-	constexpr explicit encoder_metadata(Frame&& frame) noexcept : attribute_frame{std::forward<Frame>(frame)} {}
-};
-
-encoder_metadata() -> encoder_metadata<>;
-template <class Frame> encoder_metadata(Frame&&) -> encoder_metadata<std::decay_t<Frame>>;
-
 class encoder
 {
 	static constexpr std::size_t inline_max_instructions{8};
@@ -1065,6 +1233,7 @@ class encoder
 	rule* rule_{nullptr};
 	program* program_{nullptr};
 	program_callees* callees_{nullptr};
+	std::shared_ptr<attribute_frame_info> attribute_frame_info_;
 	std::vector<directives> mode_;
 	directives entry_mode_{directives::none};
 
@@ -1089,7 +1258,7 @@ class encoder
 		};
 	}
 
-	[[nodiscard]] std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
+	[[nodiscard]] LUG_NONNULL(3) std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
 	{
 		directives const callee_mode = mode_.back();
 		skip(p->entry_mode ^ directives::eps, directives::noskip);
@@ -1098,10 +1267,10 @@ class encoder
 	}
 
 public:
-	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, mode_{initial} {}
-	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
+	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{initial} {}
+	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
 	encoder(encoder const&) = delete;
-	encoder(encoder&& e) noexcept : rule_{std::exchange(e.rule_, nullptr)}, program_{std::exchange(e.program_, nullptr)}, callees_{std::exchange(e.callees_, nullptr)}, mode_{std::move(e.mode_)}, entry_mode_{e.entry_mode_} {}
+	encoder(encoder&& e) noexcept : rule_{std::exchange(e.rule_, nullptr)}, program_{std::exchange(e.program_, nullptr)}, callees_{std::exchange(e.callees_, nullptr)}, attribute_frame_info_{std::exchange(e.attribute_frame_info_, nullptr)}, mode_{std::move(e.mode_)}, entry_mode_{e.entry_mode_} {}
 	encoder& operator=(encoder const&) = delete;
 	encoder& operator=(encoder&& e) noexcept { encoder{std::move(e)}.swap(*this); return *this; }
 	~encoder() { if (program_ != nullptr) { program_->entry_mode = entry_mode(); } if (rule_ != nullptr) { rule_->currently_encoding_ = false; } }
@@ -1123,7 +1292,8 @@ public:
 	std::ptrdiff_t encode(opcode op, semantic_capture_action&& a, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->captures, std::move(a)), 0}); }
 	std::ptrdiff_t encode(opcode op, syntactic_predicate&& p, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, add_item(program_->predicates, std::move(p)), 0}); }
 	std::ptrdiff_t encode_min_max(opcode op, std::size_t nmin, std::size_t nmax, std::uint_least16_t imm16 = 0, std::uint_least8_t imm8 = 0) { return append(instruction{op, imm8, imm16, instruction::pack_min_max(nmin, nmax)}); }
-	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>> std::uint_least16_t add_rune_set(RS&& runes) { return add_item(program_->runesets, std::forward<RS>(runes)); }
+	[[nodiscard]] std::uint_least16_t add_frame_handle() { return add_item(program_->frames, attribute_frame_info_->handle()); }
+	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>> [[nodiscard]] std::uint_least16_t add_rune_set(RS&& runes) { return add_item(program_->runesets, std::forward<RS>(runes)); }
 
 	std::ptrdiff_t call(program const& p, std::uint_least16_t prec, [[maybe_unused]] bool allow_inlining = true)
 	{
@@ -1140,16 +1310,23 @@ public:
 		return do_call(&r, &r.program_, 0, prec);
 	}
 
-	template <class M, class T, class... Args>
-	[[nodiscard]] auto call_with_frame(M const& m, T&& target, std::uint_least16_t prec, Args&&... args) -> M const&
+	template <class T, class... Args>
+	std::ptrdiff_t call_with_frame(T&& target, std::uint_least16_t prec, Args&&... args)
 	{
-		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
-			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_attribute_frame(frame); }});
-		call(std::forward<T>(target), prec, std::forward<Args>(args)...);
-		if constexpr (std::tuple_size_v<typename M::attribute_frame_type> != 0)
-			encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) mutable { envr.pop_attribute_frame(frame); }});
-		return m;
+		std::uint_least16_t handle_index{0};
+		if (!attribute_frame_info_->empty()) {
+			handle_index = add_frame_handle();
+			encode(opcode::attribute_push, handle_index);
+		}
+		std::ptrdiff_t const call_addr{call(std::forward<T>(target), prec, std::forward<Args>(args)...)};
+		if (!attribute_frame_info_->empty())
+			encode(opcode::attribute_pop, handle_index);
+		return call_addr;
 	}
+
+	[[nodiscard]] bool is_frame_empty() const noexcept { return attribute_frame_info_->empty(); }
+	[[nodiscard]] attribute_frame_handle get_frame_handle() const noexcept { return attribute_frame_info_->handle(); }
+	template <class Target> LUG_NONNULL(2) void add_to_frame(Target* target) { attribute_frame_info_->add(target); }
 
 	std::ptrdiff_t recover_push_call(rule const& r)
 	{
@@ -1157,25 +1334,22 @@ public:
 		return encode(opcode::recover_push, 0, 0, 0);
 	}
 
-	template <class M, class Recovery>
-	[[nodiscard]] decltype(auto) raise_failure(M const& m, failure<Recovery> const& reason)
+	template <class Recovery>
+	[[nodiscard]] decltype(auto) raise_failure(failure<Recovery> const& reason)
 	{
 		if constexpr (is_encoder_expression_v<Recovery>) {
 			auto const recovery_subroutine = encode(opcode::recover_push);
 			encode(opcode::raise, reason.label(), 1);
 			auto const finished = encode(opcode::jump);
 			jump_to_here(recovery_subroutine);
-			auto m2 = reason.recovery().evaluate(*this, m);
+			reason.recovery().evaluate(*this);
 			encode(opcode::ret);
 			jump_to_here(finished);
-			return m2;
 		} else if constexpr (std::is_same_v<Recovery, rule>) {
 			recover_push_call(reason.recovery());
 			encode(opcode::raise, reason.label(), 1);
-			return m;
 		} else {
 			encode(opcode::raise, reason.label(), 0);
-			return m;
 		}
 	}
 
@@ -1312,7 +1486,7 @@ struct raise_expression : terminal_encoder_expression_interface<raise_expression
 {
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
-	template <class M> [[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const { return d.raise_failure(m, reason); }
+	void evaluate(encoder& d) const { return d.raise_failure(reason); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::raises; }
 };
 
@@ -1325,16 +1499,14 @@ struct expect_expression : unary_encoder_expression_interface<expect_expression<
 	constexpr expect_expression(X1&& x1, failure<Recovery> const& fail) : base_type{std::forward<X1>(x1)}, reason{fail} {}
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::raises; }
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
-		auto m3 = d.raise_failure(m2, reason);
+		d.raise_failure(reason);
 		d.jump_to_here(commit);
-		return m3;
 	}
 };
 
@@ -1346,26 +1518,23 @@ struct recover_with_expression : unary_encoder_expression_interface<recover_with
 	template <class X1, class R, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<recover_with<Recovery>, R&&>>>
 	constexpr recover_with_expression(X1&& x1, R&& r) : base_type{std::forward<X1>(x1)}, rec{std::forward<R>(r)} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_encoder_expression_v<Recovery>) {
 			auto const recovery_subroutine = d.encode(opcode::recover_push);
-			auto m2 = this->e1.evaluate(d, m);
+			this->e1.evaluate(d);
 			d.encode(opcode::recover_pop);
 			auto const finished = d.encode(opcode::jump);
 			d.jump_to_here(recovery_subroutine);
-			auto m3 = rec.recovery().evaluate(d, m2);
+			rec.recovery().evaluate(d);
 			d.encode(opcode::ret);
 			d.jump_to_here(finished);
-			return m3;
 		} else if constexpr (std::is_same_v<Recovery, rule>) {
 			d.recover_push_call(rec.recovery());
-			auto m2 = this->e1.evaluate(d, m);
+			this->e1.evaluate(d);
 			d.encode(opcode::recover_pop);
-			return m2;
 		} else {
-			return this->e1.evaluate(d, m);
+			this->e1.evaluate(d);
 		}
 	}
 };
@@ -1374,7 +1543,7 @@ struct recover_response_expression : terminal_encoder_expression_interface<recov
 {
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); return m; }
+	void evaluate(encoder& d) const { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
@@ -1388,16 +1557,14 @@ struct report_expression : unary_encoder_expression_interface<report_expression<
 	template <class X1, class H, class = std::enable_if_t<std::is_constructible_v<Handler, H&&>>>
 	constexpr report_expression(X1&& x1, H&& h) : base_type{std::forward<X1>(x1)}, handler{std::forward<H>(h)} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (std::is_invocable_r_v<error_response, Handler, error_context&>)
 			d.encode(opcode::report_push, error_handler{handler});
 		else
 			d.encode(opcode::report_push, error_handler{[h = handler](error_context& e) -> error_response { (void)h(e); return e.recovery_response(); }});
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::report_pop);
-		return m2;
 	}
 };
 
@@ -1425,7 +1592,7 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 {
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
@@ -1470,7 +1637,7 @@ struct string_expression : terminal_encoder_expression_interface<string_expressi
 {
 	std::string_view text;
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(text); return m; }
+	void evaluate(encoder& d) const { d.match(text); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return text.empty() ? (match_traits::nullable | match_traits::nofail) : match_traits::none; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return !text.empty(); }
 };
@@ -1479,7 +1646,7 @@ struct char_expression : terminal_encoder_expression_interface<char_expression>
 {
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match(std::string_view{&c, 1}); return m; }
+	void evaluate(encoder& d) const { d.match(std::string_view{&c, 1}); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
@@ -1487,7 +1654,7 @@ struct rune_expression : terminal_encoder_expression_interface<rune_expression>
 {
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); return m; }
+	void evaluate(encoder& d) const { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
@@ -1496,7 +1663,7 @@ struct rune_range_expression : terminal_encoder_expression_interface<rune_range_
 	char32_t start;
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
@@ -1510,7 +1677,7 @@ struct rune_set_expression : terminal_encoder_expression_interface<rune_set_expr
 	rune_set set;
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_set(make_rune_set(d.mode())); return m; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
@@ -1528,7 +1695,7 @@ struct callable_expression : terminal_encoder_expression_interface<callable_expr
 	std::uint_least16_t prec{0};
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
 	constexpr explicit callable_expression(Target& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { return d.call_with_frame(m, target.get(), prec); }
+	void evaluate(encoder& d) const { d.call_with_frame(target.get(), prec); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_effects() | target.get().follow_effects(); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return target.get().first_matches() & target.get().follow_matches(); }
 };
@@ -1538,7 +1705,7 @@ struct predicate_expression : terminal_encoder_expression_interface<predicate_ex
 {
 	Pred pred;
 	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::predicate, syntactic_predicate{pred}); return m; }
+	void evaluate(encoder& d) const { d.encode(opcode::predicate, syntactic_predicate{pred}); }
 };
 
 template <class P> predicate_expression(P&&) -> predicate_expression<std::decay_t<P>>;
@@ -1569,7 +1736,7 @@ template <class E, class>
 inline rule::rule(E const& e)
 {
 	encoder rule_encoder{*this};
-	(void)make_expression(e).evaluate(rule_encoder, encoder_metadata{});
+	(void)make_expression(e).evaluate(rule_encoder);
 }
 
 inline rule::rule(rule const& r)
@@ -1613,13 +1780,11 @@ struct directive_expression : unary_encoder_expression_interface<directive_expre
 	constexpr directive_expression(X1&& x1, directives enable, directives disable, directives relay)
 		: base_type{std::forward<X1>(x1)}, enable_mask{enable}, disable_mask{disable}, relay_mask{relay} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.dpsh(enable_mask, disable_mask);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(relay_mask);
-		return m2;
 	}
 };
 
@@ -1643,26 +1808,26 @@ struct accept_cut_expression : terminal_encoder_expression_interface<accept_cut_
 {
 	std::uint_least8_t imm8;
 	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::accept, 0, imm8); return m; }
+	void evaluate(encoder& d) const { d.encode(opcode::accept, 0, imm8); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::cuts; }
 };
 
 struct eoi_expression : terminal_encoder_expression_interface<eoi_expression>
 {
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); return m; }
+	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct eol_expression : terminal_encoder_expression_interface<eol_expression>
 {
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); return m; }
+	void evaluate(encoder& d) const { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct eps_expression : terminal_encoder_expression_interface<eps_expression>
 {
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& /*d*/, M const& m) const -> M const& { return m; }
+	void evaluate(encoder& /*d*/) const {}
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
@@ -1672,7 +1837,7 @@ struct match_class_expression : terminal_encoder_expression_interface<match_clas
 	opcode mop;
 	Property property;
 	constexpr match_class_expression(opcode op, Property prop) noexcept : mop{op}, property{prop} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.match_class(mop, property); return m; }
+	void evaluate(encoder& d) const { d.match_class(mop, property); }
 };
 
 struct match_class_combinator
@@ -1686,15 +1851,14 @@ struct match_class_combinator
 struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator
 {
 	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(opcode::match_any); return m; }
+	void evaluate(encoder& d) const { d.skip().encode(opcode::match_any); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 template <unicode::ctype Property>
 struct ctype_expression : terminal_encoder_expression_interface<ctype_expression<Property>>
 {
-	template <class M>
-	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const&
+	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == unicode::ctype::blank)
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
@@ -1702,7 +1866,6 @@ struct ctype_expression : terminal_encoder_expression_interface<ctype_expression
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
 		else
 			d.match_class(opcode::match_any_of, Property);
-		return m;
 	}
 };
 
@@ -1716,7 +1879,7 @@ struct condition_test_combinator
 		std::string_view name;
 		std::uint_least8_t imm8;
 		constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::condition_test, name, imm8); return m; }
+		void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
 		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
@@ -1737,13 +1900,11 @@ struct condition_block_combinator
 		std::uint_least8_t imm8;
 		constexpr condition_block_expression(E1 const& x1, std::string_view n, std::uint_least8_t i) noexcept : base_type{x1}, name{n}, imm8{i} {}
 
-		template <class M>
-		[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+		void evaluate(encoder& d) const
 		{
 			d.encode(opcode::condition_push, name, imm8);
-			auto m2 = this->e1.evaluate(d, m);
+			this->e1.evaluate(d);
 			d.encode(opcode::condition_pop);
-			return m2;
 		}
 	};
 
@@ -1773,7 +1934,7 @@ struct symbol_exists_combinator
 		std::string_view name;
 		std::uint_least8_t imm8;
 		constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.encode(opcode::symbol_exists, name, imm8); return m; }
+		void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
 		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
@@ -1792,7 +1953,7 @@ struct symbol_match_combinator
 		opcode mopcf;
 		std::string_view name;
 		constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name); return m; }
+		void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name);}
 	};
 
 	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{mop, mopcf, name}; }
@@ -1811,7 +1972,7 @@ struct symbol_match_offset_combinator
 		std::string_view name;
 		std::uint_least8_t offset;
 		constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
-		template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const -> M const& { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); return m; }
+		void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); }
 	};
 
 	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
@@ -1826,16 +1987,14 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<negati
 	using base_type = unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
 		d.dpsh(directives::none, directives::none);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::none);
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
-		return m2;
 	}
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return (this->e1.matches() & ~match_traits::nofail) | match_traits::nullable; }
@@ -1848,17 +2007,15 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 	using base_type = unary_encoder_expression_interface<positive_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
 		d.dpsh(directives::none, directives::none);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::none);
 		d.encode(opcode::commit_back, 1, 0, 0);
 		d.jump_to_here(choice);
 		d.encode(opcode::fail, 0, 1);
-		return m2;
 	}
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches() | match_traits::nullable; }
@@ -1920,17 +2077,16 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
-				return m;
+				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::eps);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
@@ -1943,7 +2099,6 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 			auto const commit = d.encode(opcode::commit);
 			d.jump_to_here(commit);
 		}
-		return m2;
 	}
 };
 
@@ -1954,23 +2109,21 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
-				return m;
+				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::eps);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (std::size_t i = 0; i < NCount; ++i)
 			d.encode(opcode::call, (loop_body - d.here() - 1), 0, 0);
-		return m2;
 	}
 };
 
@@ -1981,17 +2134,16 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, NMin, forever))
-				return m;
+				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(NMin > 0 ? directives::eps : directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
@@ -2003,7 +2155,6 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, loop);
-		return m2;
 	}
 };
 
@@ -2016,17 +2167,16 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, 0, NMax))
-				return m;
+				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::none);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
@@ -2037,7 +2187,6 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 			auto const commit = d.encode(opcode::commit);
 			d.jump_to_here(commit);
 		}
-		return m2;
 	}
 };
 
@@ -2046,7 +2195,7 @@ struct repetition_expression<E1, 0, 0> : unary_encoder_expression_interface<repe
 {
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	template <class M> [[nodiscard]] decltype(auto) evaluate([[maybe_unused]] encoder& /*d*/, M const& m) const { return m; }
+	void evaluate(encoder& /*d*/) const {}
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
@@ -2060,20 +2209,18 @@ struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repe
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, 0, 1))
-				return m;
+				return;
 		auto const choice = d.encode(opcode::choice);
 		d.dpsh(directives::none, directives::none);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::eps);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.jump_to_here(commit);
-		return m2;
 	}
 };
 
@@ -2085,22 +2232,20 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, 0, forever))
-				return m;
+				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::none);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, expression);
-		return m2;
 	}
 };
 
@@ -2109,7 +2254,7 @@ struct repetition_expression<E1, 1, 1> : unary_encoder_expression_interface<repe
 {
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 1>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	template <class M> [[nodiscard]] decltype(auto) evaluate(encoder& d, M const& m) const { return this->e1.evaluate(d, m); }
+	void evaluate(encoder& d) const { this->e1.evaluate(d); }
 };
 
 template <class E1>
@@ -2118,21 +2263,19 @@ struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repe
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 2>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, 1, 2))
-				return m;
-		(void)this->e1.evaluate(d, m);
+				return;
+		this->e1.evaluate(d);
 		auto const choice = d.encode(opcode::choice);
 		d.dpsh(directives::preskip, directives::postskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::eps);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.jump_to_here(commit);
-		return m2;
 	}
 };
 
@@ -2142,23 +2285,21 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, forever>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 
-	template <class M>
-	[[nodiscard]] auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
 			if (repetition_encode_optimized(this->e1, d, 1, forever))
-				return m;
-		(void)this->e1.evaluate(d, m);
+				return;
+		this->e1.evaluate(d);
 		d.skip(directives::none, directives::lexeme | directives::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
 		d.dpsh(directives::postskip, directives::preskip);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::none);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, expression);
-		return m2;
 	}
 };
 
@@ -2182,20 +2323,18 @@ struct choice_expression : binary_encoder_expression_interface<choice_expression
 	using base_type = binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice);
 		d.dpsh(directives::none, directives::none);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpop(directives::eps);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.dpsh(directives::none, directives::none);
-		auto m3 = this->e2.evaluate(d, m2);
+		this->e2.evaluate(d);
 		d.dpop(directives::eps);
 		d.jump_to_here(commit);
-		return m3;
 	}
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept
@@ -2220,14 +2359,12 @@ struct sequence_expression : binary_encoder_expression_interface<sequence_expres
 	using base_type = binary_encoder_expression_interface<sequence_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.dpsh(directives::preskip, directives::postskip);
-		auto m3 = this->e2.evaluate(d, m2);
+		this->e2.evaluate(d);
 		d.dpop(directives::eps);
-		return m3;
 	}
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept
@@ -2254,15 +2391,19 @@ struct attribute_action_expression : unary_encoder_expression_interface<Derived,
 	Operand operand;
 	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) : base_type{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
 
-	template <class M>
-	[[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
-		if constexpr (detail::is_template_instantiation_of_v<std::decay_t<E1>, callable_expression> && (std::tuple_size_v<typename M::attribute_frame_type> != 0)) {
-			d.encode(opcode::action, semantic_action{[frame = m.attribute_frame](environment& envr) { envr.push_attribute_frame(frame); }});
-			static_cast<Derived const&>(*this).do_prologue(d); d.call(this->e1.target, this->e1.prec); static_cast<Derived const&>(*this).do_epilogue_inlined(d, m); return m;
-		} else {
-			static_cast<Derived const&>(*this).do_prologue(d); auto m2 = this->e1.evaluate(d, m); static_cast<Derived const&>(*this).do_epilogue(d); return m2;
+		if constexpr (detail::is_template_instantiation_of_v<std::decay_t<E1>, callable_expression>) {
+			if (!d.is_frame_empty()) {
+				static_cast<Derived const&>(*this).do_prologue_inlined(d);
+				d.call(this->e1.target, this->e1.prec);
+				static_cast<Derived const&>(*this).do_epilogue_inlined(d);
+				return;
+			}
 		}
+		static_cast<Derived const&>(*this).do_prologue(d);
+		this->e1.evaluate(d);
+		static_cast<Derived const&>(*this).do_epilogue(d);
 	}
 };
 
@@ -2271,7 +2412,7 @@ struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, T
 {
 	using base_type = attribute_action_expression<Derived, E1, Target*>;
 	using base_type::base_type;
-	template <class M> [[nodiscard]] constexpr auto evaluate(encoder& d, M const& m) const { return encoder_metadata{std::tuple_cat((attribute_action_expression<Derived, E1, Target*>::evaluate(d, m)).attribute_frame, std::forward_as_tuple(*(this->operand)))}; }
+	void evaluate(encoder& d) const { attribute_action_expression<Derived, E1, Target*>::evaluate(d); d.add_to_frame(this->operand); }
 };
 
 template <class E1, class Action>
@@ -2281,7 +2422,8 @@ struct action_expression : attribute_action_expression<action_expression<E1, Act
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); }
+	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 };
 
 template <class E1, class Action>
@@ -2291,7 +2433,8 @@ struct capture_expression : attribute_action_expression<capture_expression<E1, A
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); d.skip().encode(opcode::capture_start); }
+	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
@@ -2302,7 +2445,8 @@ struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::action, semantic_action{[f = m.attribute_frame, t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); }
+	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
 };
 
 template <class E1, class Target>
@@ -2312,7 +2456,8 @@ struct capture_to_expression : attribute_bind_to_expression<capture_to_expressio
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
-	template <class M> constexpr void do_epilogue_inlined(encoder& d, M const& m) const { d.encode(opcode::capture_end, semantic_capture_action{[f = m.attribute_frame, t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
+	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.add_frame_handle()); d.skip().encode(opcode::capture_start); }
+	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
@@ -2322,7 +2467,7 @@ struct symbol_assign_expression : unary_encoder_expression_interface<symbol_assi
 	using base_type = unary_encoder_expression_interface<symbol_assign_expression<E1>, E1>;
 	std::string_view name;
 	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : base_type{std::forward<X1>(x1)}, name{n} {}
-	template <class M> [[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const { d.skip().encode(opcode::symbol_start, name); auto m2 = this->e1.evaluate(d, m); d.encode(opcode::symbol_end); return m2; }
+	void evaluate(encoder& d) const { d.skip().encode(opcode::symbol_start, name); this->e1.evaluate(d); d.encode(opcode::symbol_end); }
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
@@ -2332,13 +2477,11 @@ struct symbol_block_expression : unary_encoder_expression_interface<symbol_block
 	using base_type = unary_encoder_expression_interface<symbol_block_expression<E1>, E1>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.skip().encode(opcode::symbol_push);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::symbol_pop);
-		return m2;
 	}
 };
 
@@ -2348,13 +2491,11 @@ struct local_block_expression : unary_encoder_expression_interface<local_block_e
 	using base_type = unary_encoder_expression_interface<local_block_expression<E1>, E1>;
 	using base_type::base_type;
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.skip().encode(opcode::symbol_push, 0, 2);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::symbol_pop);
-		return m2;
 	}
 };
 
@@ -2366,13 +2507,11 @@ struct local_to_block_expression : unary_encoder_expression_interface<local_to_b
 	std::string_view name;
 	template <class X1> constexpr local_to_block_expression(X1&& x1, std::string_view n) noexcept : base_type{std::forward<X1>(x1)}, name{n} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.skip().encode(opcode::symbol_push, name, 1);
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::symbol_pop);
-		return m2;
 	}
 };
 
@@ -2420,13 +2559,11 @@ struct collect_expression : unary_encoder_expression_interface<collect_expressio
 	using base_type = unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
 	template <class X1, class C, class... As> constexpr collect_expression(X1&& x1, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.start_attribute_collection(); }});
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{})); }});
-		return m2;
 	}
 };
 
@@ -2453,12 +2590,10 @@ struct synthesize_expression : unary_encoder_expression_interface<synthesize_exp
 	using base_type = unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
 	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::action, semantic_action{[](environment& envr) { synthesize_expression::build<Args...>(envr, std::index_sequence_for<Args...>{}); }});
-		return m2;
 	}
 
 	template <class... As, std::size_t... Is>
@@ -2495,13 +2630,11 @@ struct synthesize_collect_expression : unary_encoder_expression_interface<synthe
 	using base_type = unary_encoder_expression_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>;
 	template <class X1, class F, class V, class C, class... As> constexpr synthesize_collect_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<V> /*v*/, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
-	template <class M>
-	[[nodiscard]] constexpr decltype(auto) evaluate(encoder& d, M const& m) const
+	void evaluate(encoder& d) const
 	{
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.start_attribute_collection(); }});
-		auto m2 = this->e1.evaluate(d, m);
+		this->e1.evaluate(d);
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(Factory{}(std::in_place_type<T>, lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{}))); }});
-		return m2;
 	}
 };
 
@@ -2927,7 +3060,9 @@ class parser_base
 {
 protected:
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
-	static constexpr std::size_t max_size = (std::numeric_limits<std::size_t>::max)();
+	static constexpr std::size_t actioncode = (std::numeric_limits<std::size_t>::max)();
+	static constexpr std::size_t attrpushcode = (std::numeric_limits<std::size_t>::max)() - 1;
+	static constexpr std::size_t attrpopcode = (std::numeric_limits<std::size_t>::max)() - 2;
 
 	struct action_response { std::size_t call_depth{0}; std::size_t action_index{0}; syntax_range range{0, 0}; constexpr action_response() noexcept = default; constexpr action_response(std::size_t c, std::size_t a, syntax_range const& r) noexcept : call_depth{c}, action_index{a}, range{r} {} };
 	struct backtrack_frame { std::size_t sr; std::size_t rc; std::size_t ri; std::ptrdiff_t pc; constexpr backtrack_frame(std::size_t s, std::size_t r, std::size_t i, std::ptrdiff_t p) noexcept : sr{s}, rc{r}, ri{i}, pc{p} {} };
@@ -3087,10 +3222,12 @@ protected:
 		}};
 		for (auto& resp : responses_) {
 			if (environment_->accept_response(resp.call_depth)) {
-				if (resp.range.index < parser_base::max_size)
-					program_->captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index});
-				else
-					program_->actions[resp.action_index](*environment_);
+				switch (~resp.range.index) {
+					case ~parser_base::attrpushcode: environment_->push_attribute_frame(program_->frames[resp.action_index]); break;
+					case ~parser_base::attrpopcode: environment_->pop_attribute_frame(program_->frames[resp.action_index]); break;
+					case ~parser_base::actioncode: program_->actions[resp.action_index](*environment_); break;
+					default: program_->captures[resp.action_index](*environment_, syntax{match.substr(resp.range.index, resp.range.size), resp.range.index}); break;
+				}
 			}
 		}
 	}
@@ -3824,7 +3961,7 @@ public:
 					fail_count = accepted ? 0 : 1;
 				} break;
 				case opcode::action: {
-					responses_.emplace_back(registers_.cd, instr.immediate16, syntax_range{parser_base::max_size, 0});
+					responses_.emplace_back(registers_.cd, instr.immediate16, syntax_range{parser_base::actioncode, 0});
 					registers_.rc = responses_.size();
 				} break;
 				case opcode::capture_start: {
@@ -3843,6 +3980,14 @@ public:
 					responses_.emplace_back(registers_.cd, instr.immediate16,  syntax_range{sr0, sr1 - sr0});
 					registers_.rc = responses_.size();
 					accept_or_drain_if_deferred();
+				} break;
+				case opcode::attribute_push: {
+					responses_.emplace_back(registers_.cd, instr.immediate16, syntax_range{parser_base::attrpushcode, 0});
+					registers_.rc = responses_.size();
+				} break;
+				case opcode::attribute_pop: {
+					responses_.emplace_back(registers_.cd, instr.immediate16, syntax_range{parser_base::attrpopcode, 0});
+					registers_.rc = responses_.size();
 				} break;
 				case opcode::match: {
 					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::compare));

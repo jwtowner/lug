@@ -16,9 +16,9 @@ Checks:
   - fuschia-*
   - google-*
   - -google-build-using-namespace # would require too many individual using-declarations to satisfy
-  - -google-readability-braces-around-statements # adversely affects line count
+  - -google-readability-braces-around-statements # adversely affects line count, revisit later
   - hicpp-*
-  - -hicpp-braces-around-statements # adversely affects line count
+  - -hicpp-braces-around-statements # adversely affects line count, revisit later
   - llvm-namespace-comment
   - misc-*
   - -misc-include-cleaner # brings in redundant headers that are already included
@@ -28,8 +28,9 @@ Checks:
   - performance-*
   - portability-*
   - readability-*
-  - -readability-braces-around-statements # adversely affects line count
+  - -readability-braces-around-statements # adversely affects line count, revisit later
   - -readability-container-contains # C++20 feature
+  - -readability-convert-member-functions-to-static # interferes with expression tree traits and evaluate member function, revisit later
   - -readability-function-cognitive-complexity # grammar::start() and basic_parser::parse() are complex, revisit or suppress only for these functions
   - -readability-identifier-length # revisit later
   - -readability-qualified-auto # stylistic preference that unfortunately warns when marking 'auto*' as 'auto* const' or just 'auto const'

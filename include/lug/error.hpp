@@ -19,10 +19,12 @@
 #define LUG_TRY try
 #define LUG_CATCH(...) catch (__VA_ARGS__)
 #define LUG_CATCH_ANY catch (...)
+#define LUG_RETHROW throw
 #else
 #define LUG_TRY
 #define LUG_CATCH(...) if ([[maybe_unused]] __VA_ARGS__ = {}; (lug::exceptions_enabled))
 #define LUG_CATCH_ANY if ((lug::exceptions_enabled))
+#define LUG_RETHROW
 #endif
 
 // NOLINTEND(cppcoreguidelines-macro-usage)

@@ -9,10 +9,12 @@
 #include <lug/error.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <algorithm>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <new>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -294,18 +296,26 @@ public:
 	template <class Fn, class = std::enable_if_t<std::is_constructible_v<EF, Fn&&>>>
 	constexpr explicit scope_fail(Fn&& fn) noexcept(std::is_nothrow_constructible_v<EF, Fn&&>)
 		: destructor_{std::forward<Fn>(fn)}
-		, uncaught_on_construction_(std::uncaught_exceptions())
+#ifndef LUG_NO_EXCEPTIONS
+		, uncaught_on_construction_{std::uncaught_exceptions()}
+#else // LUG_NO_EXCEPTIONS
+		, uncaught_on_construction_{(std::numeric_limits<int>::max)()}
+#endif // LUG_NO_EXCEPTIONS
 	{}
 
 	~scope_fail()
 	{
+#ifndef LUG_NO_EXCEPTIONS
 		if (std::uncaught_exceptions() > uncaught_on_construction_)
 			destructor_();
+#endif // LUG_NO_EXCEPTIONS
 	}
 
 	void release() noexcept
 	{
+#ifndef LUG_NO_EXCEPTIONS
 		uncaught_on_construction_ = (std::numeric_limits<int>::max)();
+#endif // LUG_NO_EXCEPTIONS
 	}
 
 	scope_fail(scope_fail const&) = delete;
@@ -433,11 +443,6 @@ struct move_only_any_vtable_operations
 			return from;
 		}
 	}
-
-	static constexpr void const* type() noexcept
-	{
-		return &type_info_tag_v<T>;
-	}
 };
 
 template <>
@@ -445,18 +450,16 @@ struct move_only_any_vtable_operations<void>
 {
 	static constexpr void destroy(void* /*data*/) noexcept {}
 	static constexpr void* move(void* /*to*/, void* /*from*/) noexcept { return nullptr; }
-	static constexpr void const* type() noexcept { return &type_info_tag_v<void>; }
 };
 
 struct move_only_any_vtable
 {
 	using destroy_fn = void (*)(void*) noexcept;
 	using move_fn = void* (*)(void*, void*) noexcept;
-	using type_fn = void const* (*)() noexcept;
 	destroy_fn destroy;
 	move_fn move;
-	type_fn type;
-	constexpr move_only_any_vtable(destroy_fn d, move_fn m, type_fn t) noexcept : destroy{d}, move{m}, type{t} {}
+	void const* type;
+	constexpr move_only_any_vtable(destroy_fn d, move_fn m, void const* t) noexcept : destroy{d}, move{m}, type{t} {}
 };
 
 class move_only_any
@@ -469,7 +472,7 @@ class move_only_any
 	{
 		&move_only_any_vtable_operations<T>::destroy,
 		&move_only_any_vtable_operations<T>::move,
-		&move_only_any_vtable_operations<T>::type
+		&type_info_tag_v<T>
 	};
 
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -551,7 +554,7 @@ public:
 	template <class T>
 	[[nodiscard]] bool is_type() const noexcept
 	{
-		return vtable_->type() == &type_info_tag_v<T>;
+		return vtable_->type == &type_info_tag_v<T>;
 	}
 };
 
@@ -596,6 +599,160 @@ template <class T>
 	operand.reset();
 	return result;
 }
+
+class stack_allocator
+{
+	struct page
+	{
+		page* next{nullptr};
+		std::uintptr_t current{0};
+		std::uintptr_t begin{0};
+		std::uintptr_t end{0};
+	};
+
+	struct large_object
+	{
+		large_object* next{nullptr};
+		void* begin{nullptr};
+		std::size_t size{0};
+		std::size_t align{0};
+	};
+
+	std::size_t page_size_{0};
+	std::size_t page_align_{0};
+	std::size_t large_object_threshold_{0};
+	page* head_{nullptr};
+	large_object* large_objects_{nullptr};
+
+public:
+	static constexpr std::size_t default_page_size{16384};
+	static constexpr std::size_t default_page_align{256};
+	static constexpr std::size_t default_large_object_threshold{4096};
+
+	stack_allocator()
+		: stack_allocator(default_page_size, default_page_align, default_large_object_threshold)
+	{}
+
+	stack_allocator(std::size_t psize, std::size_t palign, std::size_t obj_thresh)
+		: page_size_{psize}
+		, page_align_{palign}
+		, large_object_threshold_{obj_thresh}
+	{
+		auto const new_page{static_cast<page*>(::operator new[](page_size_, std::align_val_t{page_align_}))};
+		auto const new_page_addr{reinterpret_cast<std::uintptr_t>(new_page)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+		new_page->next = nullptr;
+		new_page->begin = new_page_addr + sizeof(page);
+		new_page->end = new_page_addr + page_size_;
+		new_page->current = new_page->begin;
+		head_ = new_page;
+	}
+
+	stack_allocator(stack_allocator&& other) noexcept
+		: page_size_{other.page_size_}
+		, page_align_{other.page_align_}
+		, large_object_threshold_{other.large_object_threshold_}
+		, head_{std::exchange(other.head_, nullptr)}
+		, large_objects_{std::exchange(other.large_objects_, nullptr)}
+	{}
+
+	stack_allocator& operator=(stack_allocator&& other) noexcept
+	{
+		stack_allocator{std::move(other)}.swap(*this);
+		return *this;
+	}
+
+	~stack_allocator()
+	{
+		while (head_ != nullptr) {
+			auto const next{head_->next};
+			::operator delete[](static_cast<void*>(head_), std::align_val_t{page_align_});
+			head_ = next;
+		}
+		while (large_objects_ != nullptr) {
+			auto const next{large_objects_->next};
+			::operator delete[](large_objects_->begin, std::align_val_t{large_objects_->align});
+			delete large_objects_;
+			large_objects_ = next;
+		}
+	}
+
+	void swap(stack_allocator& other) noexcept
+	{
+		std::swap(page_size_, other.page_size_);
+		std::swap(page_align_, other.page_align_);
+		std::swap(head_, other.head_);
+		std::swap(large_object_threshold_, other.large_object_threshold_);
+		std::swap(large_objects_, other.large_objects_);
+	}
+
+	[[nodiscard]] LUG_RETURNS_NONNULL LUG_ALLOC LUG_ALLOC_SIZE(2) LUG_ALLOC_ALIGN(3)
+	auto allocate(std::size_t size, std::size_t align) -> void*
+	{
+		if (size < large_object_threshold_) {
+			auto const addr{(head_->current + (align - 1)) & ~(align - 1)};
+			auto const next_addr{addr + size};
+			if LUG_LIKELY(next_addr <= head_->end) {
+				head_->current = next_addr;
+				return reinterpret_cast<void*>(addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+			}
+			auto const new_page{static_cast<page*>(::operator new[](page_size_, std::align_val_t{page_align_}))};
+			auto const new_page_addr{reinterpret_cast<std::uintptr_t>(new_page)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+			new_page->next = head_;
+			new_page->begin = new_page_addr + sizeof(page);
+			new_page->end = new_page_addr + page_size_;
+			auto const new_addr{(new_page->begin + (align - 1)) & ~(align - 1)};
+			new_page->current = new_addr + size;
+			head_ = new_page;
+			return reinterpret_cast<void*>(new_addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+		}
+		auto const ptr{::operator new[](size, std::align_val_t{align})};
+		large_object* obj{nullptr};
+		LUG_TRY {
+			obj = new large_object(); // NOLINT(cppcoreguidelines-owning-memory)
+		} LUG_CATCH_ANY {
+			::operator delete[](ptr, std::align_val_t{align});
+			LUG_RETHROW;
+		}
+		obj->next = std::exchange(large_objects_, obj);
+		obj->begin = ptr;
+		obj->size = size;
+		obj->align = align;
+		return ptr;
+	}
+
+	LUG_NONNULL(2) void rewind(void* ptr, std::size_t size, std::size_t align) noexcept
+	{
+		if (size < large_object_threshold_) {
+			auto const addr{reinterpret_cast<std::uintptr_t>(ptr)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+			if LUG_LIKELY((head_->begin <= addr) && (addr <= head_->end)) {
+				head_->current = addr;
+				return;
+			}
+			auto current_page{head_};
+			while (current_page->next != nullptr) {
+				auto const next_page{current_page->next};
+				if ((next_page->begin <= addr) && (addr <= next_page->end)) {
+					next_page->current = addr;
+					while (head_ != next_page) {
+						auto const prev{head_};
+						head_ = head_->next;
+						::operator delete[](static_cast<void*>(prev), std::align_val_t{page_align_});
+					}
+					break;
+				}
+				current_page = next_page;
+			}
+		}
+		if ((large_objects_ != nullptr) && (large_objects_->begin == ptr) && (large_objects_->size == size) && (large_objects_->align == align)) {
+			auto const obj{std::exchange(large_objects_, large_objects_->next)};
+			::operator delete[](obj->begin, std::align_val_t{obj->align});
+			delete obj; // NOLINT(cppcoreguidelines-owning-memory)
+		}
+	}
+
+	stack_allocator(stack_allocator const&) = delete;
+	stack_allocator& operator=(stack_allocator const&) = delete;
+};
 
 } // namespace detail
 
