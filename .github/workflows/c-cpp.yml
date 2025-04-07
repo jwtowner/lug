@@ -43,6 +43,9 @@ jobs:
           - os: ubuntu-24.04
             compiler: g++-14
             cxxextraflags: "-fhardened -Wno-hardened -fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+          - os: ubuntu-24.04
+            compiler: g++-14
+            cxxextraflags: "-fno-exceptions -fno-rtti -fhardened -Wno-hardened -fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-22.04
             compiler: clang++-14
             cxxextraflags: "-ftrapv -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
@@ -58,6 +61,9 @@ jobs:
           - os: ubuntu-24.04
             compiler: clang++-18
             cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+          - os: ubuntu-24.04
+            compiler: clang++-18
+            cxxextraflags: "-fno-exceptions -fno-rtti -fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: windows-2022
             compiler: default
           - os: macos-latest
@@ -84,7 +90,7 @@ jobs:
       run: cd build && ctest -C Release -T test --output-on-failure
     - name: Install Ninja (macOS)
       if: runner.os == 'macOS'
-      run: brew install ninja
+      run: brew install --quiet ninja
     - name: CMake Build (macOS)
       if: runner.os == 'macOS'
       run: |
