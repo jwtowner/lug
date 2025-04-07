@@ -708,8 +708,9 @@ public:
 			return reinterpret_cast<void*>(new_addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
 		}
 		auto const ptr{::operator new[](size, std::align_val_t{align})};
-		scope_fail const cleanup{[ptr, align]() noexcept { ::operator delete[](ptr, std::align_val_t{align}); }};
+		scope_fail cleanup{[ptr, align]() noexcept { ::operator delete[](ptr, std::align_val_t{align}); }};
 		large_objects_ = new large_object(large_objects_, ptr, size, align); // NOLINT(cppcoreguidelines-owning-memory)
+		cleanup.release();
 		return ptr;
 	}
 

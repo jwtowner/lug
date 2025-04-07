@@ -45,19 +45,19 @@ jobs:
             cxxextraflags: "-fhardened -Wno-hardened -fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-22.04
             compiler: clang++-14
-            cxxextraflags: "-ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+            cxxextraflags: "-ftrapv -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-22.04
             compiler: clang++-15
-            cxxextraflags: "-ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+            cxxextraflags: "-ftrapv -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-16
-            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-17
-            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-18
-            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wextra-semi-stmt -Wshadow-all -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: windows-2022
             compiler: default
           - os: macos-latest
