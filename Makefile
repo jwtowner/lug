@@ -20,10 +20,12 @@ PREFIX = /usr/local
 # toolchain
 CXX = c++
 CXXSTD = -std=c++17
-CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
+CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wformat -Wformat=2 -Werror=format-security -Wimplicit-fallthrough -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
 CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
-CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) $(CXXEXTRAFLAGS) -Iinclude
-LDFLAGS = $(CXXSTD) -s
+CXXCGENFLAGS = -fexceptions -frtti -fstack-clash-protection -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
+CXXEXTRAFLAGS =
+CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) $(CXXCGENFLAGS) $(CXXEXTRAFLAGS) -Iinclude
+LDFLAGS = $(CXXSTD) -s -fPIE -Wl,-z,nodlopen -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -Wl,--no-copy-dt-needed-entries
 CLANGTIDY = clang-tidy
 SHELLCHECK = shellcheck
 
@@ -120,6 +122,7 @@ options:
 	@echo "CXXSTD        = $(CXXSTD)"
 	@echo "CXXWARNFLAGS  = $(CXXWARNFLAGS)"
 	@echo "CXXOPTFLAGS   = $(CXXOPTFLAGS)"
+	@echo "CXXCGENFLAGS  = $(CXXCGENFLAGS)"
 	@echo "CXXEXTRAFLAGS = $(CXXEXTRAFLAGS)"
 	@echo "CXXFLAGS      = $(CXXFLAGS)"
 	@echo "LDFLAGS       = $(LDFLAGS)"

@@ -27,26 +27,37 @@ jobs:
         include:
           - os: ubuntu-22.04
             compiler: g++-9
+            cxxextraflags: "-ftrapv -Wtrampolines"
           - os: ubuntu-22.04
             compiler: g++-10
+            cxxextraflags: "-ftrapv -Wtrampolines"
           - os: ubuntu-22.04
             compiler: g++-11
-          - os: ubuntu-22.04
-            compiler: clang++-14
-          - os: ubuntu-22.04
-            compiler: clang++-15
+            cxxextraflags: "-ftrapv -Wtrampolines"
           - os: ubuntu-24.04
             compiler: g++-12
+            cxxextraflags: "-ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: g++-13
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: g++-14
+            cxxextraflags: "-fhardened -Wno-hardened -fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -Wbidi-chars=any -Wtrampolines -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+          - os: ubuntu-22.04
+            compiler: clang++-14
+            cxxextraflags: "-ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
+          - os: ubuntu-22.04
+            compiler: clang++-15
+            cxxextraflags: "-ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-16
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-17
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: ubuntu-24.04
             compiler: clang++-18
+            cxxextraflags: "-fstrict-flex-arrays=3 -ftrapv -ftrivial-auto-var-init=pattern -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3"
           - os: windows-2022
             compiler: default
           - os: macos-latest
@@ -57,12 +68,12 @@ jobs:
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make -j$(nproc) CI_BUILD=1
+      run: make all CI_BUILD=1 CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
     - name: make test
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make test CI_BUILD=1
+      run: make test CI_BUILD=1 CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
     - name: CMake Build (Windows)
       if: runner.os == 'Windows'
       run: |
