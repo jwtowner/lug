@@ -68,12 +68,12 @@ jobs:
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make all CI_BUILD=1 CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
+      run: make all CI_BUILD=1 CXX=${{ matrix.compiler }} CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
     - name: make test
       if: runner.os == 'Linux'
       env:
         CXX: ${{ matrix.compiler }}
-      run: make test CI_BUILD=1 CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
+      run: make test CI_BUILD=1 CXX=${{ matrix.compiler }} CXXEXTRAFLAGS="${{ matrix.cxxextraflags }}"
     - name: CMake Build (Windows)
       if: runner.os == 'Windows'
       run: |
