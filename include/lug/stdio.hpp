@@ -144,17 +144,6 @@ public:
 	std_file_lock& operator=(std_file_lock&& other) = delete;
 };
 
-[[nodiscard]] inline int fgetc_locked(std_file_lock const& lock) noexcept
-{
-#if defined LUG_HAS_FLOCKFILE_POSIX
-	return getc_unlocked(lock.get()); // NOLINT(concurrency-mt-unsafe)
-#elif defined LUG_HAS_LOCK_FILE_MSVC
-	return _getc_nolock(lock.get()); // NOLINT(concurrency-mt-unsafe)
-#else
-	return std::fgetc(lock.get());
-#endif
-}
-
 [[nodiscard]] inline int fungetc_and_unlock(int ch, std_file_lock& lock) noexcept
 {
 #if defined LUG_HAS_FLOCKFILE_POSIX
@@ -172,6 +161,28 @@ public:
 #endif
 }
 
+[[nodiscard]] inline int fgetc_locked(std_file_lock const& lock) noexcept
+{
+#if defined LUG_HAS_FLOCKFILE_POSIX
+	return getc_unlocked(lock.get()); // NOLINT(concurrency-mt-unsafe)
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+	return _getc_nolock(lock.get()); // NOLINT(concurrency-mt-unsafe)
+#else
+	return std::fgetc(lock.get());
+#endif
+}
+
+[[nodiscard]] inline int fputc_locked(int ch, std_file_lock const& lock) noexcept
+{
+#if defined LUG_HAS_FLOCKFILE_POSIX
+	return putc_unlocked(ch, lock.get()); // NOLINT(concurrency-mt-unsafe)
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+	return _putc_nolock(ch, lock.get()); // NOLINT(concurrency-mt-unsafe)
+#else
+	return std::fputc(ch, lock.get());
+#endif
+}
+
 [[nodiscard]] inline std::size_t fread_locked_s(void* buffer, [[maybe_unused]] std::size_t buffer_size, std::size_t element_size, std::size_t count, std_file_lock const& lock) noexcept
 {
 #if defined LUG_HAS_FLOCKFILE_POSIX
@@ -180,6 +191,17 @@ public:
 	return _fread_nolock_s(buffer, buffer_size, element_size, count, lock.get()); // NOLINT(concurrency-mt-unsafe)
 #else
 	return std::fread(buffer, element_size, count, lock.get());
+#endif
+}
+
+[[nodiscard]] inline std::size_t fwrite_locked(void const* buffer, std::size_t element_size, std::size_t count, std_file_lock const& lock) noexcept
+{
+#if defined LUG_HAS_FLOCKFILE_POSIX
+	return fwrite_unlocked(buffer, element_size, count, lock.get()); // NOLINT(concurrency-mt-unsafe)
+#elif defined LUG_HAS_LOCK_FILE_MSVC
+	return _fwrite_nolock(buffer, element_size, count, lock.get()); // NOLINT(concurrency-mt-unsafe)
+#else
+	return std::fwrite(buffer, element_size, count, lock.get());
 #endif
 }
 
