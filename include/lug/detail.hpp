@@ -635,11 +635,19 @@ public:
 		: stack_allocator(default_page_size, default_page_align, default_large_object_threshold)
 	{}
 
-	stack_allocator(std::size_t psize, std::size_t palign, std::size_t obj_thresh)
+	stack_allocator(std::size_t psize, std::size_t palign, std::size_t lobj_thresh)
 		: page_size_{psize}
 		, page_align_{palign}
-		, large_object_threshold_{obj_thresh}
+		, large_object_threshold_{lobj_thresh}
 	{
+		if LUG_UNLIKELY(psize <= sizeof(page))
+			lug::throw_exception<invalid_argument>("page size is too small");
+		if LUG_UNLIKELY(palign < alignof(std::max_align_t))
+			lug::throw_exception<invalid_argument>("page align is too small");
+		if LUG_UNLIKELY((palign & (palign - 1)) != 0)
+			lug::throw_exception<invalid_argument>("page align is not a power of two");
+		if LUG_UNLIKELY(lobj_thresh > (psize / 2))
+			lug::throw_exception<invalid_argument>("large object threshold must be no greater than half the page size");
 		auto const new_page{static_cast<page*>(::operator new[](page_size_, std::align_val_t{page_align_}))};
 		auto const new_page_addr{reinterpret_cast<std::uintptr_t>(new_page)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 		new_page->next = nullptr;
@@ -743,6 +751,10 @@ public:
 			delete obj; // NOLINT(cppcoreguidelines-owning-memory)
 		}
 	}
+
+	[[nodiscard]] auto page_size() const noexcept -> std::size_t { return page_size_; }
+	[[nodiscard]] auto page_align() const noexcept -> std::size_t { return page_align_; }
+	[[nodiscard]] auto large_object_threshold() const noexcept -> std::size_t { return large_object_threshold_; }
 
 	stack_allocator(stack_allocator const&) = delete;
 	stack_allocator& operator=(stack_allocator const&) = delete;
