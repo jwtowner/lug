@@ -959,25 +959,26 @@ class environment
 
 	void clear_attribute_frame_stack() noexcept
 	{
-		attribute_frame_instance* instance{attribute_frame_stack_};
-		while (instance != nullptr)
-			instance = pop_attribute_frame_instance(instance, [](auto const& f, auto* b) noexcept { f.destroy(b); });
-		attribute_frame_stack_ = nullptr;
+		while (attribute_frame_stack_ != nullptr)
+			pop_attribute_frame_instance([](auto const& f, auto* b) noexcept { f.destroy(b); });
 	}
 
 	template <class FrameOp, class = std::enable_if_t<std::is_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>>>
-	[[nodiscard]] LUG_NONNULL(2) attribute_frame_instance* pop_attribute_frame_instance(attribute_frame_instance* instance, FrameOp const& frame_op)
+	void pop_attribute_frame_instance(FrameOp const& frame_op)
 			noexcept(std::is_nothrow_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>)
 	{
+		attribute_frame_instance* const instance{attribute_frame_stack_};
 		attribute_frame_instance* const next_instance{instance->next};
 		std::byte* const buffer{instance->buffer};
 		attribute_frame_handle const frame{std::move(instance->frame)};
 		std::destroy_at(instance);
+		detail::scope_exit release_memory{[this, &frame, buffer, instance, next_instance]() noexcept {
+			if (frame.size_bytes() >= attribute_frame_allocator_.large_object_threshold())
+				attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
+			attribute_frame_stack_ = next_instance;
+		}};
 		frame_op(frame, buffer);
-		if (frame.size_bytes() >= attribute_frame_allocator_.large_object_threshold())
-			attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
-		attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
-		return next_instance;
 	}
 
 public:
@@ -1073,10 +1074,9 @@ public:
 
 	void pop_attribute_frame(attribute_frame_handle const& frame)
 	{
-		attribute_frame_instance* const instance{attribute_frame_stack_};
-		if LUG_UNLIKELY(!instance || (instance->frame != frame))
+		if LUG_UNLIKELY(!attribute_frame_stack_ || (attribute_frame_stack_->frame != frame))
 			throw_exception<attribute_stack_error>();
-		attribute_frame_stack_ = pop_attribute_frame_instance(instance, [](auto const& f, auto* b) { f.restore(b); });
+		pop_attribute_frame_instance([](auto const& f, auto* b) { f.restore(b); });
 	}
 
 	template <class T>
