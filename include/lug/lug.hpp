@@ -1312,10 +1312,10 @@ public:
 			handle_index = get_frame_handle_index();
 			encode(opcode::attribute_push, handle_index);
 		}
-		std::ptrdiff_t const call_addr{call(std::forward<T>(target), prec, std::forward<Args>(args)...)};
+		std::ptrdiff_t const result{call(std::forward<T>(target), prec, std::forward<Args>(args)...)};
 		if (!attribute_frame_info_->empty())
 			encode(opcode::attribute_pop, handle_index);
-		return call_addr;
+		return result;
 	}
 
 	std::ptrdiff_t recover_push_call(rule const& r)
