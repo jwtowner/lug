@@ -323,7 +323,7 @@ inline constexpr utf8_tocasefold_fn tocasefold{};
 
 struct utf8_tolower_fn
 {
-	template <class InputIt, class OutputIt>
+	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
 	{
 		while (first != last) {
@@ -362,7 +362,7 @@ inline constexpr utf8_tolower_fn tolower{};
 
 struct utf8_toupper_fn
 {
-	template <class InputIt, class OutputIt>
+	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
 	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
 	{
 		while (first != last) {

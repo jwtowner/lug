@@ -17,7 +17,7 @@ namespace lug::ascii {
 
 struct ascii_inrange_fn
 {
-	[[nodiscard]] LUG_ALWAYS_INLINE static constexpr auto inrange(int c, int cmin, int cmax) noexcept -> int
+	[[nodiscard]] LUG_ALWAYS_INLINE static constexpr auto inrange(int c, int cmin, int cmax) noexcept -> bool
 	{
 		return ((static_cast<unsigned int>(c) - static_cast<unsigned int>(cmin)) <= static_cast<unsigned int>(cmax - cmin));
 	}
@@ -69,6 +69,37 @@ struct ascii_tolower_fn
 	{
 		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(isupper(c)) - 1U) & 0x20U));
 	}
+
+	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
+	{
+		for ( ; first != last; ++dst, ++first)
+			*dst = static_cast<char>((*this)(*first));
+		return dst;
+	}
+
+	template <class InputRng, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	constexpr auto operator()(InputRng&& rng, OutputIt dst) const -> OutputIt // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng), dst);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		std::string result;
+		result.reserve(rng.size());
+		(*this)(std::begin(rng), std::end(rng), std::back_inserter(result));
+		return result;
+	}
+
+	[[nodiscard]] auto operator()(std::string_view str) const -> std::string
+	{
+		std::string result;
+		result.reserve(str.size());
+		(*this)(std::begin(str), std::end(str), std::back_inserter(result));
+		return result;
+	}
 };
 
 inline constexpr ascii_tolower_fn tolower{};
@@ -78,6 +109,37 @@ struct ascii_toupper_fn
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
 	{
 		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(islower(c)) - 1U) & 0x20U));
+	}
+
+	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
+	constexpr auto operator()(InputIt first, InputIt last, OutputIt dst) const -> OutputIt
+	{
+		for ( ; first != last; ++dst, ++first)
+			*dst = static_cast<char>((*this)(*first));
+		return dst;
+	}
+
+	template <class InputRng, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
+	constexpr auto operator()(InputRng&& rng, OutputIt dst) const -> OutputIt // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		return (*this)(std::begin(rng), std::end(rng), dst);
+	}
+
+	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng> && !std::is_convertible_v<InputRng&&, std::string_view>>>
+	[[nodiscard]] auto operator()(InputRng&& rng) const -> std::string // NOLINT(cppcoreguidelines-missing-std-forward)
+	{
+		std::string result;
+		result.reserve(rng.size());
+		(*this)(std::begin(rng), std::end(rng), std::back_inserter(result));
+		return result;
+	}
+
+	[[nodiscard]] auto operator()(std::string_view str) const -> std::string
+	{
+		std::string result;
+		result.reserve(str.size());
+		(*this)(std::begin(str), std::end(str), std::back_inserter(result));
+		return result;
 	}
 };
 

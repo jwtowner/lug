@@ -41,8 +41,8 @@ public:
 		rule Real   = lexeme[capture(tok_)[+"0-9"_bx > ~("."_sx > +"0-9"_bx)
 		                     > ~("Ee"_bx > ~"+-"_bx > +"0-9"_bx)]]       <[this]{ return std::stod(tok_); };
 		rule String = lexeme["\"" > capture(tok_)[*"^\""_bx] > "\""]     <[this]{ return tok_.str(); };
-		rule Var    = lexeme[capture(tok_)["A-Za-z"_bx > ~"0-9"_bx]]     <[this]{ return lug::utf8::toupper(tok_); };
-		rule Fn     = lexeme["FN"_isx > capture(tok_)["A-Za-z"_bx]]      <[this]{ return lug::utf8::toupper(tok_); };
+		rule Var    = lexeme[capture(tok_)["A-Za-z"_bx > ~"0-9"_bx]]     <[this]{ return lug::ascii::toupper(tok_); };
+		rule Fn     = lexeme["FN"_isx > capture(tok_)["A-Za-z"_bx]]      <[this]{ return lug::ascii::toupper(tok_); };
 
 		rule RelOp  = "="                             <[]() -> RelOpFn { return [](double x, double y) { return x == y; }; }
 		            | ">="                            <[]() -> RelOpFn { return std::isgreaterequal; }
@@ -174,7 +174,7 @@ public:
 					int lineno{0};
 					if (auto const [ptr, ec] = std::from_chars(line.data(), line.data() + line.size(), lineno); ec == std::errc{}) {
 						auto pos = static_cast<std::size_t>(ptr - line.data());
-						while ((pos < line.size()) && std::isspace(line[pos]))
+						while ((pos < line.size()) && lug::ascii::isspace(line[pos]))
 							++pos;
 						update_line(lineno, line.substr(pos) + "\n");
 					} else if (ec ==  std::errc::result_out_of_range) {

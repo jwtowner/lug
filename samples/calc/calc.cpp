@@ -5,7 +5,6 @@
 #include <lug/lug.hpp>
 #include <lug/iostream.hpp>
 
-#include <cctype>
 #include <cstdlib>
 
 namespace samples::calc {
@@ -19,7 +18,7 @@ double v[26];
 extern rule Expr;
 
 rule BLANK  = noskip[ *" \t"_bx ];
-rule ID     = lexeme[ "a-zA-Z"_bx    <[](syntax m) -> int { return std::tolower(m.str().front()) - 'a'; } ];
+rule ID     = lexeme[ "a-zA-Z"_bx    <[](syntax m) -> int { return lug::ascii::tolower(m.str().front()) - 'a'; } ];
 rule NUMBER = lexeme[ ( ~"+-"_bx > +"0-9"_bx > ~('.' > +"0-9"_bx) )
                                      <[](syntax m) -> double { return std::stod(m); } ];
 rule Value  = n%NUMBER               <[]{ return n; }
