@@ -523,42 +523,45 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 {
 	friend class attribute_frame_handle;
 
+	struct descriptor;
+
+	struct sentinel_operations
+	{
+		static void persist(std::byte* /*buffer*/, descriptor const* /*desc*/, descriptor const* /*last*/) {}
+		static void restore(std::byte* /*buffer*/, descriptor const* /*desc*/) {}
+		static void destroy(std::byte* /*buffer*/, descriptor const* /*desc*/) {}
+	};
+
 	struct descriptor
 	{
 		using forward_operation_fn = void (*)(std::byte*, descriptor const*, descriptor const*);
 		using reverse_operation_fn = void (*)(std::byte*, descriptor const*);
-		std::unique_ptr<descriptor> prev;
-		descriptor* next{nullptr};
-		forward_operation_fn persist{nullptr};
-		reverse_operation_fn restore{nullptr};
-		reverse_operation_fn destroy{nullptr};
 		std::size_t offset{0};
 		void* target{nullptr};
-		void const* type{nullptr};
-		descriptor(forward_operation_fn pfn, reverse_operation_fn rfn, reverse_operation_fn dfn, std::size_t off, void* tar, void const* typ) noexcept
-			: persist{pfn}, restore{rfn}, destroy{dfn}, offset{off}, target{tar}, type{typ} {}
+		void const* type{&detail::type_info_tag_v<void>};
+		forward_operation_fn persist{&sentinel_operations::persist};
+		reverse_operation_fn restore{&sentinel_operations::restore};
+		reverse_operation_fn destroy{&sentinel_operations::destroy};
+		descriptor() noexcept = default;
+		descriptor(std::size_t off, void* tar, void const* typ, forward_operation_fn pfn, reverse_operation_fn rfn, reverse_operation_fn dfn) noexcept
+			: offset{off}, target{tar}, type{typ}, persist{pfn}, restore{rfn}, destroy{dfn} {}
 	};
 
 	template <class T>
-	struct descriptor_operations
+	struct operations
 	{
 		static void persist(std::byte* buffer, descriptor const* desc, descriptor const* last)
 		{
 			if constexpr (std::is_nothrow_copy_constructible_v<T>) {
 				::new(buffer + desc->offset) T{*static_cast<T const*>(desc->target)};
 			} else {
-				detail::scope_fail guard{[buffer, desc]() noexcept {
-					if (descriptor const* prev = desc->prev.get(); prev)
-						(*prev->destroy)(buffer, prev);
-				}};
+				detail::scope_exit guard{[buffer, desc]() noexcept { (*((desc - 1)->destroy))(buffer, desc - 1); }};
 				::new(buffer + desc->offset) T{*static_cast<T const*>(desc->target)};
 				guard.release();
 			}
 			if (desc == last)
 				return;
-			descriptor const* next = desc->next;
-			if (next == nullptr)
-				return;
+			descriptor const* const next = desc + 1;
 			LUG_MUSTTAIL return (*next->persist)(buffer, next, last); // NOLINT(readability-avoid-return-with-void-value)
 		}
 
@@ -570,46 +573,39 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 			} else if constexpr (std::is_nothrow_copy_assignable_v<T>) {
 				*static_cast<T*>(desc->target) = *from;
 			} else if constexpr (std::is_move_assignable_v<T>) {
-				detail::scope_fail guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
+				detail::scope_exit guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
 				*static_cast<T*>(desc->target) = static_cast<T&&>(*from);
 				guard.release();
 			} else {
-				detail::scope_fail guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
+				detail::scope_exit guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
 				*static_cast<T*>(desc->target) = *from;
 				guard.release();
 			}
 			std::destroy_at(from);
-			descriptor const* prev = desc->prev.get();
-			if (prev == nullptr)
-				return;
+			descriptor const* const prev = desc - 1;
 			LUG_MUSTTAIL return (*prev->restore)(buffer, prev); // NOLINT(readability-avoid-return-with-void-value)
 		}
 
 		static void destroy(std::byte* buffer, descriptor const* desc)
 		{
 			std::destroy_at(static_cast<T*>(static_cast<void*>(buffer + desc->offset))); // NOLINT(bugprone-casting-through-void)
-			descriptor const* prev = desc->prev.get();
-			if (prev == nullptr)
-				return;
+			descriptor const* const prev = desc - 1;
 			LUG_MUSTTAIL return (*prev->destroy)(buffer, prev); // NOLINT(readability-avoid-return-with-void-value)
 		}
 	};
 
-	std::unique_ptr<descriptor> last_;
-	descriptor* first_{nullptr};
+	std::vector<descriptor> descriptors_{1};
 	std::size_t align_bytes_{1};
 	std::size_t size_bytes_{0};
 
 	[[nodiscard]] bool is_target_unique(void* target, void const* type) const
 	{
-		descriptor const* desc = last_.get();
-		while (desc != nullptr) {
-			if (desc->target == target) {
-				if LUG_UNLIKELY(desc->type != type)
+		for (auto const& desc : descriptors_) {
+			if (desc.target == target) {
+				if LUG_UNLIKELY(desc.type != type)
 					lug::throw_exception<attribute_stack_error>();
 				return false;
 			}
-			desc = desc->prev.get();
 		}
 		return true;
 	}
@@ -621,7 +617,7 @@ public:
 	attribute_frame_info(attribute_frame_info&&) = delete;
 	attribute_frame_info& operator=(attribute_frame_info const&) = delete;
 	attribute_frame_info& operator=(attribute_frame_info&&) = delete;
-	[[nodiscard]] bool empty() const noexcept { return !last_; }
+	[[nodiscard]] bool empty() const noexcept { return descriptors_.size() <= 1; }
 	[[nodiscard]] std::size_t alignment() const noexcept { return align_bytes_; }
 	[[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
 	[[nodiscard]] attribute_frame_handle handle() const;
@@ -632,17 +628,7 @@ public:
 		using U = std::remove_cv_t<T>;
 		if (is_target_unique(target, &detail::type_info_tag_v<U>)) {
 			std::size_t const offset{(size_bytes_ + (alignof(U) - 1)) & ~(alignof(U) - 1)};
-			auto desc{std::make_unique<descriptor>(
-				&descriptor_operations<U>::persist,
-				&descriptor_operations<U>::restore,
-				&descriptor_operations<U>::destroy,
-				offset, target, &detail::type_info_tag_v<U>)};
-			desc->prev = std::move(last_);
-			if (desc->prev != nullptr)
-				desc->prev->next = desc.get();
-			if (first_ == nullptr)
-				first_ = desc.get();
-			last_ = std::move(desc);
+			descriptors_.emplace_back(offset, target, &detail::type_info_tag_v<U>, &operations<U>::persist, &operations<U>::restore, &operations<U>::destroy);
 			align_bytes_ = (std::max)(align_bytes_, alignof(U));
 			size_bytes_ = offset + sizeof(U);
 		}
@@ -653,13 +639,11 @@ class attribute_frame_handle
 {
 	friend class attribute_frame_info;
 	std::shared_ptr<attribute_frame_info const> info_;
-	attribute_frame_info::descriptor const* first_{nullptr};
-	attribute_frame_info::descriptor const* last_{nullptr};
-	attribute_frame_handle(
-			std::shared_ptr<attribute_frame_info const> info,
-			attribute_frame_info::descriptor const* first,
-			attribute_frame_info::descriptor const* last) noexcept
-		: info_{std::move(info)}, first_{first}, last_{last} {}
+	std::size_t head_{0};
+	std::size_t tail_{0};
+	attribute_frame_handle(std::shared_ptr<attribute_frame_info const> info, std::size_t first, std::size_t last) noexcept : info_{std::move(info)}, head_{first}, tail_{last} {}
+	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* head() const noexcept { return info_->descriptors_.data() + head_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* tail() const noexcept { return info_->descriptors_.data() + tail_; }
 public:
 	constexpr attribute_frame_handle() noexcept = default;
 	attribute_frame_handle(attribute_frame_handle const&) noexcept = default;
@@ -667,19 +651,19 @@ public:
 	attribute_frame_handle& operator=(attribute_frame_handle const&) noexcept = default;
 	attribute_frame_handle& operator=(attribute_frame_handle&&) noexcept = default;
 	~attribute_frame_handle() noexcept = default;
-	[[nodiscard]] bool empty() const noexcept { return info_->empty(); }
-	[[nodiscard]] std::size_t alignment() const noexcept { return info_->alignment(); }
-	[[nodiscard]] std::size_t size_bytes() const noexcept { return info_->size_bytes(); }
-	LUG_NONNULL(2) void persist(std::byte* buffer) const { (*first_->persist)(buffer, first_, last_); }
-	LUG_NONNULL(2) void restore(std::byte* buffer) const { (*last_->restore)(buffer, last_); }
-	LUG_NONNULL(2) void destroy(std::byte* buffer) const noexcept { (*last_->destroy)(buffer, last_); }
-	[[nodiscard]] bool operator==(attribute_frame_handle const& other) const noexcept { return info_ == other.info_ && first_ == other.first_ && last_ == other.last_; }
-	[[nodiscard]] bool operator!=(attribute_frame_handle const& other) const noexcept { return !(*this == other); }
+	[[nodiscard]] LUG_ALWAYS_INLINE bool empty() const noexcept { return info_->empty(); }
+	[[nodiscard]] LUG_ALWAYS_INLINE std::size_t alignment() const noexcept { return info_->alignment(); }
+	[[nodiscard]] LUG_ALWAYS_INLINE std::size_t size_bytes() const noexcept { return info_->size_bytes(); }
+	LUG_ALWAYS_INLINE LUG_NONNULL(2) void persist(std::byte* buffer) const { (*(head()->persist))(buffer, head(), tail()); }
+	LUG_ALWAYS_INLINE LUG_NONNULL(2) void restore(std::byte* buffer) const { (*(tail()->restore))(buffer, tail()); }
+	LUG_ALWAYS_INLINE LUG_NONNULL(2) void destroy(std::byte* buffer) const noexcept { (*(tail()->destroy))(buffer, tail()); }
+	[[nodiscard]] LUG_ALWAYS_INLINE bool operator==(attribute_frame_handle const& other) const noexcept { return info_ == other.info_ && head_ == other.head_ && tail_ == other.tail_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE bool operator!=(attribute_frame_handle const& other) const noexcept { return !(*this == other); }
 };
 
 [[nodiscard]] inline attribute_frame_handle attribute_frame_info::handle() const
 {
-	return attribute_frame_handle{shared_from_this(), first_, last_.get()};
+	return attribute_frame_handle{shared_from_this(), ((descriptors_.size() > 1U) ? 1U : 0U), (descriptors_.size() - 1U)};
 }
 
 struct program
@@ -964,15 +948,14 @@ class environment
 	}
 
 	template <class FrameOp, class = std::enable_if_t<std::is_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>>>
-	void pop_attribute_frame_instance(FrameOp const& frame_op)
-			noexcept(std::is_nothrow_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>)
+	void pop_attribute_frame_instance(FrameOp const& frame_op) noexcept(std::is_nothrow_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>)
 	{
 		attribute_frame_instance* const instance{attribute_frame_stack_};
 		attribute_frame_instance* const next_instance{instance->next};
 		std::byte* const buffer{instance->buffer};
 		attribute_frame_handle const frame{std::move(instance->frame)};
 		std::destroy_at(instance);
-		detail::scope_exit release_memory{[this, &frame, buffer, instance, next_instance]() noexcept {
+		detail::scope_exit const release_memory{[this, &frame, buffer, instance, next_instance]() noexcept {
 			if (frame.size_bytes() >= attribute_frame_allocator_.large_object_threshold())
 				attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
 			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
@@ -1003,11 +986,11 @@ public:
 	[[nodiscard]] attribute_collection tail_attribute_collection(std::size_t element_count = 1);
 	[[nodiscard]] bool has_condition(std::string_view name) const noexcept { return (conditions_.count(name) > 0); }
 	bool set_condition(std::string_view name, bool value) { return value ? (!conditions_.emplace(name).second) : (conditions_.erase(name) > 0); }
-	void clear_conditions() { conditions_.clear(); }
+	void clear_conditions() noexcept { conditions_.clear(); }
 	[[nodiscard]] bool has_symbol(std::string_view name) const noexcept { return (symbols_.count(name) > 0); }
 	[[nodiscard]] std::vector<std::string> const& get_symbols(std::string_view name) const noexcept { auto it = symbols_.find(name); if (it == symbols_.end()) return empty_symbols_; return it->second; }
 	void add_symbol(std::string_view name, std::string value) { symbols_[name].emplace_back(std::move(value)); }
-	void clear_symbols(std::string_view name) { symbols_.erase(name); }
+	void clear_symbols(std::string_view name) noexcept { symbols_.erase(name); }
 	[[nodiscard]] std::string_view match() const noexcept { return match_; }
 	[[nodiscard]] std::string_view subject() const noexcept { return subject_; }
 	[[nodiscard]] syntax_position position_begin(syntax const& stx) { return position_at(stx.index()); }
@@ -1018,7 +1001,7 @@ public:
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] std::size_t call_depth() const noexcept { return call_depth_; }
 	[[nodiscard]] std::size_t prune_depth() const noexcept { return prune_depth_; }
-	void escape() { prune_depth_ = call_depth_; }
+	void escape() noexcept { prune_depth_ = call_depth_; }
 
 	[[nodiscard]] syntax_position position_at(std::size_t index)
 	{
@@ -1061,11 +1044,11 @@ public:
 	void push_attribute_frame(attribute_frame_handle const& frame)
 	{
 		void* const instance_storage{attribute_frame_allocator_.allocate(sizeof(attribute_frame_instance), alignof(attribute_frame_instance))};
-		detail::scope_fail instance_cleanup{[this, instance_storage]() noexcept { attribute_frame_allocator_.rewind(instance_storage, sizeof(attribute_frame_instance), alignof(attribute_frame_instance)); }};
+		detail::scope_exit instance_cleanup{[this, instance_storage]() noexcept { attribute_frame_allocator_.rewind(instance_storage, sizeof(attribute_frame_instance), alignof(attribute_frame_instance)); }};
 		std::byte* const buffer{static_cast<std::byte*>(attribute_frame_allocator_.allocate(frame.size_bytes(), frame.alignment()))};
-		detail::scope_fail buffer_cleanup{[this, &frame, buffer]() noexcept { attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment()); }};
+		detail::scope_exit buffer_cleanup{[this, &frame, buffer]() noexcept { attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment()); }};
 		frame.persist(buffer);
-		detail::scope_fail frame_cleanup{[&frame, buffer]() noexcept { frame.destroy(buffer); }};
+		detail::scope_exit frame_cleanup{[&frame, buffer]() noexcept { frame.destroy(buffer); }};
 		attribute_frame_stack_ = ::new(instance_storage) attribute_frame_instance{attribute_frame_stack_, buffer, frame}; // NOLINT(cppcoreguidelines-owning-memory)
 		frame_cleanup.release();
 		buffer_cleanup.release();
@@ -1128,8 +1111,8 @@ public:
 	~attribute_collection() { if (first_initial_ < last_initial_) envr_->attribute_result_stack_.resize(first_initial_); }
 	[[nodiscard]] bool empty() const noexcept { return first_ >= last_; }
 	[[nodiscard]] std::size_t size() const noexcept { return (first_ < last_) ? (last_ - first_) : 0; }
-	void consume_front(std::size_t n) { first_ += n; }
-	void consume_back(std::size_t n) { last_ -= (std::min)(n, last_); }
+	void consume_front(std::size_t n) noexcept { first_ += n; }
+	void consume_back(std::size_t n) noexcept { last_ -= (std::min)(n, last_); }
 	template <class T, std::size_t I> [[nodiscard]] T read_front() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[first_ + I])); }
 	template <class T, std::size_t I, std::size_t N> [[nodiscard]] T read_back() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[last_ - N + I])); }
 	attribute_collection(attribute_collection const&) = delete;

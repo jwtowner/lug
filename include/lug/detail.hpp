@@ -641,13 +641,13 @@ public:
 		, large_object_threshold_{lobj_thresh}
 	{
 		if LUG_UNLIKELY(psize <= sizeof(page))
-			lug::throw_exception<invalid_argument>("page size is too small");
+			lug::throw_exception<lug::invalid_argument>("page size is too small");
 		if LUG_UNLIKELY(palign < alignof(std::max_align_t))
-			lug::throw_exception<invalid_argument>("page align is too small");
+			lug::throw_exception<lug::invalid_argument>("page align is too small");
 		if LUG_UNLIKELY((palign & (palign - 1)) != 0)
-			lug::throw_exception<invalid_argument>("page align is not a power of two");
+			lug::throw_exception<lug::invalid_argument>("page align is not a power of two");
 		if LUG_UNLIKELY(lobj_thresh > (psize / 2))
-			lug::throw_exception<invalid_argument>("large object threshold must be no greater than half the page size");
+			lug::throw_exception<lug::invalid_argument>("large object threshold must be no greater than half the page size");
 		auto const new_page{static_cast<page*>(::operator new[](page_size_, std::align_val_t{page_align_}))};
 		auto const new_page_addr{reinterpret_cast<std::uintptr_t>(new_page)}; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 		new_page->next = nullptr;
@@ -716,7 +716,7 @@ public:
 			return reinterpret_cast<void*>(new_addr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
 		}
 		auto const ptr{::operator new[](size, std::align_val_t{align})};
-		scope_fail cleanup{[ptr, align]() noexcept { ::operator delete[](ptr, std::align_val_t{align}); }};
+		scope_exit cleanup{[ptr, align]() noexcept { ::operator delete[](ptr, std::align_val_t{align}); }};
 		large_objects_ = new large_object(large_objects_, ptr, size, align); // NOLINT(cppcoreguidelines-owning-memory)
 		cleanup.release();
 		return ptr;
