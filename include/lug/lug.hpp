@@ -611,7 +611,7 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 	}
 
 public:
-	attribute_frame_info() noexcept = default;
+	attribute_frame_info() = default;
 	~attribute_frame_info() = default;
 	attribute_frame_info(attribute_frame_info const&) = delete;
 	attribute_frame_info(attribute_frame_info&&) = delete;
