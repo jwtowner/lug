@@ -595,14 +595,14 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 
 	[[nodiscard]] bool is_target_unique(void* target, void const* type) const
 	{
-		for (auto const& desc : descriptors_) {
+		return std::all_of(descriptors_.begin(), descriptors_.end(), [target, type](descriptor const& desc) {
 			if (desc.target == target) {
 				if LUG_UNLIKELY(desc.type != type)
 					lug::throw_exception<attribute_stack_error>();
 				return false;
 			}
-		}
-		return true;
+			return true;
+		});
 	}
 
 public:

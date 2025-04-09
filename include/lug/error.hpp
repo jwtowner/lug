@@ -47,10 +47,10 @@ template <class Error, class... Args>
 [[noreturn]] void throw_exception(Args&&... args)
 {
 #ifndef LUG_NO_EXCEPTIONS
-	throw Error{std::forward<Args>(args)...};
+	throw Error{std::forward<Args>(args)...}; // NOLINT(hicpp-no-array-decay)
 #else
 	errno = ENOTRECOVERABLE;
-	std::perror(Error{std::forward<Args>(args)...}.what());
+	std::perror(Error{std::forward<Args>(args)...}.what()); // NOLINT(hicpp-no-array-decay)
 	std::abort();
 #endif
 }

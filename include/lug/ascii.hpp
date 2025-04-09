@@ -15,35 +15,38 @@
 
 namespace lug::ascii {
 
-struct ascii_inrange_fn
+struct ascii_niebloid_base
 {
+	static constexpr unsigned int alpha_mask = 0x20U;
+	static constexpr unsigned int ascii_max = 0x7fU;
+
 	[[nodiscard]] LUG_ALWAYS_INLINE static constexpr auto inrange(int c, int cmin, int cmax) noexcept -> bool
 	{
 		return ((static_cast<unsigned int>(c) - static_cast<unsigned int>(cmin)) <= static_cast<unsigned int>(cmax - cmin));
 	}
 };
 
-struct ascii_isascii_fn
+struct ascii_isascii_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
-		return static_cast<unsigned int>(c) <= 0x7fU;
+		return static_cast<unsigned int>(c) <= ascii_max;
 	}
 };
 
 inline constexpr ascii_isascii_fn isascii{};
 
-struct ascii_toascii_fn
+struct ascii_toascii_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) & 0x7fU);
+		return static_cast<int>(static_cast<unsigned int>(c) & ascii_max);
 	}
 };
 
 inline constexpr ascii_toascii_fn toascii{};
 
-struct ascii_islower_fn : private ascii_inrange_fn
+struct ascii_islower_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -53,7 +56,7 @@ struct ascii_islower_fn : private ascii_inrange_fn
 
 inline constexpr ascii_islower_fn islower{};
 
-struct ascii_isupper_fn : private ascii_inrange_fn
+struct ascii_isupper_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -63,11 +66,11 @@ struct ascii_isupper_fn : private ascii_inrange_fn
 
 inline constexpr ascii_isupper_fn isupper{};
 
-struct ascii_tolower_fn
+struct ascii_tolower_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(isupper(c)) - 1U) & 0x20U));
+		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(isupper(c)) - 1U) & alpha_mask));
 	}
 
 	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
@@ -104,11 +107,11 @@ struct ascii_tolower_fn
 
 inline constexpr ascii_tolower_fn tolower{};
 
-struct ascii_toupper_fn
+struct ascii_toupper_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(islower(c)) - 1U) & 0x20U));
+		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(islower(c)) - 1U) & alpha_mask));
 	}
 
 	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
@@ -145,17 +148,17 @@ struct ascii_toupper_fn
 
 inline constexpr ascii_toupper_fn toupper{};
 
-struct ascii_isalpha_fn
+struct ascii_isalpha_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
-		return islower(static_cast<int>(static_cast<unsigned int>(c) | 0x20U));
+		return islower(static_cast<int>(static_cast<unsigned int>(c) | alpha_mask));
 	}
 };
 
 inline constexpr ascii_isalpha_fn isalpha{};
 
-struct ascii_isblank_fn
+struct ascii_isblank_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -165,7 +168,7 @@ struct ascii_isblank_fn
 
 inline constexpr ascii_isblank_fn isblank{};
 
-struct ascii_iscntrl_fn
+struct ascii_iscntrl_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -175,7 +178,7 @@ struct ascii_iscntrl_fn
 
 inline constexpr ascii_iscntrl_fn iscntrl{};
 
-struct ascii_isdigit_fn : private ascii_inrange_fn
+struct ascii_isdigit_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -185,7 +188,7 @@ struct ascii_isdigit_fn : private ascii_inrange_fn
 
 inline constexpr ascii_isdigit_fn isdigit{};
 
-struct ascii_isgraph_fn : private ascii_inrange_fn
+struct ascii_isgraph_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -195,7 +198,7 @@ struct ascii_isgraph_fn : private ascii_inrange_fn
 
 inline constexpr ascii_isgraph_fn isgraph{};
 
-struct ascii_isprint_fn : private ascii_inrange_fn
+struct ascii_isprint_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -205,7 +208,7 @@ struct ascii_isprint_fn : private ascii_inrange_fn
 
 inline constexpr ascii_isprint_fn isprint{};
 
-struct ascii_isspace_fn : private ascii_inrange_fn
+struct ascii_isspace_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -215,17 +218,17 @@ struct ascii_isspace_fn : private ascii_inrange_fn
 
 inline constexpr ascii_isspace_fn isspace{};
 
-struct ascii_isxdigit_fn : private ascii_inrange_fn
+struct ascii_isxdigit_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
-		return isdigit(c) || inrange(static_cast<int>(static_cast<unsigned int>(c) | 0x20U), 'a', 'f');
+		return isdigit(c) || inrange(static_cast<int>(static_cast<unsigned int>(c) | alpha_mask), 'a', 'f');
 	}
 };
 
 inline constexpr ascii_isxdigit_fn isxdigit{};
 
-struct ascii_isalnum_fn
+struct ascii_isalnum_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
@@ -235,7 +238,7 @@ struct ascii_isalnum_fn
 
 inline constexpr ascii_isalnum_fn isalnum{};
 
-struct ascii_ispunct_fn
+struct ascii_ispunct_fn : private ascii_niebloid_base
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
