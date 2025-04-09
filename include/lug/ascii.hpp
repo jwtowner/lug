@@ -37,7 +37,7 @@ struct ascii_toascii_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
 	{
-		return static_cast<int>(static_cast<unsigned int>(c & 0x7fU));
+		return static_cast<int>(static_cast<unsigned int>(c) & 0x7fU);
 	}
 };
 
