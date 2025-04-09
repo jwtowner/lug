@@ -527,9 +527,8 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 
 	struct sentinel_operations
 	{
-		static void persist(std::byte* /*buffer*/, descriptor const* /*desc*/, descriptor const* /*last*/) {}
-		static void restore(std::byte* /*buffer*/, descriptor const* /*desc*/) {}
-		static void destroy(std::byte* /*buffer*/, descriptor const* /*desc*/) {}
+		static void forward(std::byte* /*buffer*/, descriptor const* /*desc*/, descriptor const* /*last*/) {}
+		static void reverse(std::byte* /*buffer*/, descriptor const* /*desc*/) {}
 	};
 
 	struct descriptor
@@ -539,9 +538,9 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 		std::size_t offset{0};
 		void* target{nullptr};
 		void const* type{&detail::type_info_tag_v<void>};
-		forward_operation_fn persist{&sentinel_operations::persist};
-		reverse_operation_fn restore{&sentinel_operations::restore};
-		reverse_operation_fn destroy{&sentinel_operations::destroy};
+		forward_operation_fn persist{&sentinel_operations::forward};
+		reverse_operation_fn restore{&sentinel_operations::reverse};
+		reverse_operation_fn destroy{&sentinel_operations::reverse};
 		descriptor() noexcept = default;
 		descriptor(std::size_t off, void* tar, void const* typ, forward_operation_fn pfn, reverse_operation_fn rfn, reverse_operation_fn dfn) noexcept
 			: offset{off}, target{tar}, type{typ}, persist{pfn}, restore{rfn}, destroy{dfn} {}
@@ -572,10 +571,6 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 				*static_cast<T*>(desc->target) = static_cast<T&&>(*from);
 			} else if constexpr (std::is_nothrow_copy_assignable_v<T>) {
 				*static_cast<T*>(desc->target) = *from;
-			} else if constexpr (std::is_move_assignable_v<T>) {
-				detail::scope_exit guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
-				*static_cast<T*>(desc->target) = static_cast<T&&>(*from);
-				guard.release();
 			} else {
 				detail::scope_exit guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
 				*static_cast<T*>(desc->target) = *from;
@@ -594,7 +589,7 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 		}
 	};
 
-	std::vector<descriptor> descriptors_{1};
+	std::vector<descriptor> descriptors_{2U, descriptor{}};
 	std::size_t align_bytes_{1};
 	std::size_t size_bytes_{0};
 
@@ -617,7 +612,7 @@ public:
 	attribute_frame_info(attribute_frame_info&&) = delete;
 	attribute_frame_info& operator=(attribute_frame_info const&) = delete;
 	attribute_frame_info& operator=(attribute_frame_info&&) = delete;
-	[[nodiscard]] bool empty() const noexcept { return descriptors_.size() <= 1; }
+	[[nodiscard]] bool empty() const noexcept { return descriptors_.size() <= 2; }
 	[[nodiscard]] std::size_t alignment() const noexcept { return align_bytes_; }
 	[[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
 	[[nodiscard]] attribute_frame_handle handle() const;
@@ -628,7 +623,7 @@ public:
 		using U = std::remove_cv_t<T>;
 		if (is_target_unique(target, &detail::type_info_tag_v<U>)) {
 			std::size_t const offset{(size_bytes_ + (alignof(U) - 1)) & ~(alignof(U) - 1)};
-			descriptors_.emplace_back(offset, target, &detail::type_info_tag_v<U>, &operations<U>::persist, &operations<U>::restore, &operations<U>::destroy);
+			descriptors_.emplace(descriptors_.end() - 1, offset, target, &detail::type_info_tag_v<U>, &operations<U>::persist, &operations<U>::restore, &operations<U>::destroy);
 			align_bytes_ = (std::max)(align_bytes_, alignof(U));
 			size_bytes_ = offset + sizeof(U);
 		}
@@ -642,8 +637,8 @@ class attribute_frame_handle
 	std::size_t head_{0};
 	std::size_t tail_{0};
 	attribute_frame_handle(std::shared_ptr<attribute_frame_info const> info, std::size_t first, std::size_t last) noexcept : info_{std::move(info)}, head_{first}, tail_{last} {}
-	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* head() const noexcept { return info_->descriptors_.data() + head_; }
-	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* tail() const noexcept { return info_->descriptors_.data() + tail_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE auto head() const noexcept { return info_->descriptors_.data() + head_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE auto tail() const noexcept { return info_->descriptors_.data() + tail_; }
 public:
 	constexpr attribute_frame_handle() noexcept = default;
 	attribute_frame_handle(attribute_frame_handle const&) noexcept = default;
@@ -654,16 +649,16 @@ public:
 	[[nodiscard]] LUG_ALWAYS_INLINE bool empty() const noexcept { return info_->empty(); }
 	[[nodiscard]] LUG_ALWAYS_INLINE std::size_t alignment() const noexcept { return info_->alignment(); }
 	[[nodiscard]] LUG_ALWAYS_INLINE std::size_t size_bytes() const noexcept { return info_->size_bytes(); }
-	LUG_ALWAYS_INLINE LUG_NONNULL(2) void persist(std::byte* buffer) const { (*(head()->persist))(buffer, head(), tail()); }
-	LUG_ALWAYS_INLINE LUG_NONNULL(2) void restore(std::byte* buffer) const { (*(tail()->restore))(buffer, tail()); }
-	LUG_ALWAYS_INLINE LUG_NONNULL(2) void destroy(std::byte* buffer) const noexcept { (*(tail()->destroy))(buffer, tail()); }
-	[[nodiscard]] LUG_ALWAYS_INLINE bool operator==(attribute_frame_handle const& other) const noexcept { return info_ == other.info_ && head_ == other.head_ && tail_ == other.tail_; }
+	LUG_NONNULL(2) LUG_ALWAYS_INLINE void persist(std::byte* buffer) const { auto const h = head(); (*h->persist)(buffer, h, tail()); }
+	LUG_NONNULL(2) LUG_ALWAYS_INLINE void restore(std::byte* buffer) const { auto const t = tail(); (*t->restore)(buffer, t); }
+	LUG_NONNULL(2) LUG_ALWAYS_INLINE void destroy(std::byte* buffer) const noexcept { auto const t = tail(); (*t->destroy)(buffer, t); }
+	[[nodiscard]] LUG_ALWAYS_INLINE bool operator==(attribute_frame_handle const& other) const noexcept { return (info_ == other.info_) && (head_ == other.head_) && (tail_ == other.tail_); }
 	[[nodiscard]] LUG_ALWAYS_INLINE bool operator!=(attribute_frame_handle const& other) const noexcept { return !(*this == other); }
 };
 
 [[nodiscard]] inline attribute_frame_handle attribute_frame_info::handle() const
 {
-	return attribute_frame_handle{shared_from_this(), ((descriptors_.size() > 1U) ? 1U : 0U), (descriptors_.size() - 1U)};
+	return attribute_frame_handle{shared_from_this(), 1U, descriptors_.size() - 2U};
 }
 
 struct program
