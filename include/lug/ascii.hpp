@@ -87,7 +87,7 @@ struct ascii_isalpha_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
 	{
-		return islower(static_cast<int>(static_cast<unsigned int>(c | 0x20U)));
+		return islower(static_cast<int>(static_cast<unsigned int>(c) | 0x20U));
 	}
 };
 
