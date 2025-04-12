@@ -7,8 +7,8 @@
 
 #include <lug/ascii.hpp>
 #include <lug/utf8.hpp>
+#include <lug/rune.hpp>
 
-#include <bitset>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -27,8 +27,6 @@ class grammar;
 class multi_input_source;
 class parser_base;
 class rule;
-class rune_set;
-class rune_set_builder;
 class string_input_source;
 class string_view_input_source;
 class syntax;
@@ -40,375 +38,6 @@ template <class> class failure;
 template <class> class recover_with;
 template <class> class recursive_wrapper;
 [[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
-
-class rune_set
-{
-	friend class rune_set_builder;
-
-	static constexpr char32_t ascii_limit = U'\U00000080';
-	static constexpr char32_t unicode_limit = U'\U0010FFFF';
-	static constexpr char32_t rune_max = (std::numeric_limits<char32_t>::max)();
-	using ascii_bitset = std::bitset<static_cast<std::size_t>(ascii_limit)>;
-
-	ascii_bitset ascii_map_;
-	std::unique_ptr<std::pair<char32_t, char32_t>[]> intervals_; // NOLINT(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
-	std::size_t intervals_size_{0};
-
-	constexpr explicit rune_set(ascii_bitset const& ascii_map) noexcept
-		: ascii_map_{ascii_map}
-	{}
-
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
-	rune_set(ascii_bitset const& ascii_map, std::unique_ptr<std::pair<char32_t, char32_t>[]>&& intervals, std::size_t size) noexcept
-		: ascii_map_{ascii_map}
-		, intervals_{std::move(intervals)}
-		, intervals_size_{size}
-	{}
-
-	static rune_set build_full();
-	static rune_set build_blank();
-	static rune_set build_eol();
-	static rune_set build_space();
-
-public:
-	constexpr rune_set() noexcept = default;
-
-	rune_set(rune_set const& other)
-		: ascii_map_{other.ascii_map_}
-		, intervals_size_{other.intervals_size_}
-	{
-		if (intervals_size_ > 0) {
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
-			intervals_ = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals_size_);
-			std::copy_n(other.intervals_.get(), intervals_size_, intervals_.get());
-		}
-	}
-
-	rune_set(rune_set&& other) noexcept
-		: ascii_map_{other.ascii_map_}
-		, intervals_{std::move(other.intervals_)}
-		, intervals_size_{std::exchange(other.intervals_size_, 0)}
-	{}
-
-	rune_set& operator=(rune_set const& other)
-	{
-		rune_set{other}.swap(*this);
-		return *this;
-	}
-
-	rune_set& operator=(rune_set&& other) noexcept
-	{
-		rune_set{std::move(other)}.swap(*this);
-		return *this;
-	}
-	
-	~rune_set() = default;
-
-	[[nodiscard]] bool operator==(rune_set const& rhs) const noexcept
-	{
-		return (ascii_map_ == rhs.ascii_map_) &&
-				(intervals_size_ == rhs.intervals_size_) &&
-				(intervals_size_ == 0 || std::equal(intervals_.get(), intervals_.get() + intervals_size_, rhs.intervals_.get()));
-	}
-
-	[[nodiscard]] bool operator!=(rune_set const& rhs) const noexcept
-	{
-		return !(*this == rhs);
-	}
-
-	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
-	[[nodiscard]] LUG_ALWAYS_INLINE auto operator()(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
-	{
-		if LUG_LIKELY(first != last) {
-			if (auto const c = *first++; utf8::is_ascii(c)) {
-				if (ascii_map_[static_cast<std::size_t>(static_cast<unsigned char>(c))])
-					return first;
-			} else {
-				auto const [next, rune] = utf8::decode_rune_rest(c, first, last);
-				auto const interval = std::lower_bound(intervals_.get(), intervals_.get() + intervals_size_, rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
-				if ((interval != intervals_.get() + intervals_size_) && (interval->first <= rune) && (rune <= interval->second))
-					return next;
-			}
-		}
-		return std::nullopt;
-	}
-
-	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] LUG_ALWAYS_INLINE auto operator()(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
-	{
-		return (*this)(std::begin(rng), std::end(rng));
-	}
-
-	template <class InputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
-	[[nodiscard]] LUG_ALWAYS_INLINE auto match(InputIt first, InputIt last) const -> std::optional<std::decay_t<InputIt>>
-	{
-		return match(first, last);
-	}
-
-	template <class InputRng, class = std::enable_if_t<lug::detail::is_char_input_range_v<InputRng>>>
-	[[nodiscard]] LUG_ALWAYS_INLINE auto match(InputRng&& rng) const -> std::optional<std::decay_t<decltype(std::begin(rng))>> // NOLINT(cppcoreguidelines-missing-std-forward)
-	{
-		return match(std::begin(rng), std::end(rng));
-	}
-
-	[[nodiscard]] bool contains(char32_t rune) const noexcept
-	{
-		if (rune < ascii_limit)
-			return ascii_map_[static_cast<std::size_t>(rune)];
-		auto const interval = std::lower_bound(intervals_.get(), intervals_.get() + intervals_size_, rune, [](auto const& x, auto const& y) noexcept { return x.second < y; });
-		return (interval != intervals_.get() + intervals_size_) && (interval->first <= rune) && (rune <= interval->second);
-	}
-
-	[[nodiscard]] bool empty() const noexcept
-	{
-		return ascii_map_.none() && (intervals_size_ == 0);
-	}
-
-	void swap(rune_set& other) noexcept
-	{
-		std::swap(ascii_map_, other.ascii_map_);
-		intervals_.swap(other.intervals_);
-		std::swap(intervals_size_, other.intervals_size_);
-	}
-
-	friend void swap(rune_set& lhs, rune_set& rhs) noexcept
-	{
-		lhs.swap(rhs);
-	}
-
-	static rune_set const& full()
-	{
-		static rune_set const full_{build_full()};
-		return full_;
-	}
-
-	static rune_set const& blank()
-	{
-		static rune_set const blank_{build_blank()};
-		return blank_;
-	}
-
-	static rune_set const& eol()
-	{
-		static rune_set const eol_{build_eol()};
-		return eol_;
-	}
-
-	static rune_set const& space()
-	{
-		static rune_set const space_{build_space()};
-		return space_;
-	}
-
-	static rune_set const& none()
-	{
-		static rune_set const none_{};
-		return none_;
-	}
-};
-
-class rune_set_builder
-{
-	using ascii_bitset = rune_set::ascii_bitset;
-
-	ascii_bitset ascii_map_;
-	std::vector<std::pair<char32_t, char32_t>> intervals_;
-	bool casefolded_{false};
-	bool negated_{false};
-
-	[[nodiscard]] static std::vector<std::pair<char32_t, char32_t>> negate_intervals(std::vector<std::pair<char32_t, char32_t>> const& intervals)
-	{
-		std::vector<std::pair<char32_t, char32_t>> result;
-		if (!intervals.empty()) {
-			if (char32_t const front = intervals.front().first; rune_set::ascii_limit < front)
-				result.emplace_back(rune_set::ascii_limit, front - 1);
-			if (intervals.size() > 1) {
-				auto const last = intervals.cend();
-				for (auto left = intervals.cbegin(), right = left + 1; right != last; ++left, ++right)
-					result.emplace_back(left->second + 1, right->first - 1);
-			}
-			if (char32_t const back = intervals.back().second; back < rune_set::rune_max)
-				result.emplace_back(back + 1, rune_set::rune_max);
-		} else {
-			result.emplace_back(rune_set::ascii_limit, rune_set::rune_max);
-		}
-		return result;
-	}
-
-	[[nodiscard]] static rune_set make_rune_set(ascii_bitset const& ascii_map, std::vector<std::pair<char32_t, char32_t>> const& intervals)
-	{
-		if (intervals.empty())
-			return rune_set{ascii_map};
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
-		auto interval_array = std::make_unique<std::pair<char32_t, char32_t>[]>(intervals.size());
-		std::copy(intervals.begin(), intervals.end(), interval_array.get());
-		return rune_set{ascii_map, std::move(interval_array), intervals.size()};
-	}
-
-	void push_rune(char32_t rune)
-	{
-		if (rune < rune_set::ascii_limit) {
-			ascii_map_.set(static_cast<std::size_t>(rune));
-		} else {
-			intervals_.emplace_back(rune, rune);
-			std::push_heap(intervals_.begin(), intervals_.end());
-		}
-	}
-
-	void push_casefolded_rune(char32_t rune)
-	{
-		push_rune(unicode::tolower(rune));
-		push_rune(unicode::toupper(rune));
-		push_rune(unicode::tocasefold(rune));
-	}
-
-	void push_range(char32_t start, char32_t end)
-	{
-		for (char32_t rn = start; rn <= end && rn < rune_set::ascii_limit; ++rn)
-			ascii_map_.set(static_cast<std::size_t>(rn));
-		if (end >= rune_set::ascii_limit) {
-			intervals_.emplace_back((std::max)(start, rune_set::ascii_limit), end);
-			std::push_heap(intervals_.begin(), intervals_.end());
-		}
-	}
-
-	void push_casefolded_range(char32_t start, char32_t end)
-	{
-		unicode::ptype p = unicode::query(start).properties();
-		char32_t r1 = start;
-		char32_t r2 = start;
-		for (char32_t rn = start + 1; rn <= end; r2 = rn, ++rn) {
-			unicode::ptype const q = unicode::query(rn).properties();
-			if (((p ^ q) & unicode::ptype::Cased) != unicode::ptype::None) {
-				push_uniform_casefolded_range(p, r1, r2);
-				r1 = rn;
-				p = q;
-			}
-		}
-		push_uniform_casefolded_range(p, r1, r2);
-	}
-
-	void push_uniform_casefolded_range(unicode::ptype props, char32_t start, char32_t end)
-	{
-		if ((props & unicode::ptype::Cased) != unicode::ptype::None) {
-			push_range(unicode::tolower(start), unicode::tolower(end));
-			push_range(unicode::toupper(start), unicode::toupper(end));
-			push_range(unicode::tocasefold(start), unicode::tocasefold(end));
-		} else {
-			push_range(start, end);
-		}
-	}
-
-public:
-	rune_set_builder& casefold(bool value = true)
-	{
-		casefolded_ = value;
-		return *this;
-	}
-
-	rune_set_builder& negate(bool value = true)
-	{
-		negated_ = value;
-		return *this;
-	}
-
-	rune_set_builder& add_rune(char32_t rune)
-	{
-		if LUG_UNLIKELY(rune >= rune_set::unicode_limit)
-			throw_exception<bad_character_range>();
-		if (casefolded_)
-			push_casefolded_rune(rune);
-		else
-			push_rune(rune);
-		return *this;
-	}
-
-	rune_set_builder& add_runes(std::initializer_list<char32_t> runes)
-	{
-		for (char32_t const r : runes)
-			add_rune(r);
-		return *this;
-	}
-
-	rune_set_builder& add_range(char32_t start, char32_t end)
-	{
-		if LUG_UNLIKELY((start > end) || (end >= rune_set::unicode_limit))
-			throw_exception<bad_character_range>();
-		if (casefolded_)
-			push_casefolded_range(start, end);
-		else
-			push_range(start, end);
-		return *this;
-	}
-
-	rune_set_builder& add_range(std::pair<char32_t, char32_t> const& range)
-	{
-		return add_range(range.first, range.second);
-	}
-
-	rune_set_builder& add_ranges(std::initializer_list<std::pair<char32_t, char32_t>> ranges)
-	{
-		for (auto const& range : ranges)
-			add_range(range);
-		return *this;
-	}
-
-	rune_set_builder& add_rune_set(rune_set const& set)
-	{
-		if (casefolded_) {
-			for (std::size_t i = 0; i < set.ascii_map_.size(); ++i)
-				if (set.ascii_map_[i])
-					push_casefolded_rune(static_cast<char32_t>(i));
-			std::for_each_n(set.intervals_.get(), set.intervals_size_, [this](auto const& r) { push_casefolded_range(r.first, r.second); });
-		} else {
-			ascii_map_ |= set.ascii_map_;
-			std::for_each_n(set.intervals_.get(), set.intervals_size_, [this](auto const& r) { push_range(r.first, r.second); });
-		}
-		return *this;
-	}
-
-	[[nodiscard]] rune_set build() &&
-	{
-		std::vector<std::pair<char32_t, char32_t>> optimized;
-		std::sort_heap(intervals_.begin(), intervals_.end());
-		auto out = optimized.end();
-		for (auto const& r : intervals_) {
-			if (out == optimized.end() || r.first < out->first || out->second < r.first)
-				out = optimized.insert(optimized.end(), r);
-			else
-				out->second = out->second < r.second ? r.second : out->second;
-		}
-		if (negated_)
-			return make_rune_set(~ascii_map_, negate_intervals(optimized));
-		return make_rune_set(ascii_map_, optimized);
-	}
-};
-
-inline rune_set rune_set::build_full()
-{
-	return std::move(rune_set_builder{}.negate()).build();
-}
-
-inline rune_set rune_set::build_blank()
-{
-	rune_set_builder builder;
-	builder.add_runes({U'\u0009', U'\u0020', U'\u00A0', U'\u1680', U'\u202F', U'\u205F', U'\u3000'}).add_range(U'\u2000', U'\u200A');
-	return std::move(builder).build();
-}
-
-inline rune_set rune_set::build_space()
-{
-	rune_set_builder builder;
-	builder.add_runes({U'\u0020', U'\u0085', U'\u00A0', U'\u1680', U'\u2028', U'\u2029', U'\u202F', U'\u205F', U'\u3000'}).add_range(U'\u0009', U'\u000D').add_range(U'\u2000', U'\u200A');
-	return std::move(builder).build();
-}
-
-inline rune_set rune_set::build_eol()
-{
-	rune_set_builder builder;
-	builder.add_runes({U'\u0085', U'\u2028', U'\u2029'}).add_range(U'\u000A', U'\u000D');
-	return std::move(builder).build();
-}
 
 enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
 
@@ -477,6 +106,16 @@ struct alignas(std::uint_least64_t) instruction
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::size_t unpack_max() const noexcept
 	{
 		return static_cast<std::size_t>((static_cast<std::uint_least32_t>(offset32) >> max_limit_shift) & limit_mask) - max_limit_bias;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE friend constexpr bool operator==(instruction const& lhs, instruction const& rhs) noexcept
+	{
+		return (lhs.op == rhs.op) && (lhs.immediate8 == rhs.immediate8) && (lhs.immediate16 == rhs.immediate16) && (lhs.offset32 == rhs.offset32);
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE friend constexpr bool operator!=(instruction const& lhs, instruction const& rhs) noexcept
+	{
+		return !(lhs == rhs);
 	}
 };
 
@@ -570,10 +209,10 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 			if constexpr (std::is_nothrow_move_assignable_v<T>) {
 				*static_cast<T*>(desc->target) = static_cast<T&&>(*from);
 			} else if constexpr (std::is_nothrow_copy_assignable_v<T>) {
-				*static_cast<T*>(desc->target) = *from;
+				*static_cast<T*>(desc->target) = static_cast<T const&>(*from);
 			} else {
 				detail::scope_exit guard{[buffer, desc]() noexcept { (*desc->destroy)(buffer, desc); }};
-				*static_cast<T*>(desc->target) = *from;
+				*static_cast<T*>(desc->target) = static_cast<T const&>(*from);
 				guard.release();
 			}
 			std::destroy_at(from);
@@ -1281,7 +920,7 @@ class encoder
 	}
 
 public:
-	explicit encoder(program& p, program_callees& c, directives initial) : program_{&p}, callees_{&c}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{initial} {}
+	explicit encoder(program& p, program_callees& c, directives initial = directives::eps) : program_{&p}, callees_{&c}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{initial} {}
 	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
 	encoder(encoder const&) = delete;
 	encoder(encoder&& e) noexcept : rule_{std::exchange(e.rule_, nullptr)}, program_{std::exchange(e.program_, nullptr)}, callees_{std::exchange(e.callees_, nullptr)}, attribute_frame_info_{std::exchange(e.attribute_frame_info_, nullptr)}, mode_{std::move(e.mode_)}, entry_mode_{e.entry_mode_} {}
@@ -1381,7 +1020,7 @@ public:
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(rune)).build()));
 		}
 		if constexpr (std::is_same_v<std::decay_t<T>, char32_t>)
-			if (!unicode::is_ascii(value))
+			if (!ascii::isascii(value))
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.add_rune(value)).build()));
 		return encode_min_max(unit_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<std::make_unsigned_t<T>>(value)));
 	}
@@ -1422,9 +1061,14 @@ public:
 			encode(opcode::skip_space);
 	}
 
-	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme) const
+	void ddrop()
 	{
-		return ((((mode_.back() | callee_mode)) & (callee_skip | directives::preskip)) == directives::preskip);
+		mode_.pop_back();
+	}
+
+	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives skip_ignore = directives::lexeme) const
+	{
+		return ((((mode_.back() | callee_mode)) & (skip_ignore | directives::preskip)) == directives::preskip);
 	}
 
 	encoder& commit_eps(directives callee_mode = directives::eps)
@@ -1460,15 +1104,14 @@ struct common_encoder_expression_interface
 	template <class Recovery> [[nodiscard]] constexpr auto operator[](failure<Recovery> const& reason) const;
 	template <class Recovery> [[nodiscard]] constexpr auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] constexpr auto operator^=(Handler&& handler) const;
+	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return (this->derived().effects() & mask) == mask; }
 };
 
-template <class Derived>
+template <class Derived, auto... Traits>
 struct terminal_encoder_expression_interface : common_encoder_expression_interface<Derived>
 {
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::none; }
-	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return (this->derived().effects() & mask) != effect_traits::none; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return flag_enum_fold_pack_or_v<effect_traits::none, Traits...>; }
+	[[nodiscard]] constexpr match_traits matches() const noexcept { return flag_enum_fold_pack_or_v<match_traits::none, Traits...>; }
 };
 
 template <class Derived, class E1>
@@ -1479,8 +1122,6 @@ struct unary_encoder_expression_interface : common_encoder_expression_interface<
 	constexpr explicit unary_encoder_expression_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects(); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches(); }
-	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return this->e1.has_effects(mask); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return this->e1.head_optimizable(); }
 };
 
 template <class Derived, class E1, class E2>
@@ -1491,16 +1132,14 @@ struct binary_encoder_expression_interface : common_encoder_expression_interface
 	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
 	constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | this->e2.effects(); }
-	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { if (this->e1.has_effects(mask)) return true; return this->e2.has_effects(mask); }
 };
 
 template <class Recovery>
-struct raise_expression : terminal_encoder_expression_interface<raise_expression<Recovery>>
+struct raise_expression : terminal_encoder_expression_interface<raise_expression<Recovery>, effect_traits::raises>
 {
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
 	void evaluate(encoder& d) const { return d.raise_failure(reason); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::raises; }
 };
 
 template <class E1, class Recovery>
@@ -1552,12 +1191,11 @@ struct recover_with_expression : unary_encoder_expression_interface<recover_with
 	}
 };
 
-struct recover_response_expression : terminal_encoder_expression_interface<recover_response_expression>
+struct recover_response_expression : terminal_encoder_expression_interface<recover_response_expression, match_traits::nullable | match_traits::nofail>
 {
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
 	void evaluate(encoder& d) const { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
 template <class E1, class Handler>
@@ -1606,7 +1244,6 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1652,7 +1289,6 @@ struct string_expression : terminal_encoder_expression_interface<string_expressi
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	void evaluate(encoder& d) const { d.match(text); }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return text.empty() ? (match_traits::nullable | match_traits::nofail) : match_traits::none; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return !text.empty(); }
 };
 
 struct char_expression : terminal_encoder_expression_interface<char_expression>
@@ -1660,7 +1296,6 @@ struct char_expression : terminal_encoder_expression_interface<char_expression>
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.match(std::string_view{&c, 1}); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct rune_expression : terminal_encoder_expression_interface<rune_expression>
@@ -1668,7 +1303,6 @@ struct rune_expression : terminal_encoder_expression_interface<rune_expression>
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct rune_range_expression : terminal_encoder_expression_interface<rune_range_expression>
@@ -1677,7 +1311,6 @@ struct rune_range_expression : terminal_encoder_expression_interface<rune_range_
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1691,7 +1324,6 @@ struct rune_set_expression : terminal_encoder_expression_interface<rune_set_expr
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1801,6 +1433,10 @@ struct directive_expression : unary_encoder_expression_interface<directive_expre
 	}
 };
 
+template <class E> struct unwrap_directive_expression { using type = E; };
+template <class E> struct unwrap_directive_expression<directive_expression<E>> { using type = typename unwrap_directive_expression<E>::type; };
+template <class E> using unwrap_directive_expression_t = typename unwrap_directive_expression<std::decay_t<E>>::type;
+
 template <directives EnableMask, directives DisableMask, directives RelayMask>
 struct directive_modifier
 {
@@ -1817,31 +1453,26 @@ struct directive_modifier
 	}
 };
 
-struct accept_cut_expression : terminal_encoder_expression_interface<accept_cut_expression>
+struct accept_cut_expression : terminal_encoder_expression_interface<accept_cut_expression, effect_traits::cuts>
 {
 	std::uint_least8_t imm8;
 	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
 	void evaluate(encoder& d) const { d.encode(opcode::accept, 0, imm8); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::cuts; }
 };
 
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression>
+struct eoi_expression : terminal_encoder_expression_interface<eoi_expression, match_traits::nullable>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
 struct eol_expression : terminal_encoder_expression_interface<eol_expression>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
 };
 
-struct eps_expression : terminal_encoder_expression_interface<eps_expression>
+struct eps_expression : terminal_encoder_expression_interface<eps_expression, match_traits::nullable | match_traits::nofail>
 {
 	void evaluate(encoder& /*d*/) const {}
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
 template <class Property>
@@ -1865,18 +1496,36 @@ struct match_any_expression : terminal_encoder_expression_interface<match_any_ex
 {
 	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::match_any); }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return true; }
+};
+
+template <ascii::ctype Property>
+struct ascii_ctype_expression : terminal_encoder_expression_interface<ascii_ctype_expression<Property>>
+{
+	void evaluate(encoder& d) const
+	{
+		if constexpr (Property == ascii::ctype::blank)
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
+		else if constexpr (Property == ascii::ctype::space)
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
+		else
+			d.match_set(make_rune_set(d.mode()));
+	}
+
+	[[nodiscard]] rune_set make_rune_set([[maybe_unused]] directives mode = directives::none) const
+	{
+		return ascii::ctype_rune_set(Property);
+	}
 };
 
 template <unicode::ctype Property>
-struct ctype_expression : terminal_encoder_expression_interface<ctype_expression<Property>>
+struct unicode_ctype_expression : terminal_encoder_expression_interface<unicode_ctype_expression<Property>>
 {
 	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == unicode::ctype::blank)
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
+			d.skip(directives::lexeme | directives::eps).encode_class(opcode::match_any_of, Property);
 		else if constexpr (Property == unicode::ctype::space)
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
+			d.skip(directives::lexeme | directives::eps).encode_class(opcode::match_any_of, Property);
 		else
 			d.match_class(opcode::match_any_of, Property);
 	}
@@ -1887,13 +1536,12 @@ struct condition_test_combinator
 	std::uint_least8_t imm8;
 	constexpr explicit condition_test_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
 
-	struct condition_test_expression : terminal_encoder_expression_interface<condition_test_expression>
+	struct condition_test_expression : terminal_encoder_expression_interface<condition_test_expression, match_traits::nullable>
 	{
 		std::string_view name;
 		std::uint_least8_t imm8;
 		constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 		void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
-		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
 	[[nodiscard]] constexpr condition_test_expression operator()(std::string_view name) const noexcept { return condition_test_expression{name, imm8}; }
@@ -1942,13 +1590,12 @@ struct symbol_exists_combinator
 	std::uint_least8_t imm8;
 	constexpr explicit symbol_exists_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
 
-	struct symbol_exists_expression : terminal_encoder_expression_interface<symbol_exists_expression>
+	struct symbol_exists_expression : terminal_encoder_expression_interface<symbol_exists_expression, match_traits::nullable>
 	{
 		std::string_view name;
 		std::uint_least8_t imm8;
 		constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 		void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
-		[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable; }
 	};
 
 	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name, imm8}; }
@@ -1994,6 +1641,29 @@ struct symbol_match_offset_combinator
 	}
 };
 
+template <class E1> struct negative_lookahead_expression;
+template <class E1> struct positive_lookahead_expression;
+template <class E1, std::size_t NMin, std::size_t NMax> struct repetition_expression;
+template <class E1, class E2> struct choice_expression;
+template <class E1, class E2> struct sequence_expression;
+
+template <class E>
+inline constexpr bool is_expression_always_head_optimizable_v =
+	std::is_same_v<E, char_expression> ||
+	std::is_same_v<E, rune_expression> ||
+	std::is_same_v<E, rune_range_expression> ||
+	std::is_same_v<E, rune_set_expression> ||
+	std::is_same_v<E, bracket_expression> ||
+	std::is_same_v<E, match_any_expression> ||
+	detail::is_template_non_type_instantiation_of_v<E, ascii_ctype_expression>;
+
+template <class E>
+inline constexpr bool is_expression_maybe_head_optimizable_v =
+	detail::is_template_instantiation_of_v<E, positive_lookahead_expression> ||
+	detail::is_template_instantiation_of_v<E, choice_expression> ||
+	detail::is_template_instantiation_of_v<E, sequence_expression>;
+	// TODO: callable, capture/attribute bindings, condition and symbol blocks
+
 template <class E1>
 struct negative_lookahead_expression : unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>
 {
@@ -2011,7 +1681,6 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<negati
 	}
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return (this->e1.matches() & ~match_traits::nofail) | match_traits::nullable; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 };
 
 template <class E1>
@@ -2034,50 +1703,70 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches() | match_traits::nullable; }
 };
 
-inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)();
-inline constexpr std::size_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
-
 template <class E>
-inline constexpr bool is_repetition_expression_always_optimizable_v =
-	std::is_same_v<E, match_any_expression> ||
-	std::is_same_v<E, ctype_expression<unicode::ctype::blank>> ||
-	std::is_same_v<E, ctype_expression<unicode::ctype::space>> ||
+inline constexpr bool is_expression_always_repeat_optimizable_v =
 	std::is_same_v<E, char_expression> ||
 	std::is_same_v<E, rune_expression> ||
 	std::is_same_v<E, rune_range_expression> ||
 	std::is_same_v<E, rune_set_expression> ||
-	std::is_same_v<E, bracket_expression>;
+	std::is_same_v<E, bracket_expression> ||
+	std::is_same_v<E, match_any_expression> ||
+	detail::is_template_non_type_instantiation_of_v<E, ascii_ctype_expression>;
 
 template <class E>
-inline constexpr bool is_repetition_expression_optimizable_v =
-	is_repetition_expression_always_optimizable_v<E> ||
+inline constexpr bool is_expression_maybe_repeat_optimizable_v =
 	std::is_same_v<E, string_expression>;
+
+namespace detail {
+
+template <class E>
+inline constexpr bool is_expression_repeat_optimizable_impl_v =
+	is_expression_always_repeat_optimizable_v<E> ||
+	is_expression_maybe_repeat_optimizable_v<E>;
+
+} // namespace detail
+
+template <class E>
+inline constexpr bool is_expression_repeat_optimizable_v =
+	detail::is_expression_repeat_optimizable_impl_v<unwrap_directive_expression_t<E>>;
+
+inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)();
+inline constexpr std::size_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
 
 template <class E>
 [[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, encoder& d, std::size_t nmin, std::size_t nmax)
 {
-	if constexpr (is_repetition_expression_always_optimizable_v<std::decay_t<E>>) {
-		if (d.should_skip())
+	if constexpr (is_expression_always_repeat_optimizable_v<std::decay_t<E>>) {
+		if (d.should_skip(directives::preskip, directives::lexeme | directives::noskip | directives::postskip))
 			return false;
 		d.commit_eps();
 		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>)
 			d.encode_min_max(opcode::repeat_any, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::blank>>)
+		else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::blank>>)
 			d.encode_min_max(opcode::repeat_blank, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, ctype_expression<unicode::ctype::space>>)
+		else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::space>>)
 			d.encode_min_max(opcode::repeat_space, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression> || std::is_same_v<std::decay_t<E>, rune_expression>)
 			d.encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.c, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, rune_range_expression> ||
 							std::is_same_v<std::decay_t<E>, rune_set_expression> ||
-							std::is_same_v<std::decay_t<E>, bracket_expression>)
+							std::is_same_v<std::decay_t<E>, bracket_expression> ||
+							detail::is_template_non_type_instantiation_of_v<std::decay_t<E>, ascii_ctype_expression>)
 			d.encode_min_max(opcode::repeat_set, nmin, nmax, d.add_rune_set(e.make_rune_set(d.mode())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
-		if (d.should_skip() || (e.text.size() != 1))
+		if (d.should_skip(directives::preskip, directives::lexeme | directives::noskip | directives::postskip))
 			return false;
-		d.commit_eps().encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.text.front(), nmin, nmax);
+		auto const [rest, rune] = utf8::decode_rune(e.text.begin(), e.text.end());
+		if (rest != e.text.end())
+			return false;
+		d.commit_eps().encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, rune, nmin, nmax);
 		return true;
+	} else if constexpr (detail::is_template_instantiation_of_v<std::decay_t<E>, directive_expression>) {
+		d.dpsh(e.enable_mask, e.disable_mask);
+		bool const result = repetition_encode_optimized(e.e1, d, nmin, nmax);
+		d.ddrop();
+		return result;
 	} else {
 		static_assert(detail::always_false_v<E>, "unsupported repetition expression");
 	}
@@ -2092,7 +1781,7 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
 				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2124,7 +1813,7 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
 				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2149,7 +1838,7 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, forever))
 				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2178,11 +1867,10 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, NMax))
 				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2211,7 +1899,6 @@ struct repetition_expression<E1, 0, 0> : unary_encoder_expression_interface<repe
 	void evaluate(encoder& /*d*/) const {}
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 };
 
 template <class E1>
@@ -2220,11 +1907,10 @@ struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repe
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, 1))
 				return;
 		auto const choice = d.encode(opcode::choice);
@@ -2243,11 +1929,10 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>;
 	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
 	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return false; }
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, forever))
 				return;
 		d.skip(directives::none, directives::lexeme | directives::noskip);
@@ -2278,7 +1963,7 @@ struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repe
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 1, 2))
 				return;
 		this->e1.evaluate(d);
@@ -2300,7 +1985,7 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_repetition_expression_optimizable_v<std::decay_t<E1>>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 1, forever))
 				return;
 		this->e1.evaluate(d);
@@ -2352,17 +2037,10 @@ struct choice_expression : binary_encoder_expression_interface<choice_expression
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept
 	{
-		auto const mtraits1 = this->e1.matches();
-		if (mtraits1 == match_traits::all)
+		auto const matches1 = this->e1.matches();
+		if (matches1 == match_traits::all)
 			return match_traits::all;
-		return mtraits1 | this->e2.matches();
-	}
-
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept
-	{
-		if (!this->e1.head_optimizable())
-			return false;
-		return this->e2.head_optimizable();
+		return matches1 | this->e2.matches();
 	}
 };
 
@@ -2382,17 +2060,10 @@ struct sequence_expression : binary_encoder_expression_interface<sequence_expres
 
 	[[nodiscard]] constexpr match_traits matches() const noexcept
 	{
-		auto const mtraits1 = this->e1.matches();
-		if (mtraits1 == match_traits::none)
+		auto const matches1 = this->e1.matches();
+		if (matches1 == match_traits::none)
 			return match_traits::none;
-		return mtraits1 & this->e2.matches();
-	}
-
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept
-	{
-		if ((this->e2.matches() & match_traits::nofail) == match_traits::none)
-			return false;
-		return this->e1.head_optimizable();
+		return matches1 & this->e2.matches();
 	}
 };
 
@@ -2698,7 +2369,6 @@ namespace language {
 using lug::environment; using lug::grammar; using lug::rule; using lug::start; using lug::forever; using lug::max_repetitions;
 using lug::error_context; using lug::error_response; using lug::recover_with; using lug::failure;
 using lug::syntax; using lug::syntax_position; using lug::syntax_range; using lug::rune_set; using lug::rune_set_builder;
-using unicode::ctype; using unicode::ptype; using unicode::gctype; using unicode::sctype; using unicode::blktype; using unicode::agetype; using unicode::eawtype;
 inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
 inline constexpr directive_modifier<directives::caseless, directives::none, directives::eps> caseless{};
 inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
@@ -2707,10 +2377,6 @@ inline constexpr directive_modifier<directives::none, directives::lexeme | direc
 inline constexpr accept_cut_expression accept{lug::registers::ignore_errors_flag}; inline constexpr accept_cut_expression cut{lug::registers::inhibited_flag};
 inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator all{opcode::match_all_of}; inline constexpr match_class_combinator none{opcode::match_none_of};
-inline constexpr ctype_expression<ctype::alpha> alpha{}; inline constexpr ctype_expression<ctype::alnum> alnum{}; inline constexpr ctype_expression<ctype::lower> lower{};
-inline constexpr ctype_expression<ctype::upper> upper{}; inline constexpr ctype_expression<ctype::digit> digit{}; inline constexpr ctype_expression<ctype::xdigit> xdigit{};
-inline constexpr ctype_expression<ctype::space> space{}; inline constexpr ctype_expression<ctype::blank> blank{}; inline constexpr ctype_expression<ctype::punct> punct{};
-inline constexpr ctype_expression<ctype::graph> graph{}; inline constexpr ctype_expression<ctype::print> print{}; inline constexpr ctype_expression<ctype::cntrl> cntrl{};
 inline constexpr condition_test_combinator when{true}; inline constexpr condition_test_combinator unless{false};
 inline constexpr condition_block_combinator on{true}; inline constexpr condition_block_combinator off{false};
 inline constexpr symbol_exists_combinator exists{true}; inline constexpr symbol_exists_combinator missing{false};
@@ -2730,6 +2396,50 @@ template <class T, class... Args> inline constexpr synthesize_combinator<synthes
 template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_factory, T, Container, ElementArgs...> synthesize_collect{};
 template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_shared_factory, T, Container, ElementArgs...> synthesize_collect_shared{};
 template <class T, class Container, class... ElementArgs> inline constexpr synthesize_collect_combinator<synthesize_unique_factory, T, Container, ElementArgs...> synthesize_collect_unique{};
+
+inline namespace ascii {
+
+using lug::ascii::ctype;
+inline constexpr ascii_ctype_expression<ctype::alpha> alpha{};
+inline constexpr ascii_ctype_expression<ctype::alnum> alnum{};
+inline constexpr ascii_ctype_expression<ctype::lower> lower{};
+inline constexpr ascii_ctype_expression<ctype::upper> upper{};
+inline constexpr ascii_ctype_expression<ctype::digit> digit{};
+inline constexpr ascii_ctype_expression<ctype::xdigit> xdigit{};
+inline constexpr ascii_ctype_expression<ctype::space> space{};
+inline constexpr ascii_ctype_expression<ctype::blank> blank{};
+inline constexpr ascii_ctype_expression<ctype::punct> punct{};
+inline constexpr ascii_ctype_expression<ctype::graph> graph{};
+inline constexpr ascii_ctype_expression<ctype::print> print{};
+inline constexpr ascii_ctype_expression<ctype::cntrl> cntrl{};
+inline constexpr ascii_ctype_expression<ctype::word> word{};
+
+} // namespace ascii
+
+namespace unicode {
+
+using lug::unicode::ctype;
+using lug::unicode::ptype;
+using lug::unicode::gctype;
+using lug::unicode::sctype;
+using lug::unicode::blktype;
+using lug::unicode::agetype;
+using lug::unicode::eawtype;
+inline constexpr unicode_ctype_expression<ctype::alpha> alpha{};
+inline constexpr unicode_ctype_expression<ctype::alnum> alnum{};
+inline constexpr unicode_ctype_expression<ctype::lower> lower{};
+inline constexpr unicode_ctype_expression<ctype::upper> upper{};
+inline constexpr unicode_ctype_expression<ctype::digit> digit{};
+inline constexpr unicode_ctype_expression<ctype::xdigit> xdigit{};
+inline constexpr unicode_ctype_expression<ctype::space> space{};
+inline constexpr unicode_ctype_expression<ctype::blank> blank{};
+inline constexpr unicode_ctype_expression<ctype::punct> punct{};
+inline constexpr unicode_ctype_expression<ctype::graph> graph{};
+inline constexpr unicode_ctype_expression<ctype::print> print{};
+inline constexpr unicode_ctype_expression<ctype::cntrl> cntrl{};
+inline constexpr unicode_ctype_expression<ctype::word> word{};
+
+} // namespace unicode
 
 inline constexpr struct
 {

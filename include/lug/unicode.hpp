@@ -9,7 +9,7 @@
 #ifndef LUG_INCLUDE_LUG_UNICODE_HPP
 #define LUG_INCLUDE_LUG_UNICODE_HPP
 
-#include <lug/detail.hpp>
+#include <lug/ascii.hpp>
 
 #include <cstdint>
 #include <array>
@@ -17,14 +17,6 @@
 #include <optional>
 
 namespace lug::unicode {
-
-static constexpr char32_t max_ascii_code_point = 0x7FU;
-static constexpr char32_t max_code_point = 0x10FFFFU;
-
-[[nodiscard]] constexpr bool is_ascii(char32_t r) noexcept
-{
-	return r <= max_ascii_code_point;
-}
 
 // NOLINTBEGIN(hicpp-signed-bitwise)
 

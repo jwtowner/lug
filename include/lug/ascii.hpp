@@ -6,6 +6,9 @@
 #define LUG_INCLUDE_LUG_ASCII_HPP
 
 #include <lug/detail.hpp>
+
+#include <array>
+#include <bitset>
 #include <optional>
 
 #undef isascii
@@ -15,8 +18,54 @@
 
 namespace lug::ascii {
 
+enum class ctype : std::uint_least16_t
+{
+	none     = 0,
+	alpha    = UINT16_C(1) <<  0,
+	lower    = UINT16_C(1) <<  1,
+	upper    = UINT16_C(1) <<  2,
+	punct    = UINT16_C(1) <<  3,
+	digit    = UINT16_C(1) <<  4,
+	xdigit   = UINT16_C(1) <<  5,
+	alnum    = UINT16_C(1) <<  6,
+	space    = UINT16_C(1) <<  7,
+	blank    = UINT16_C(1) <<  8,
+	cntrl    = UINT16_C(1) <<  9,
+	graph    = UINT16_C(1) << 10,
+	print    = UINT16_C(1) << 11,
+	word     = UINT16_C(1) << 12
+};
+
+} // namespace lug::ascii
+
+template <> inline constexpr bool lug::is_flag_enum_v<lug::ascii::ctype> = true;
+
+namespace lug::ascii {
+
+inline constexpr std::array<ctype, 128> ascii_ctype_table
+{
+	ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},
+	ctype{0x0200},ctype{0x0380},ctype{0x0280},ctype{0x0280},ctype{0x0280},ctype{0x0280},ctype{0x0200},ctype{0x0200},
+	ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},
+	ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},ctype{0x0200},
+	ctype{0x0980},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},
+	ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},
+	ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},ctype{0x1c70},
+	ctype{0x1c70},ctype{0x1c70},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},
+	ctype{0x0c08},ctype{0x1c65},ctype{0x1c65},ctype{0x1c65},ctype{0x1c65},ctype{0x1c65},ctype{0x1c65},ctype{0x1c45},
+	ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},
+	ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},
+	ctype{0x1c45},ctype{0x1c45},ctype{0x1c45},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x1c08},
+	ctype{0x0c08},ctype{0x1c63},ctype{0x1c63},ctype{0x1c63},ctype{0x1c63},ctype{0x1c63},ctype{0x1c63},ctype{0x1c43},
+	ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},
+	ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},
+	ctype{0x1c43},ctype{0x1c43},ctype{0x1c43},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0c08},ctype{0x0200}
+};
+
 struct ascii_niebloid_base
 {
+	template <class T> using char_type = std::conditional_t<std::is_same_v<std::decay_t<T>, char>, char, int>;
+	
 	static constexpr unsigned int alpha_mask = 0x20U;
 	static constexpr unsigned int ascii_max = 0x7fU;
 
@@ -28,9 +77,14 @@ struct ascii_niebloid_base
 
 struct ascii_isascii_fn : private ascii_niebloid_base
 {
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
+	template <class T, class = std::enable_if_t<std::is_integral_v<T>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(T c) const noexcept -> bool
 	{
-		return static_cast<unsigned int>(c) <= ascii_max;
+		if constexpr (std::is_signed_v<T>) {
+			return static_cast<unsigned int>(static_cast<int>(c)) <= ascii_max;
+		} else {
+			return static_cast<unsigned int>(c) <= ascii_max;
+		}
 	}
 };
 
@@ -38,9 +92,10 @@ inline constexpr ascii_isascii_fn isascii{};
 
 struct ascii_toascii_fn : private ascii_niebloid_base
 {
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
+	template <class T, class = std::enable_if_t<std::is_signed_v<std::decay_t<T>>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(T c) const noexcept -> char_type<T>
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) & ascii_max);
+		return static_cast<char_type<T>>(static_cast<int>(static_cast<unsigned int>(static_cast<std::make_unsigned_t<T>>(c)) & ascii_max));
 	}
 };
 
@@ -68,9 +123,12 @@ inline constexpr ascii_isupper_fn isupper{};
 
 struct ascii_tolower_fn : private ascii_niebloid_base
 {
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
+	template <class T, class = std::enable_if_t<std::is_signed_v<std::decay_t<T>>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(T c) const noexcept -> char_type<T>
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(isupper(c)) - 1U) & alpha_mask));
+		return static_cast<char_type<T>>(static_cast<int>(
+			static_cast<unsigned int>(static_cast<std::make_unsigned_t<T>>(c))
+			^ (~(static_cast<unsigned int>(isupper(c)) - 1U) & alpha_mask)));
 	}
 
 	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
@@ -109,9 +167,12 @@ inline constexpr ascii_tolower_fn tolower{};
 
 struct ascii_toupper_fn : private ascii_niebloid_base
 {
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> int
+	template <class T, class = std::enable_if_t<std::is_signed_v<std::decay_t<T>>>>
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(T c) const noexcept -> char_type<T>
 	{
-		return static_cast<int>(static_cast<unsigned int>(c) ^ (~(static_cast<unsigned int>(islower(c)) - 1U) & alpha_mask));
+		return static_cast<char_type<T>>(static_cast<int>(
+			static_cast<unsigned int>(static_cast<std::make_unsigned_t<T>>(c))
+			^ (~(static_cast<unsigned int>(islower(c)) - 1U) & alpha_mask)));
 	}
 
 	template <class InputIt, class OutputIt, class = std::enable_if_t<lug::detail::is_char_input_iterator_v<InputIt>>>
@@ -247,6 +308,16 @@ struct ascii_ispunct_fn : private ascii_niebloid_base
 };
 
 inline constexpr ascii_ispunct_fn ispunct{};
+
+struct ascii_isword_fn : private ascii_niebloid_base
+{
+	[[nodiscard]] LUG_ALWAYS_INLINE constexpr auto operator()(int c) const noexcept -> bool
+	{
+		return (c == '_') || isalnum(c);
+	}
+};
+
+inline constexpr ascii_isword_fn isword{};
 
 struct ascii_match_space_fn
 {

@@ -79,16 +79,6 @@ inline constexpr char32_t utf32_replacement = U'\U0000fffd';
 
 } // namespace detail
 
-struct utf8_is_ascii_fn
-{
-	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
-	{
-		return (static_cast<unsigned char>(octet) & 0x80U) == 0x00U;
-	}
-};
-
-inline constexpr utf8_is_ascii_fn is_ascii{};
-
 struct utf8_is_lead_fn
 {
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool operator()(char octet) const noexcept
