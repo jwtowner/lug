@@ -123,25 +123,41 @@ struct alignas(std::uint_least64_t) instruction
 static_assert(sizeof(instruction) == sizeof(std::uint_least64_t), "expected instruction size to be same size as std::uint_least64_t");
 static_assert(alignof(instruction) == alignof(std::uint_least64_t), "expected instruction alignment to be same size as std::uint_least64_t");
 
-struct encoder_expression_trait_tag {};
-template <class E, class = void> struct is_encoder_expression : std::false_type {};
-template <class E> struct is_encoder_expression<E, std::enable_if_t<std::is_same_v<encoder_expression_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
-template <class E> inline constexpr bool is_encoder_expression_v = is_encoder_expression<E>::value;
-template <class E> inline constexpr bool is_encoder_callable_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
+struct expression_node_trait_tag {};
+template <class E, class = void> struct is_expression_node : std::false_type {};
+template <class E> struct is_expression_node<E, std::enable_if_t<std::is_same_v<expression_node_trait_tag, typename std::decay_t<E>::expression_trait>>> : std::true_type {};
+template <class E, class = void> struct is_unary_expression_node : std::false_type {};
+template <class E> struct is_unary_expression_node<E, std::void_t<typename std::decay_t<E>::inner_expression_type>> : std::true_type {};
+template <class E, class = void> struct is_binary_expression_node : std::false_type {};
+template <class E> struct is_binary_expression_node<E, std::void_t<typename std::decay_t<E>::left_expression_type, typename std::decay_t<E>::right_expression_type>> : std::true_type {};
+template <class E> inline constexpr bool is_expression_node_v = is_expression_node<E>::value;
+template <class E> inline constexpr bool is_leaf_expression_node_v = is_expression_node<E>::value && !is_unary_expression_node<E>::value && !is_binary_expression_node<E>::value;
+template <class E> inline constexpr bool is_unary_expression_node_v = is_expression_node<E>::value && is_unary_expression_node<E>::value && !is_binary_expression_node<E>::value;
+template <class E> inline constexpr bool is_binary_expression_node_v = is_expression_node<E>::value && is_binary_expression_node<E>::value && !is_unary_expression_node<E>::value;
+template <class E> inline constexpr bool is_callable_expression_v = std::is_same_v<grammar, std::decay_t<E>> || std::is_same_v<rule, std::decay_t<E>> || std::is_same_v<program, std::decay_t<E>>;
 template <class E> inline constexpr bool is_primitive_expression_v = std::is_same_v<std::decay_t<E>, char> || std::is_same_v<std::decay_t<E>, char32_t> || std::is_same_v<std::decay_t<E>, rune_set> || std::is_convertible_v<std::decay_t<E>, std::string_view>;
-template <class E> inline constexpr bool is_recovery_expression_v = is_encoder_expression_v<E> || std::is_same_v<rule, std::decay_t<E>>;
+template <class E> inline constexpr bool is_recovery_expression_v = is_expression_node_v<E> || std::is_same_v<rule, std::decay_t<E>>;
 template <class H> inline constexpr bool is_error_handler_v = std::is_invocable_v<std::decay_t<H>, error_context&>;
 template <class P> inline constexpr bool is_predicate_v = std::is_invocable_r_v<bool, std::decay_t<P>, environment&>;
 template <class A> inline constexpr bool is_capture_action_v = std::is_invocable_v<std::decay_t<A>, detail::dynamic_cast_if_base_of<environment&>, syntax const&> || std::is_invocable_v<std::decay_t<A>, syntax const&>;
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
-template <class E> inline constexpr bool is_expression_v = is_encoder_expression_v<E> || is_encoder_callable_v<E> || is_primitive_expression_v<E> || is_predicate_v<E>;
+template <class E> inline constexpr bool is_expression_v = is_expression_node_v<E> || is_callable_expression_v<E> || is_primitive_expression_v<E> || is_predicate_v<E>;
 
 enum class directives : std::uint_least8_t { none = 0U, caseless = 1U, eps = 2U, lexeme = 4U, noskip = 8U, preskip = 16U, postskip = 32U };
 template <> inline constexpr bool is_flag_enum_v<directives> = true;
-enum class effect_traits : std::uint_least8_t { none = 0U, captures = 1U, cuts = 2U, raises = 4U, all = 7U };
+enum class effect_traits : std::uint_least8_t { none = 0U, action = 1U, binding = 2U, captures = 4U, cuts = 8U, raises = 8U, runtime = 16U };
 template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
-enum class match_traits : std::uint_least8_t { none = 0U, nullable = 1U, nofail = 2U, all = 3U };
-template <> inline constexpr bool is_flag_enum_v<match_traits> = true;
+
+struct program_traits
+{
+	effect_traits effects{effect_traits::none};
+	bool nofail{true};
+	bool nullable{true};
+	bool head_optimizable{false};
+	constexpr program_traits() noexcept = default;
+	constexpr program_traits(effect_traits in_effects, bool in_nofail, bool in_nullable, bool in_head_optimizable) noexcept
+		: effects{in_effects}, nofail{in_nofail}, nullable{in_nullable}, head_optimizable{in_head_optimizable} {}
+};
 
 using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
 using error_handler = std::function<error_response(error_context&)>;
@@ -313,10 +329,8 @@ struct program
 	std::vector<semantic_capture_action> captures;
 	std::vector<attribute_frame_handle> frames;
 	directives entry_mode{directives::eps};
-	effect_traits first_etraits{effect_traits::none};
-	effect_traits follow_etraits{effect_traits::none};
-	match_traits first_mtraits{match_traits::nullable | match_traits::nofail};
-	match_traits follow_mtraits{match_traits::nullable | match_traits::nofail};
+	program_traits first;
+	program_traits follow;
 
 	void concatenate(program const& src)
 	{
@@ -364,13 +378,13 @@ struct program
 		frames.insert(frames.end(), src.frames.begin(), src.frames.end());
 		entry_mode = (entry_mode & ~directives::eps) | (entry_mode & src.entry_mode & directives::eps);
 		if (was_empty) {
-			first_etraits = src.first_etraits;
-			follow_etraits = src.follow_etraits;
-			first_mtraits = src.first_mtraits;
-			follow_mtraits = src.follow_mtraits;
+			first = src.first;
+			follow = src.follow;
 		} else {
-			follow_etraits |= src.first_etraits | src.follow_etraits;
-			follow_mtraits &= src.first_mtraits & src.follow_mtraits;
+			follow.effects |= src.first.effects | src.follow.effects;
+			follow.nofail = follow.nofail && src.first.nofail && src.follow.nofail;
+			follow.nullable = follow.nullable && src.first.nullable && src.follow.nullable;
+			follow.head_optimizable = follow.head_optimizable && src.first.nofail && src.follow.nofail;
 		}
 	}
 
@@ -385,16 +399,12 @@ struct program
 		actions.swap(p.actions);
 		captures.swap(p.captures);
 		std::swap(entry_mode, p.entry_mode);
-		std::swap(first_etraits, p.first_etraits);
-		std::swap(follow_etraits, p.follow_etraits);
-		std::swap(first_mtraits, p.first_mtraits);
-		std::swap(follow_mtraits, p.follow_mtraits);
+		std::swap(first, p.first);
+		std::swap(follow, p.follow);
 	}
 
-	[[nodiscard]] effect_traits first_effects() const noexcept { return first_etraits; }
-	[[nodiscard]] effect_traits follow_effects() const noexcept { return follow_etraits; }
-	[[nodiscard]] match_traits first_matches() const noexcept { return first_mtraits; }
-	[[nodiscard]] match_traits follow_matches() const noexcept { return follow_mtraits; }
+	[[nodiscard]] program_traits const& first_traits() const noexcept { return first; }
+	[[nodiscard]] program_traits const& follow_traits() const noexcept { return follow; }
 };
 
 class rule
@@ -403,10 +413,8 @@ class rule
 	friend grammar start(rule const& start_rule, rule const& skip_rule);
 	program program_;
 	program_callees callees_;
-	effect_traits first_etraits_{effect_traits::captures | effect_traits::cuts};
-	effect_traits follow_etraits_{effect_traits::captures | effect_traits::cuts};
-	match_traits first_mtraits_{match_traits::none};
-	match_traits follow_mtraits_{match_traits::none};
+	program_traits first_{effect_traits::captures | effect_traits::cuts | effect_traits::raises, false, false, false};
+	program_traits follow_{effect_traits::captures | effect_traits::cuts | effect_traits::raises, false, false, false};
 	bool currently_encoding_{false};
 public:
 	rule() noexcept = default;
@@ -421,10 +429,8 @@ public:
 	template <class Recovery> [[nodiscard]] auto operator[](failure<Recovery> const& reason) const;
 	template <class Recovery> [[nodiscard]] auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] auto operator^=(Handler&& handler) const;
-	[[nodiscard]] effect_traits first_effects() const noexcept { return first_etraits_; }
-	[[nodiscard]] effect_traits follow_effects() const noexcept { return follow_etraits_; }
-	[[nodiscard]] match_traits first_matches() const noexcept { return first_mtraits_; }
-	[[nodiscard]] match_traits follow_matches() const noexcept { return follow_mtraits_; }
+	[[nodiscard]] program_traits const& first_traits() const noexcept { return first_; }
+	[[nodiscard]] program_traits const& follow_traits() const noexcept { return follow_; }
 };
 
 class grammar
@@ -436,10 +442,8 @@ public:
 	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	[[nodiscard]] effect_traits first_effects() const noexcept { return program_.first_effects(); }
-	[[nodiscard]] effect_traits follow_effects() const noexcept { return program_.follow_effects(); }
-	[[nodiscard]] match_traits first_matches() const noexcept { return program_.first_matches(); }
-	[[nodiscard]] match_traits follow_matches() const noexcept { return program_.follow_matches(); }
+	[[nodiscard]] program_traits const& first_traits() const noexcept { return program_.first_traits(); }
+	[[nodiscard]] program_traits const& follow_traits() const noexcept { return program_.follow_traits(); }
 };
 
 struct syntax_position
@@ -845,7 +849,7 @@ public:
 template <class Recovery>
 class recover_with
 {
-	using storage_type = std::conditional_t<std::is_void_v<Recovery>, std::nullptr_t, std::conditional_t<is_encoder_expression_v<Recovery>, Recovery, std::reference_wrapper<rule const>>>;
+	using storage_type = std::conditional_t<std::is_void_v<Recovery>, std::nullptr_t, std::conditional_t<is_expression_node_v<Recovery>, Recovery, std::reference_wrapper<rule const>>>;
 	storage_type recovery_;
 public:
 	template <class R = Recovery, class = std::enable_if_t<std::is_void_v<R>>>
@@ -854,7 +858,7 @@ public:
 	constexpr explicit recover_with(R&& r) noexcept(std::is_nothrow_constructible_v<storage_type, R&&>) : recovery_{std::forward<R>(r)} {}
 
 	[[nodiscard]] constexpr auto const& recovery() const noexcept {
-		if constexpr (is_encoder_expression_v<Recovery> || std::is_void_v<Recovery>)
+		if constexpr (is_expression_node_v<Recovery> || std::is_void_v<Recovery>)
 			return recovery_;
 		else
 			return recovery_.get();
@@ -990,7 +994,7 @@ public:
 	template <class Recovery>
 	[[nodiscard]] decltype(auto) raise_failure(failure<Recovery> const& reason)
 	{
-		if constexpr (is_encoder_expression_v<Recovery>) {
+		if constexpr (is_expression_node_v<Recovery>) {
 			auto const recovery_subroutine = encode(opcode::recover_push);
 			encode(opcode::raise, reason.label(), 1);
 			auto const finished = encode(opcode::jump);
@@ -1096,61 +1100,178 @@ public:
 	}
 };
 
-template <class Derived>
-struct common_encoder_expression_interface
+template <class E, class = void> struct expression_node_has_effects_property : std::false_type {};
+template <class E> struct expression_node_has_effects_property<E, std::enable_if_t<std::is_same_v<effect_traits, decltype(std::declval<E const&>().effects())>>> : std::true_type {};
+template <class E> inline constexpr bool expression_node_has_effects_property_v = expression_node_has_effects_property<E>::value;
+
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
+[[nodiscard]] constexpr effect_traits expression_effects([[maybe_unused]] E const& e) noexcept
 {
-	using expression_trait = encoder_expression_trait_tag;
+	if constexpr ((E::static_effects & effect_traits::runtime) != effect_traits::none) {
+		if constexpr (expression_node_has_effects_property_v<E>) {
+			return e.effects();
+		} else if constexpr (is_unary_expression_node_v<E>) {
+			return lug::expression_effects(e.e1);
+		} else if constexpr (is_binary_expression_node_v<E>) {
+			return lug::expression_effects(e.e1) | lug::expression_effects(e.e2);
+		} else {
+			static_assert(detail::always_false_v<E>, "expression node has no effects property and is not a unary or binary expression node");
+		}
+	} else {
+		return E::static_effects;
+	}
+}
+
+enum class certainty : std::uint_least8_t { never = 0U, always = 1U, maybe = 2U };
+
+[[nodiscard]] constexpr certainty static_certainty_and(certainty left, certainty right) noexcept
+{
+	if (left == certainty::never || right == certainty::never)
+		return certainty::never;
+	if (left == certainty::always && right == certainty::always)
+		return certainty::always;
+	return certainty::maybe;
+}
+
+[[nodiscard]] constexpr certainty static_certainty_or(certainty left, certainty right) noexcept
+{
+	if (left == certainty::always || right == certainty::always)
+		return certainty::always;
+	if (left == certainty::maybe || right == certainty::maybe)
+		return certainty::maybe;
+	return certainty::never;
+}
+
+template <class E> inline constexpr bool is_expression_maybe_nofail_or_nullable_v = (E::static_nofail == certainty::maybe) || (E::static_nullable == certainty::maybe);
+
+template <class E, class = void> struct expression_node_has_nofail_property : std::false_type {};
+template <class E> struct expression_node_has_nofail_property<E, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<E const&>().nofail())>>> : std::true_type {};
+template <class E> inline constexpr bool expression_node_has_nofail_property_v = expression_node_has_nofail_property<E>::value;
+
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
+[[nodiscard]] constexpr bool is_expression_nofail([[maybe_unused]] E const& e) noexcept
+{
+	if constexpr (E::static_nofail == certainty::maybe) {
+		if constexpr (expression_node_has_nofail_property_v<E>) {
+			return e.nofail();
+		} else if constexpr (is_unary_expression_node_v<E>) {
+			return lug::is_expression_nofail(e.e1);
+		} else {
+			static_assert(detail::always_false_v<E>, "expression node has no nofail property and is not a unary expression node");
+		}
+	} else if constexpr (E::static_nofail == certainty::always) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+template <class E, class = void> struct expression_node_has_nullable_property : std::false_type {};
+template <class E> struct expression_node_has_nullable_property<E, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<E const&>().nullable())>>> : std::true_type {};
+template <class E> inline constexpr bool expression_node_has_nullable_property_v = expression_node_has_nullable_property<E>::value;
+
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
+[[nodiscard]] constexpr bool is_expression_nullable([[maybe_unused]] E const& e) noexcept
+{
+	if constexpr (E::static_nullable == certainty::maybe) {
+		if constexpr (expression_node_has_nullable_property_v<E>) {
+			return e.nullable();
+		} else if constexpr (is_unary_expression_node_v<E>) {
+			return lug::is_expression_nullable(e.e1);
+		} else {
+			static_assert(detail::always_false_v<E>, "expression node has no nullable property and is not a unary expression node");
+		}
+	} else if constexpr (E::static_nullable == certainty::always) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+template <class E, class = void> struct expression_node_has_head_optimizable_property : std::false_type {};
+template <class E> struct expression_node_has_head_optimizable_property<E, std::enable_if_t<std::is_same_v<bool, decltype(std::declval<E const&>().head_optimizable())>>> : std::true_type {};
+template <class E> inline constexpr bool expression_node_has_head_optimizable_property_v = expression_node_has_head_optimizable_property<E>::value;
+
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
+[[nodiscard]] constexpr bool is_expression_head_optimizable([[maybe_unused]] E const& e) noexcept
+{
+	if constexpr (E::static_head_optimizable == certainty::maybe) {
+		if constexpr (expression_node_has_head_optimizable_property_v<E>) {
+			return e.head_optimizable();
+		} else if constexpr (is_unary_expression_node_v<E>) {
+			return lug::is_expression_head_optimizable(e.e1);
+		} else {
+			static_assert(detail::always_false_v<E>, "expression node has no head_optimizable property and is not a unary expression node");
+		}
+	} else if constexpr (E::static_head_optimizable == certainty::always) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+template <class Derived>
+struct common_expression_node_interface
+{
+	using expression_trait = expression_node_trait_tag;
 	[[nodiscard]] constexpr Derived& derived() noexcept { return static_cast<Derived&>(*this); }
 	[[nodiscard]] constexpr const Derived& derived() const noexcept { return static_cast<const Derived&>(*this); }
 	template <class Recovery> [[nodiscard]] constexpr auto operator[](failure<Recovery> const& reason) const;
 	template <class Recovery> [[nodiscard]] constexpr auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] constexpr auto operator^=(Handler&& handler) const;
-	[[nodiscard]] constexpr bool has_effects(effect_traits mask) const noexcept { return (this->derived().effects() & mask) == mask; }
 };
 
-template <class Derived, auto... Traits>
-struct terminal_encoder_expression_interface : common_encoder_expression_interface<Derived>
+template <class Derived>
+struct leaf_expression_node_interface : common_expression_node_interface<Derived>
 {
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return flag_enum_fold_pack_or_v<effect_traits::none, Traits...>; }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return flag_enum_fold_pack_or_v<match_traits::none, Traits...>; }
+	static constexpr effect_traits static_effects = effect_traits::none;
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::never;
+	static constexpr certainty static_head_optimizable = certainty::never;
 };
 
 template <class Derived, class E1>
-struct unary_encoder_expression_interface : common_encoder_expression_interface<Derived>
+struct unary_expression_node_interface : common_expression_node_interface<Derived>
 {
+	static constexpr effect_traits static_effects = E1::static_effects;
+	static constexpr certainty static_nofail = E1::static_nofail;
+	static constexpr certainty static_nullable = E1::static_nullable;
+	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
+	using inner_expression_type = E1;
 	E1 e1;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
-	constexpr explicit unary_encoder_expression_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects(); }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches(); }
+	constexpr explicit unary_expression_node_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
 };
 
 template <class Derived, class E1, class E2>
-struct binary_encoder_expression_interface : common_encoder_expression_interface<Derived>
+struct binary_expression_node_interface : common_expression_node_interface<Derived>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | E2::static_effects;
+	using left_expression_type = E1;
+	using right_expression_type = E2;
 	E1 e1;
 	E2 e2;
 	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
-	constexpr binary_encoder_expression_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | this->e2.effects(); }
+	constexpr binary_expression_node_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
 };
 
 template <class Recovery>
-struct raise_expression : terminal_encoder_expression_interface<raise_expression<Recovery>, effect_traits::raises>
+struct raise_expression : leaf_expression_node_interface<raise_expression<Recovery>>
 {
+	static constexpr effect_traits static_effects = effect_traits::raises;
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
 	void evaluate(encoder& d) const { return d.raise_failure(reason); }
 };
 
 template <class E1, class Recovery>
-struct expect_expression : unary_encoder_expression_interface<expect_expression<E1, Recovery>, E1>
+struct expect_expression : unary_expression_node_interface<expect_expression<E1, Recovery>, E1>
 {
-	using base_type = unary_encoder_expression_interface<expect_expression<E1, Recovery>, E1>;
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::raises;
+	using base_type = unary_expression_node_interface<expect_expression<E1, Recovery>, E1>;
 	failure<Recovery> reason;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr expect_expression(X1&& x1, failure<Recovery> const& fail) : base_type{std::forward<X1>(x1)}, reason{fail} {}
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::raises; }
 
 	void evaluate(encoder& d) const
 	{
@@ -1164,16 +1285,16 @@ struct expect_expression : unary_encoder_expression_interface<expect_expression<
 };
 
 template <class E1, class Recovery>
-struct recover_with_expression : unary_encoder_expression_interface<recover_with_expression<E1, Recovery>, E1>
+struct recover_with_expression : unary_expression_node_interface<recover_with_expression<E1, Recovery>, E1>
 {
-	using base_type = unary_encoder_expression_interface<recover_with_expression<E1, Recovery>, E1>;
+	using base_type = unary_expression_node_interface<recover_with_expression<E1, Recovery>, E1>;
 	recover_with<Recovery> rec;
 	template <class X1, class R, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<recover_with<Recovery>, R&&>>>
 	constexpr recover_with_expression(X1&& x1, R&& r) : base_type{std::forward<X1>(x1)}, rec{std::forward<R>(r)} {}
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (is_encoder_expression_v<Recovery>) {
+		if constexpr (is_expression_node_v<Recovery>) {
 			auto const recovery_subroutine = d.encode(opcode::recover_push);
 			this->e1.evaluate(d);
 			d.encode(opcode::recover_pop);
@@ -1192,17 +1313,19 @@ struct recover_with_expression : unary_encoder_expression_interface<recover_with
 	}
 };
 
-struct recover_response_expression : terminal_encoder_expression_interface<recover_response_expression, match_traits::nullable | match_traits::nofail>
+struct recover_response_expression : leaf_expression_node_interface<recover_response_expression>
 {
+	static constexpr certainty static_nofail = certainty::always;
+	static constexpr certainty static_nullable = certainty::always;
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
 	void evaluate(encoder& d) const { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); }
 };
 
 template <class E1, class Handler>
-struct report_expression : unary_encoder_expression_interface<report_expression<E1, Handler>, E1>
+struct report_expression : unary_expression_node_interface<report_expression<E1, Handler>, E1>
 {
-	using base_type = unary_encoder_expression_interface<report_expression<E1, Handler>, E1>;
+	using base_type = unary_expression_node_interface<report_expression<E1, Handler>, E1>;
 	using base_type::base_type;
 	Handler handler;
 
@@ -1211,10 +1334,11 @@ struct report_expression : unary_encoder_expression_interface<report_expression<
 
 	void evaluate(encoder& d) const
 	{
-		if constexpr (std::is_invocable_r_v<error_response, Handler, error_context&>)
+		if constexpr (std::is_invocable_r_v<error_response, Handler, error_context&>) {
 			d.encode(opcode::report_push, error_handler{handler});
-		else
+		} else {
 			d.encode(opcode::report_push, error_handler{[h = handler](error_context& e) -> error_response { (void)h(e); return e.recovery_response(); }});
+		}
 		this->e1.evaluate(d);
 		d.encode(opcode::report_pop);
 	}
@@ -1223,25 +1347,26 @@ struct report_expression : unary_encoder_expression_interface<report_expression<
 template <class X1, class H> report_expression(X1&&, H&&) -> report_expression<std::decay_t<X1>, std::decay_t<H>>;
 
 template <class Derived> template <class Recovery>
-[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator[](failure<Recovery> const& reason) const
+[[nodiscard]] constexpr auto common_expression_node_interface<Derived>::operator[](failure<Recovery> const& reason) const
 {
 	return expect_expression<Derived, Recovery>{derived(), reason};
 }
 
 template <class Derived> template <class Recovery>
-[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator[](recover_with<Recovery> const& rec) const
+[[nodiscard]] constexpr auto common_expression_node_interface<Derived>::operator[](recover_with<Recovery> const& rec) const
 {
 	return recover_with_expression<Derived, Recovery>{derived(), rec};
 }
 
 template <class Derived> template <class Handler, class>
-[[nodiscard]] constexpr auto common_encoder_expression_interface<Derived>::operator^=(Handler&& handler) const
+[[nodiscard]] constexpr auto common_expression_node_interface<Derived>::operator^=(Handler&& handler) const
 {
 	return report_expression<Derived, std::decay_t<Handler>>{derived(), std::forward<Handler>(handler)};
 }
 
-struct bracket_expression : terminal_encoder_expression_interface<bracket_expression>
+struct bracket_expression : leaf_expression_node_interface<bracket_expression>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
@@ -1284,30 +1409,38 @@ struct bracket_expression : terminal_encoder_expression_interface<bracket_expres
 	}
 };
 
-struct string_expression : terminal_encoder_expression_interface<string_expression>
+struct string_expression : leaf_expression_node_interface<string_expression>
 {
+	static constexpr certainty static_nofail = certainty::maybe;
+	static constexpr certainty static_nullable = certainty::maybe;
+	static constexpr certainty static_head_optimizable = certainty::maybe;
 	std::string_view text;
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	void evaluate(encoder& d) const { d.match(text); }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return text.empty() ? (match_traits::nullable | match_traits::nofail) : match_traits::none; }
+	[[nodiscard]] constexpr bool nofail() const noexcept { return text.empty(); }
+	[[nodiscard]] constexpr bool nullable() const noexcept { return text.empty(); }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return !text.empty(); }
 };
 
-struct char_expression : terminal_encoder_expression_interface<char_expression>
+struct char_expression : leaf_expression_node_interface<char_expression>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.match(std::string_view{&c, 1}); }
 };
 
-struct rune_expression : terminal_encoder_expression_interface<rune_expression>
+struct rune_expression : leaf_expression_node_interface<rune_expression>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); }
 };
 
-struct rune_range_expression : terminal_encoder_expression_interface<rune_range_expression>
+struct rune_range_expression : leaf_expression_node_interface<rune_range_expression>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	char32_t start;
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
@@ -1319,8 +1452,9 @@ struct rune_range_expression : terminal_encoder_expression_interface<rune_range_
 	}
 };
 
-struct rune_set_expression : terminal_encoder_expression_interface<rune_set_expression>
+struct rune_set_expression : leaf_expression_node_interface<rune_set_expression>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	rune_set set;
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
@@ -1335,20 +1469,29 @@ struct rune_set_expression : terminal_encoder_expression_interface<rune_set_expr
 };
 
 template <class Target>
-struct callable_expression : terminal_encoder_expression_interface<callable_expression<Target>>
+struct callable_expression : leaf_expression_node_interface<callable_expression<Target>>
 {
+	static constexpr effect_traits static_effects = effect_traits::runtime;
+	static constexpr certainty static_nofail = certainty::maybe;
+	static constexpr certainty static_nullable = certainty::maybe;
+	static constexpr certainty static_head_optimizable = certainty::maybe;
 	std::reference_wrapper<Target> target;
 	std::uint_least16_t prec{0};
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
 	constexpr explicit callable_expression(Target& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
 	void evaluate(encoder& d) const { d.call_with_frame(target.get(), prec); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_effects() | target.get().follow_effects(); }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return target.get().first_matches() & target.get().follow_matches(); }
+	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_traits().effects | target.get().follow_traits().effects; }
+	[[nodiscard]] constexpr bool nofail() const noexcept { return target.get().first_traits().nofail ? target.get().follow_traits().nofail : false; }
+	[[nodiscard]] constexpr bool nullable() const noexcept { return target.get().first_traits().nullable ? target.get().follow_traits().nullable : false; }
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return target.get().first_traits().head_optimizable ? target.get().follow_traits().nofail : false; }
 };
 
 template <class Pred>
-struct predicate_expression : terminal_encoder_expression_interface<predicate_expression<Pred>>
+struct predicate_expression : leaf_expression_node_interface<predicate_expression<Pred>>
 {
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = certainty::never;
 	Pred pred;
 	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	void evaluate(encoder& d) const { d.encode(opcode::predicate, syntactic_predicate{pred}); }
@@ -1356,26 +1499,27 @@ struct predicate_expression : terminal_encoder_expression_interface<predicate_ex
 
 template <class P> predicate_expression(P&&) -> predicate_expression<std::decay_t<P>>;
 
-template <class E, class = std::enable_if_t<is_encoder_expression_v<E>>>
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 [[nodiscard]] constexpr auto make_expression(E const& e) noexcept -> E const& { return e; }
 
-template <class E, class = std::enable_if_t<!is_encoder_expression_v<E> && is_expression_v<E>>>
+template <class E, class = std::enable_if_t<!is_expression_node_v<E> && is_expression_v<E>>>
 [[nodiscard]] constexpr auto make_expression(E&& e)
 {
-	if constexpr (is_encoder_callable_v<E>)
+	if constexpr (is_callable_expression_v<E>) {
 		return callable_expression{std::forward<E>(e)};
-	else if constexpr (std::is_same_v<std::decay_t<E>, char>)
+	} else if constexpr (std::is_same_v<std::decay_t<E>, char>) {
 		return char_expression{std::forward<E>(e)};
-	else if constexpr (std::is_same_v<std::decay_t<E>, char32_t>)
+	} else if constexpr (std::is_same_v<std::decay_t<E>, char32_t>) {
 		return rune_expression{std::forward<E>(e)};
-	else if constexpr (std::is_same_v<std::decay_t<E>, rune_set>)
+	} else if constexpr (std::is_same_v<std::decay_t<E>, rune_set>) {
 		return rune_set_expression{std::forward<E>(e)};
-	else if constexpr (std::is_convertible_v<std::decay_t<E>, std::string_view>)
+	} else if constexpr (std::is_convertible_v<std::decay_t<E>, std::string_view>) {
 		return string_expression{std::forward<E>(e)}; // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-	else if constexpr (is_predicate_v<E>)
+	} else if constexpr (is_predicate_v<E>) {
 		return predicate_expression{std::forward<E>(e)};
-	else
+	} else {
 		static_assert(detail::always_false_v<E>, "invalid expression type");
+	}
 }
 
 template <class E, class>
@@ -1415,9 +1559,9 @@ template <class Handler, class>
 }
 
 template <class E1>
-struct directive_expression : unary_encoder_expression_interface<directive_expression<E1>, E1>
+struct directive_expression : unary_expression_node_interface<directive_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<directive_expression<E1>, E1>;
+	using base_type = unary_expression_node_interface<directive_expression<E1>, E1>;
 	directives enable_mask{directives::none};
 	directives disable_mask{directives::none};
 	directives relay_mask{directives::none};
@@ -1454,30 +1598,37 @@ struct directive_modifier
 	}
 };
 
-struct accept_cut_expression : terminal_encoder_expression_interface<accept_cut_expression, effect_traits::cuts>
+struct accept_cut_expression : leaf_expression_node_interface<accept_cut_expression>
 {
+	static constexpr effect_traits static_effects = effect_traits::cuts;
+	static constexpr certainty static_nofail = certainty::always;
+	static constexpr certainty static_nullable = certainty::always;
 	std::uint_least8_t imm8;
 	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
 	void evaluate(encoder& d) const { d.encode(opcode::accept, 0, imm8); }
 };
 
-struct eoi_expression : terminal_encoder_expression_interface<eoi_expression, match_traits::nullable>
+struct eoi_expression : leaf_expression_node_interface<eoi_expression>
 {
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
 	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
 };
 
-struct eol_expression : terminal_encoder_expression_interface<eol_expression>
+struct eol_expression : leaf_expression_node_interface<eol_expression>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); }
 };
 
-struct eps_expression : terminal_encoder_expression_interface<eps_expression, match_traits::nullable | match_traits::nofail>
+struct eps_expression : leaf_expression_node_interface<eps_expression>
 {
+	static constexpr certainty static_nofail = certainty::always;
+	static constexpr certainty static_nullable = certainty::always;
 	void evaluate(encoder& /*d*/) const {}
 };
 
 template <class Property>
-struct match_class_expression : terminal_encoder_expression_interface<match_class_expression<Property>>
+struct match_class_expression : leaf_expression_node_interface<match_class_expression<Property>>
 {
 	opcode mop;
 	Property property;
@@ -1493,23 +1644,27 @@ struct match_class_combinator
 	[[nodiscard]] constexpr match_class_expression<std::decay_t<Property>> operator()(Property prop) const { return match_class_expression<std::decay_t<Property>>{mop, prop}; }
 };
 
-struct match_any_expression : terminal_encoder_expression_interface<match_any_expression>, match_class_combinator
+struct match_any_expression : leaf_expression_node_interface<match_any_expression>, match_class_combinator
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
 	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::match_any); }
 };
 
 template <ascii::ctype Property>
-struct ascii_ctype_expression : terminal_encoder_expression_interface<ascii_ctype_expression<Property>>
+struct ascii_ctype_expression : leaf_expression_node_interface<ascii_ctype_expression<Property>>
 {
+	static constexpr certainty static_head_optimizable = certainty::always;
+
 	void evaluate(encoder& d) const
 	{
-		if constexpr (Property == ascii::ctype::blank)
+		if constexpr (Property == ascii::ctype::blank) {
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
-		else if constexpr (Property == ascii::ctype::space)
+		} else if constexpr (Property == ascii::ctype::space) {
 			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
-		else
+		} else {
 			d.match_set(make_rune_set(d.mode()));
+		}
 	}
 
 	[[nodiscard]] rune_set make_rune_set([[maybe_unused]] directives mode = directives::none) const
@@ -1519,32 +1674,36 @@ struct ascii_ctype_expression : terminal_encoder_expression_interface<ascii_ctyp
 };
 
 template <unicode::ctype Property>
-struct unicode_ctype_expression : terminal_encoder_expression_interface<unicode_ctype_expression<Property>>
+struct unicode_ctype_expression : leaf_expression_node_interface<unicode_ctype_expression<Property>>
 {
+	static constexpr certainty static_head_optimizable = ((Property == unicode::ctype::blank) || (Property == unicode::ctype::space)) ? certainty::always : certainty::never;
+
 	void evaluate(encoder& d) const
 	{
-		if constexpr (Property == unicode::ctype::blank)
-			d.skip(directives::lexeme | directives::eps).encode_class(opcode::match_any_of, Property);
-		else if constexpr (Property == unicode::ctype::space)
-			d.skip(directives::lexeme | directives::eps).encode_class(opcode::match_any_of, Property);
-		else
+		if constexpr (Property == unicode::ctype::blank) {
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_set, d.add_rune_set(unicode::blank_rune_set()));
+		} else if constexpr (Property == unicode::ctype::space) {
+			d.skip(directives::lexeme | directives::eps).encode(opcode::match_set, d.add_rune_set(unicode::space_rune_set()));
+		} else {
 			d.match_class(opcode::match_any_of, Property);
+		}
 	}
+};
+
+struct condition_test_expression : leaf_expression_node_interface<condition_test_expression>
+{
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	std::string_view name;
+	std::uint_least8_t imm8;
+	constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
+	void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
 };
 
 struct condition_test_combinator
 {
 	std::uint_least8_t imm8;
 	constexpr explicit condition_test_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
-
-	struct condition_test_expression : terminal_encoder_expression_interface<condition_test_expression, match_traits::nullable>
-	{
-		std::string_view name;
-		std::uint_least8_t imm8;
-		constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
-		void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
-	};
-
 	[[nodiscard]] constexpr condition_test_expression operator()(std::string_view name) const noexcept { return condition_test_expression{name, imm8}; }
 };
 
@@ -1554,9 +1713,9 @@ struct condition_block_combinator
 	constexpr explicit condition_block_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
 
 	template <class E1>
-	struct condition_block_expression : unary_encoder_expression_interface<condition_block_expression<E1>, E1>
+	struct condition_block_expression : unary_expression_node_interface<condition_block_expression<E1>, E1>
 	{
-		using base_type = unary_encoder_expression_interface<condition_block_expression<E1>, E1>;
+		using base_type = unary_expression_node_interface<condition_block_expression<E1>, E1>;
 		using base_type::base_type;
 		std::string_view name;
 		std::uint_least8_t imm8;
@@ -1586,20 +1745,30 @@ struct condition_block_combinator
 	[[nodiscard]] constexpr condition_block_group operator()(std::string_view name) const noexcept { return condition_block_group{name, imm8}; }
 };
 
+struct symbol_exists_expression : leaf_expression_node_interface<symbol_exists_expression>
+{
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	std::string_view name;
+	std::uint_least8_t imm8;
+	constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
+	void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
+};
+
 struct symbol_exists_combinator
 {
 	std::uint_least8_t imm8;
 	constexpr explicit symbol_exists_combinator(bool value) noexcept : imm8{static_cast<std::uint_least8_t>(value ? 1 : 0)} {}
-
-	struct symbol_exists_expression : terminal_encoder_expression_interface<symbol_exists_expression, match_traits::nullable>
-	{
-		std::string_view name;
-		std::uint_least8_t imm8;
-		constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
-		void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
-	};
-
 	[[nodiscard]] constexpr symbol_exists_expression operator()(std::string_view name) const noexcept { return symbol_exists_expression{name, imm8}; }
+};
+
+struct symbol_match_expression : leaf_expression_node_interface<symbol_match_expression>
+{
+	opcode mop;
+	opcode mopcf;
+	std::string_view name;
+	constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
+	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name);}
 };
 
 struct symbol_match_combinator
@@ -1607,17 +1776,17 @@ struct symbol_match_combinator
 	opcode mop;
 	opcode mopcf;
 	constexpr symbol_match_combinator(opcode op, opcode opcf) noexcept : mop{op}, mopcf{opcf} {}
-
-	struct symbol_match_expression : terminal_encoder_expression_interface<symbol_match_expression>
-	{
-		opcode mop;
-		opcode mopcf;
-		std::string_view name;
-		constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
-		void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name);}
-	};
-
 	[[nodiscard]] constexpr symbol_match_expression operator()(std::string_view name) const noexcept { return symbol_match_expression{mop, mopcf, name}; }
+};
+
+struct symbol_match_offset_expression : leaf_expression_node_interface<symbol_match_offset_expression>
+{
+	opcode mop;
+	opcode mopcf;
+	std::string_view name;
+	std::uint_least8_t offset;
+	constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
+	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); }
 };
 
 struct symbol_match_offset_combinator
@@ -1625,50 +1794,16 @@ struct symbol_match_offset_combinator
 	opcode mop;
 	opcode mopcf;
 	constexpr symbol_match_offset_combinator(opcode op, opcode opcf) noexcept : mop{op}, mopcf{opcf} {}
-
-	struct symbol_match_offset_expression : terminal_encoder_expression_interface<symbol_match_offset_expression>
-	{
-		opcode mop;
-		opcode mopcf;
-		std::string_view name;
-		std::uint_least8_t offset;
-		constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
-		void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); }
-	};
-
-	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const
-	{
-		return symbol_match_offset_expression{mop, mopcf, name, detail::checked_cast<std::uint_least8_t, resource_limit_error>(offset)};
-	}
+	[[nodiscard]] constexpr symbol_match_offset_expression operator()(std::string_view name, std::size_t offset = 0) const { return symbol_match_offset_expression{mop, mopcf, name, detail::checked_cast<std::uint_least8_t, resource_limit_error>(offset)}; }
 };
 
-template <class E1> struct negative_lookahead_expression;
-template <class E1> struct positive_lookahead_expression;
-template <class E1, std::size_t NMin, std::size_t NMax> struct repetition_expression;
-template <class E1, class E2> struct choice_expression;
-template <class E1, class E2> struct sequence_expression;
-
-template <class E>
-inline constexpr bool is_expression_always_head_optimizable_v =
-	std::is_same_v<E, char_expression> ||
-	std::is_same_v<E, rune_expression> ||
-	std::is_same_v<E, rune_range_expression> ||
-	std::is_same_v<E, rune_set_expression> ||
-	std::is_same_v<E, bracket_expression> ||
-	std::is_same_v<E, match_any_expression> ||
-	detail::is_template_non_type_instantiation_of_v<E, ascii_ctype_expression>;
-
-template <class E>
-inline constexpr bool is_expression_maybe_head_optimizable_v =
-	detail::is_template_instantiation_of_v<E, positive_lookahead_expression> ||
-	detail::is_template_instantiation_of_v<E, choice_expression> ||
-	detail::is_template_instantiation_of_v<E, sequence_expression>;
-	// TODO: callable, capture/attribute bindings, condition and symbol blocks
-
 template <class E1>
-struct negative_lookahead_expression : unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>
+struct negative_lookahead_expression : unary_expression_node_interface<negative_lookahead_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<negative_lookahead_expression<E1>, E1>;
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = certainty::never;
+	using base_type = unary_expression_node_interface<negative_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -1680,14 +1815,15 @@ struct negative_lookahead_expression : unary_encoder_expression_interface<negati
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
 	}
-
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return (this->e1.matches() & ~match_traits::nofail) | match_traits::nullable; }
 };
 
 template <class E1>
-struct positive_lookahead_expression : unary_encoder_expression_interface<positive_lookahead_expression<E1>, E1>
+struct positive_lookahead_expression : unary_expression_node_interface<positive_lookahead_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<positive_lookahead_expression<E1>, E1>;
+	static constexpr certainty static_nofail = E1::static_nofail;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
+	using base_type = unary_expression_node_interface<positive_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -1700,8 +1836,6 @@ struct positive_lookahead_expression : unary_encoder_expression_interface<positi
 		d.jump_to_here(choice);
 		d.encode(opcode::fail, 0, 1);
 	}
-
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return this->e1.matches() | match_traits::nullable; }
 };
 
 template <class E>
@@ -1765,15 +1899,47 @@ template <class E>
 	}
 }
 
-template <class E1, std::size_t NMin, std::size_t NMax>
-struct repetition_expression : unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>
+template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
+constexpr void repetition_validate_forward_progress(E const& e)
 {
-	static_assert((NMin > 0) && (NMin < NMax) && (NMax <= max_repetitions));
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, NMax>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	if constexpr (E::static_nofail == certainty::maybe) {
+		if LUG_UNLIKELY(is_expression_nofail(e)) {
+			lug::throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
+		}
+	}
+	if constexpr (E::static_nullable == certainty::maybe) {
+		if LUG_UNLIKELY(is_expression_nullable(e)) {
+			lug::throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be nullable");
+		}
+	}
+}
+
+template <class Derived, class E1, std::size_t NMin, std::size_t NMax>
+struct repetition_expression_base : unary_expression_node_interface<Derived, E1>
+{
+	static_assert(NMin <= NMax, "repetition minimum is greater than maximum");
+	static_assert(NMin <= max_repetitions, "repetition minimum is out of bounds");
+	static_assert((NMax <= max_repetitions) || (NMax == forever), "repetition maximum is out of bounds");
+	static_assert(E1::static_nofail != certainty::always, "non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
+	static_assert(E1::static_nullable != certainty::always, "non-progressing infinite loop: repetition sub-expression must not be potentially nullable");
+	static constexpr certainty static_nofail = (NMin == 0) ? certainty::always : certainty::never;
+	static constexpr certainty static_nullable = (NMin == 0) ? certainty::always : certainty::never;
+	static constexpr certainty static_head_optimizable = certainty::never;
+	using base_type = unary_expression_node_interface<Derived, E1>;
+	using base_type::base_type;
+};
+
+template <class E1, std::size_t NMin, std::size_t NMax>
+struct repetition_expression : repetition_expression_base<repetition_expression<E1, NMin, NMax>, E1, NMin, NMax>
+{
+	static_assert((NMin >= 1) && (NMin < NMax) && (NMax <= max_repetitions));
+	using base_type = repetition_expression_base<repetition_expression<E1, NMin, NMax>, E1, NMin, NMax>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
 				return;
@@ -1798,14 +1964,16 @@ struct repetition_expression : unary_encoder_expression_interface<repetition_exp
 };
 
 template <class E1, std::size_t NCount>
-struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>
+struct repetition_expression<E1, NCount, NCount> : repetition_expression_base<repetition_expression<E1, NCount, NCount>, E1, NCount, NCount>
 {
 	static_assert((NCount > 1) && (NCount <= max_repetitions));
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NCount, NCount>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	using base_type = repetition_expression_base<repetition_expression<E1, NCount, NCount>, E1, NCount, NCount>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
 				return;
@@ -1823,14 +1991,16 @@ struct repetition_expression<E1, NCount, NCount> : unary_encoder_expression_inte
 };
 
 template <class E1, std::size_t NMin>
-struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>
+struct repetition_expression<E1, NMin, forever> : repetition_expression_base<repetition_expression<E1, NMin, forever>, E1, NMin, forever>
 {
 	static_assert((NMin > 1) && (NMin <= max_repetitions));
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, NMin, forever>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	using base_type = repetition_expression_base<repetition_expression<E1, NMin, forever>, E1, NMin, forever>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, forever))
 				return;
@@ -1854,15 +2024,16 @@ struct repetition_expression<E1, NMin, forever> : unary_encoder_expression_inter
 };
 
 template <class E1, std::size_t NMax>
-struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>
+struct repetition_expression<E1, 0, NMax> : repetition_expression_base<repetition_expression<E1, 0, NMax>, E1, 0, NMax>
 {
 	static_assert((NMax > 0) && (NMax <= max_repetitions));
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, NMax>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	using base_type = repetition_expression_base<repetition_expression<E1, 0, NMax>, E1, 0, NMax>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, NMax))
 				return;
@@ -1885,24 +2056,24 @@ struct repetition_expression<E1, 0, NMax> : unary_encoder_expression_interface<r
 };
 
 template <class E1>
-struct repetition_expression<E1, 0, 0> : unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>
+struct repetition_expression<E1, 0, 0> : repetition_expression_base<repetition_expression<E1, 0, 0>, E1, 0, 0>
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 0>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	static constexpr effect_traits static_effects = effect_traits::none;
+	using base_type = repetition_expression_base<repetition_expression<E1, 0, 0>, E1, 0, 0>;
+	using base_type::base_type;
 	void evaluate(encoder& /*d*/) const {}
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return effect_traits::none; }
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
 };
 
 template <class E1>
-struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>
+struct repetition_expression<E1, 0, 1> : repetition_expression_base<repetition_expression<E1, 0, 1>, E1, 0, 1>
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, 1>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	using base_type = repetition_expression_base<repetition_expression<E1, 0, 1>, E1, 0, 1>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, 1))
 				return;
@@ -1917,14 +2088,15 @@ struct repetition_expression<E1, 0, 1> : unary_encoder_expression_interface<repe
 };
 
 template <class E1>
-struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>
+struct repetition_expression<E1, 0, forever> : repetition_expression_base<repetition_expression<E1, 0, forever>, E1, 0, forever>
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 0, forever>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	[[nodiscard]] constexpr match_traits matches() const noexcept { return match_traits::nullable | match_traits::nofail; }
+	using base_type = repetition_expression_base<repetition_expression<E1, 0, forever>, E1, 0, forever>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, forever))
 				return;
@@ -1941,21 +2113,29 @@ struct repetition_expression<E1, 0, forever> : unary_encoder_expression_interfac
 };
 
 template <class E1>
-struct repetition_expression<E1, 1, 1> : unary_encoder_expression_interface<repetition_expression<E1, 1, 1>, E1>
+struct repetition_expression<E1, 1, 1> : repetition_expression_base<repetition_expression<E1, 1, 1>, E1, 1, 1>
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 1>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
-	void evaluate(encoder& d) const { this->e1.evaluate(d); }
-};
-
-template <class E1>
-struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repetition_expression<E1, 1, 2>, E1>
-{
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, 2>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	using base_type = repetition_expression_base<repetition_expression<E1, 1, 1>, E1, 1, 1>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
+		this->e1.evaluate(d);
+	}
+};
+
+template <class E1>
+struct repetition_expression<E1, 1, 2> : repetition_expression_base<repetition_expression<E1, 1, 2>, E1, 1, 2>
+{
+	using base_type = repetition_expression_base<repetition_expression<E1, 1, 2>, E1, 1, 2>;
+	using base_type::base_type;
+
+	void evaluate(encoder& d) const
+	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 1, 2))
 				return;
@@ -1971,13 +2151,15 @@ struct repetition_expression<E1, 1, 2> : unary_encoder_expression_interface<repe
 };
 
 template <class E1>
-struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interface<repetition_expression<E1, 1, forever>, E1>
+struct repetition_expression<E1, 1, forever> : repetition_expression_base<repetition_expression<E1, 1, forever>, E1, 1, forever>
 {
-	using base_type = unary_encoder_expression_interface<repetition_expression<E1, 1, forever>, E1>;
-	constexpr explicit repetition_expression(E1 const& e) : base_type{e} {}
+	using base_type = repetition_expression_base<repetition_expression<E1, 1, forever>, E1, 1, forever>;
+	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
+		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
+			repetition_validate_forward_progress(this->e1);
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 1, forever))
 				return;
@@ -1997,10 +2179,6 @@ struct repetition_expression<E1, 1, forever> : unary_encoder_expression_interfac
 template <std::size_t NMin, std::size_t NMax>
 struct repetition_combinator
 {
-	static_assert((NMin <= NMax), "min count must be less than or equal to max count");
-	static_assert((NMin <= max_repetitions), "min count must be less than or equal to max repetitions");
-	static_assert(((NMax <= max_repetitions) || (NMax == forever)), "max count must be less than or equal to max repetitions or forever");
-
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
@@ -2009,9 +2187,12 @@ struct repetition_combinator
 };
 
 template <class E1, class E2>
-struct choice_expression : binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>
+struct choice_expression : binary_expression_node_interface<choice_expression<E1, E2>, E1, E2>
 {
-	using base_type = binary_encoder_expression_interface<choice_expression<E1, E2>, E1, E2>;
+	static constexpr certainty static_nofail  = static_certainty_or(E1::static_nofail, E2::static_nofail);
+	static constexpr certainty static_nullable = static_certainty_or(E1::static_nullable, E2::static_nullable);
+	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_head_optimizable);
+	using base_type = binary_expression_node_interface<choice_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -2028,19 +2209,74 @@ struct choice_expression : binary_encoder_expression_interface<choice_expression
 		d.jump_to_here(commit);
 	}
 
-	[[nodiscard]] constexpr match_traits matches() const noexcept
+	[[nodiscard]] constexpr bool nofail() const noexcept
 	{
-		auto const matches1 = this->e1.matches();
-		if (matches1 == match_traits::all)
-			return match_traits::all;
-		return matches1 | this->e2.matches();
+		if constexpr (E2::static_nofail == certainty::always) {
+			return true;
+		} else {
+			if constexpr (E2::static_nofail == certainty::maybe) {
+				if (lug::is_expression_nofail(this->e2)) {
+					return true;
+				}
+			}
+			if constexpr (E1::static_nofail == certainty::maybe) {
+				return lug::is_expression_nofail(this->e1);
+			} else if constexpr (E1::static_nofail == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+
+	[[nodiscard]] constexpr bool nullable() const noexcept
+	{
+		if constexpr (E2::static_nullable == certainty::always) {
+			return true;
+		} else {
+			if constexpr (E2::static_nullable == certainty::maybe) {
+				if (lug::is_expression_nullable(this->e2)) {
+					return true;
+				}
+			}
+			if constexpr (E1::static_nullable == certainty::maybe) {
+				return lug::is_expression_nullable(this->e1);
+			} else if constexpr (E1::static_nullable == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept
+	{
+		if constexpr (E1::static_head_optimizable == certainty::never) {
+			return false;
+		} else {
+			if constexpr (E1::static_head_optimizable == certainty::maybe) {
+				if (!lug::is_expression_head_optimizable(this->e1)) {
+					return false;
+				}
+			}
+			if constexpr (E2::static_head_optimizable == certainty::maybe) {
+				return lug::is_expression_head_optimizable(this->e2);
+			} else if constexpr (E2::static_head_optimizable == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
 	}
 };
 
 template <class E1, class E2>
-struct sequence_expression : binary_encoder_expression_interface<sequence_expression<E1, E2>, E1, E2>
+struct sequence_expression : binary_expression_node_interface<sequence_expression<E1, E2>, E1, E2>
 {
-	using base_type = binary_encoder_expression_interface<sequence_expression<E1, E2>, E1, E2>;
+	static constexpr certainty static_nofail  = static_certainty_and(E1::static_nofail, E2::static_nofail);
+	static constexpr certainty static_nullable = static_certainty_and(E1::static_nullable, E2::static_nullable);
+	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_nofail);
+	using base_type = binary_expression_node_interface<sequence_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -2051,19 +2287,71 @@ struct sequence_expression : binary_encoder_expression_interface<sequence_expres
 		d.dpop(directives::eps);
 	}
 
-	[[nodiscard]] constexpr match_traits matches() const noexcept
+	[[nodiscard]] constexpr bool nofail() const noexcept
 	{
-		auto const matches1 = this->e1.matches();
-		if (matches1 == match_traits::none)
-			return match_traits::none;
-		return matches1 & this->e2.matches();
+		if constexpr (E1::static_nofail == certainty::never) {
+			return false;
+		} else {
+			if constexpr (E1::static_nofail == certainty::maybe) {
+				if (!lug::is_expression_nofail(this->e1)) {
+					return false;
+				}
+			}
+			if constexpr (E2::static_nofail == certainty::maybe) {
+				return lug::is_expression_nofail(this->e2);
+			} else if constexpr (E2::static_nofail == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+
+	[[nodiscard]] constexpr bool nullable() const noexcept
+	{
+		if constexpr (E1::static_nullable == certainty::never) {
+			return false;
+		} else {
+			if constexpr (E1::static_nullable == certainty::maybe) {
+				if (!lug::is_expression_nullable(this->e1)) {
+					return false;
+				}
+			}
+			if constexpr (E2::static_nullable == certainty::maybe) {
+				return lug::is_expression_nullable(this->e2);
+			} else if constexpr (E2::static_nullable == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+
+	[[nodiscard]] constexpr bool head_optimizable() const noexcept
+	{
+		if constexpr (E2::static_nofail == certainty::never) {
+			return false;
+		} else {
+			if constexpr (E2::static_nofail == certainty::maybe) {
+				if (!lug::is_expression_nofail(this->e2)) {
+					return false;
+				}
+			}
+			if constexpr (E1::static_head_optimizable == certainty::maybe) {
+				return lug::is_expression_head_optimizable(this->e1);
+			} else if constexpr (E1::static_head_optimizable == certainty::always) {
+				return true;
+			} else {
+				return false;
+			}
+		}
 	}
 };
 
 template <class Derived, class E1, class Operand>
-struct attribute_action_expression : unary_encoder_expression_interface<Derived, E1>
+struct attribute_action_expression : unary_expression_node_interface<Derived, E1>
 {
-	using base_type = unary_encoder_expression_interface<Derived, E1>;
+	using base_type = unary_expression_node_interface<Derived, E1>;
 	using base_type::base_type;
 	Operand operand;
 	template <class X1, class O> constexpr attribute_action_expression(X1&& x1, O&& o) : base_type{std::forward<X1>(x1)}, operand(std::forward<O>(o)) {}
@@ -2095,6 +2383,7 @@ struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, T
 template <class E1, class Action>
 struct action_expression : attribute_action_expression<action_expression<E1, Action>, E1, Action>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action;
 	using base_type = attribute_action_expression<action_expression<E1, Action>, E1, Action>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
@@ -2106,18 +2395,19 @@ struct action_expression : attribute_action_expression<action_expression<E1, Act
 template <class E1, class Action>
 struct capture_expression : attribute_action_expression<capture_expression<E1, Action>, E1, Action>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::captures;
 	using base_type = attribute_action_expression<capture_expression<E1, Action>, E1, Action>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1, class Target>
 struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	using base_type = attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
@@ -2129,29 +2419,29 @@ struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<
 template <class E1, class Target>
 struct capture_to_expression : attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding | effect_traits::captures;
 	using base_type = attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1>
-struct symbol_assign_expression : unary_encoder_expression_interface<symbol_assign_expression<E1>, E1>
+struct symbol_assign_expression : unary_expression_node_interface<symbol_assign_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<symbol_assign_expression<E1>, E1>;
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::captures;
+	using base_type = unary_expression_node_interface<symbol_assign_expression<E1>, E1>;
 	std::string_view name;
 	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : base_type{std::forward<X1>(x1)}, name{n} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::symbol_start, name); this->e1.evaluate(d); d.encode(opcode::symbol_end); }
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return this->e1.effects() | effect_traits::captures; }
 };
 
 template <class E1>
-struct symbol_block_expression : unary_encoder_expression_interface<symbol_block_expression<E1>, E1>
+struct symbol_block_expression : unary_expression_node_interface<symbol_block_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<symbol_block_expression<E1>, E1>;
+	using base_type = unary_expression_node_interface<symbol_block_expression<E1>, E1>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -2163,9 +2453,9 @@ struct symbol_block_expression : unary_encoder_expression_interface<symbol_block
 };
 
 template <class E1>
-struct local_block_expression : unary_encoder_expression_interface<local_block_expression<E1>, E1>
+struct local_block_expression : unary_expression_node_interface<local_block_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<local_block_expression<E1>, E1>;
+	using base_type = unary_expression_node_interface<local_block_expression<E1>, E1>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
@@ -2177,9 +2467,9 @@ struct local_block_expression : unary_encoder_expression_interface<local_block_e
 };
 
 template <class E1>
-struct local_to_block_expression : unary_encoder_expression_interface<local_to_block_expression<E1>, E1>
+struct local_to_block_expression : unary_expression_node_interface<local_to_block_expression<E1>, E1>
 {
-	using base_type = unary_encoder_expression_interface<local_to_block_expression<E1>, E1>;
+	using base_type = unary_expression_node_interface<local_to_block_expression<E1>, E1>;
 	using base_type::base_type;
 	std::string_view name;
 	template <class X1> constexpr local_to_block_expression(X1&& x1, std::string_view n) noexcept : base_type{std::forward<X1>(x1)}, name{n} {}
@@ -2229,11 +2519,12 @@ template <class Container, class... As, std::size_t... Is>
 }
 
 template <class E1, class Container, class... ElementArgs>
-struct collect_expression : unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>
+struct collect_expression : unary_expression_node_interface<collect_expression<E1, Container, ElementArgs...>, E1>
 {
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression" );
 	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types" );
-	using base_type = unary_encoder_expression_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
+	using base_type = unary_expression_node_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
 	template <class X1, class C, class... As> constexpr collect_expression(X1&& x1, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
 	void evaluate(encoder& d) const
@@ -2252,19 +2543,21 @@ struct collect_combinator
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
-		if constexpr (sizeof...(ElementArgs) == 0)
+		if constexpr (sizeof...(ElementArgs) == 0) {
 			return collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<typename Container::value_type>};
-		else
+		} else {
 			return collect_expression{make_expression(e), std::in_place_type<Container>, std::in_place_type<ElementArgs>...};
+		}
 	}
 };
 
 template <class E1, class Factory, class T, class... Args>
-struct synthesize_expression : unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>
+struct synthesize_expression : unary_expression_node_interface<synthesize_expression<E1, Factory, T, Args...>, E1>
 {
 	static_assert(sizeof...(Args) > 0, "no arguments types provided to synthesize expression" );
 	static_assert(std::is_constructible_v<T, std::decay_t<Args>...>, "synthesized type T does not support the provided constructor arguments" );
-	using base_type = unary_encoder_expression_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
+	using base_type = unary_expression_node_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
 	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
 	void evaluate(encoder& d) const
@@ -2291,20 +2584,22 @@ struct synthesize_combinator
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
-		if constexpr (sizeof...(Args) == 0)
+		if constexpr (sizeof...(Args) == 0) {
 			return synthesize_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<T>};
-		else
+		} else {
 			return synthesize_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Args>...};
+		}
 	}
 };
 
 template <class E1, class Factory, class T, class Container, class... ElementArgs>
-struct synthesize_collect_expression : unary_encoder_expression_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>
+struct synthesize_collect_expression : unary_expression_node_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>
 {
 	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression");
 	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types");
 	static_assert(std::is_constructible_v<T, Container>, "synthesized type T not constructible from Container type argument");
-	using base_type = unary_encoder_expression_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>;
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
+	using base_type = unary_expression_node_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>;
 	template <class X1, class F, class V, class C, class... As> constexpr synthesize_collect_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<V> /*v*/, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
 	void evaluate(encoder& d) const
@@ -2323,10 +2618,11 @@ struct synthesize_collect_combinator
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
 	[[nodiscard]] constexpr auto operator[](E const& e) const noexcept
 	{
-		if constexpr (sizeof...(ElementArgs) == 0)
+		if constexpr (sizeof...(ElementArgs) == 0) {
 			return synthesize_collect_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>, std::in_place_type<typename Container::value_type>};
-		else
+		} else {
 			return synthesize_collect_expression{make_expression(e), std::in_place_type<Factory>, std::in_place_type<T>, std::in_place_type<Container>, std::in_place_type<ElementArgs>...};
+		}
 	}
 };
 

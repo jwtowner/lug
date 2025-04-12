@@ -15,7 +15,8 @@
 
 namespace lug {
 
-using ascii_bitset = std::bitset<128>;
+constexpr std::size_t ascii_bitset_size = 128;
+using ascii_bitset = std::bitset<ascii_bitset_size>;
 
 class rune_pattern;
 class rune_set;
@@ -631,7 +632,7 @@ private:
 	using storage_type = std::variant<std::monostate, allstate, char32_t, rune_set, std::reference_wrapper<const rune_set>>;
 
 	template <class T, class... Args>
-	explicit constexpr rune_pattern(std::in_place_type_t<T>, Args&&... args) noexcept(std::is_nothrow_constructible_v<storage_type, std::in_place_type_t<T>, Args&&...>)
+	explicit constexpr rune_pattern(std::in_place_type_t<T> /*unused*/, Args&&... args) noexcept(std::is_nothrow_constructible_v<storage_type, std::in_place_type_t<T>, Args&&...>)
 		: data_{std::in_place_type<T>, std::forward<T>(args)...}
 	{}
 
@@ -665,7 +666,7 @@ namespace detail {
 
 namespace ascii {
 
-[[nodiscard]] rune_set ctype_rune_set(ctype properties) noexcept
+[[nodiscard]] inline rune_set ctype_rune_set(ctype properties) noexcept
 {
 	ascii_bitset result;
 	for (std::size_t i = 0; i < result.size(); ++i) {

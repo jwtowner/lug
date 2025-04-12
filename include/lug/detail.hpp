@@ -72,20 +72,6 @@ LUG_ALWAYS_INLINE constexpr T& operator^=(T& x, T y) noexcept
 
 } // namespace flag_enum_ops
 
-template <class ValueType, class DefaultValueType, class = std::enable_if_t<is_flag_enum_v<DefaultValueType>>>
-[[nodiscard]] constexpr auto flag_enum_pack_extract_value(ValueType value, DefaultValueType default_value) -> DefaultValueType
-{
-	if constexpr (std::is_same_v<std::decay_t<ValueType>, std::decay_t<DefaultValueType>>) {
-		return value;
-	} else {
-		return default_value;
-	}
-}
-
-template <class T, auto... Values> inline constexpr bool has_flag_enum_in_pack_v = (false || ... || std::is_same_v<T, std::decay_t<decltype(Values)>>);
-template <auto Mask, auto... Values> inline constexpr auto flag_enum_fold_pack_and_v = (Mask & ... & (flag_enum_pack_extract_value(Values, Mask)));
-template <auto Mask, auto... Values> inline constexpr auto flag_enum_fold_pack_or_v = (Mask | ... | (flag_enum_pack_extract_value(Values, Mask)));
-
 namespace detail {
 
 template <class T> inline constexpr bool always_false_v = false;

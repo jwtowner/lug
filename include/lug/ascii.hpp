@@ -21,19 +21,19 @@ namespace lug::ascii {
 enum class ctype : std::uint_least16_t
 {
 	none     = 0,
-	alpha    = UINT16_C(1) <<  0,
-	lower    = UINT16_C(1) <<  1,
-	upper    = UINT16_C(1) <<  2,
-	punct    = UINT16_C(1) <<  3,
-	digit    = UINT16_C(1) <<  4,
-	xdigit   = UINT16_C(1) <<  5,
-	alnum    = UINT16_C(1) <<  6,
-	space    = UINT16_C(1) <<  7,
-	blank    = UINT16_C(1) <<  8,
-	cntrl    = UINT16_C(1) <<  9,
-	graph    = UINT16_C(1) << 10,
-	print    = UINT16_C(1) << 11,
-	word     = UINT16_C(1) << 12
+	alpha    = 1U <<  0U,
+	lower    = 1U <<  1U,
+	upper    = 1U <<  2U,
+	punct    = 1U <<  3U,
+	digit    = 1U <<  4U,
+	xdigit   = 1U <<  5U,
+	alnum    = 1U <<  6U,
+	space    = 1U <<  7U,
+	blank    = 1U <<  8U,
+	cntrl    = 1U <<  9U,
+	graph    = 1U << 10U,
+	print    = 1U << 11U,
+	word     = 1U << 12U
 };
 
 } // namespace lug::ascii
