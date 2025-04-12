@@ -14,7 +14,7 @@ class json_matcher
 public:
 	json_matcher()
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		rule JSON;
 		auto ExponentPart   = lexeme[ "Ee"_bx > ~"+-"_bx > +"0-9"_bx ];
 		auto FractionalPart = lexeme[ '.'_cx > +"0-9"_bx ];

@@ -1178,13 +1178,6 @@ R"c++(// lug - Embedded DSL for PE grammar parser combinators in C++
 
 namespace lug::unicode {
 
-static constexpr char32_t ascii_limit = 0x80U;
-
-[[nodiscard]] constexpr bool is_ascii(char32_t r) noexcept
-{
-	return r < ascii_limit;
-}
-
 // NOLINTBEGIN(hicpp-signed-bitwise)
 )c++"
 << "\n"

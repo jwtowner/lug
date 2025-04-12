@@ -10,7 +10,7 @@
 
 void test_simple_predicates()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = "a"_sx > [](environment&){ return false; } | [](environment&){ return true; } > "ab";
 	grammar G = start(S > eoi);
 	assert(!lug::parse("a", G));
@@ -19,7 +19,7 @@ void test_simple_predicates()
 
 void test_match_size_predicate()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = +("a"_sx > [](environment& e){ return e.match().size() <= 4; });
 	grammar G = start(S > eoi);
 	assert(!lug::parse("", G));

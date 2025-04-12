@@ -10,7 +10,7 @@
 
 void test_direct_left_recursion()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule R, S;
 	R = R > chr('a') | chr('a');
 	S = R > !chr('a');
@@ -28,7 +28,7 @@ void test_direct_left_recursion()
 
 void test_indirect_left_recursion()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule Q, R, S;
 	Q = R > chr('a');
 	R = Q | chr('a');
@@ -47,7 +47,7 @@ void test_indirect_left_recursion()
 
 void test_association_and_precedence()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	std::string out;
 	rule N, E, S;
 	N = chr('1') | chr('2') | chr('3');
@@ -76,7 +76,7 @@ void test_association_and_precedence()
 /* NOTE: Medeiros' algorithm doesn't appear to support hidden left recursion
 void test_hidden_left_recursion()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule R = *chr('b') > R > chr('a') | chr('a');
 	rule S = R > !(chr('a') | chr('b'));
 	grammar G = start(S, eps);

@@ -56,7 +56,7 @@ void test_line_column_tracking()
 	// Create a grammar that tracks positions of specific words
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 
 		// Define a rule that matches words and captures positions of specific words
 		rule Word = lexeme[
@@ -128,7 +128,7 @@ struct test_environment : public lug::environment
 
 void test_environment_callbacks()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Create a simple grammar
 	grammar G = start(+bkt("a-z") > eoi);

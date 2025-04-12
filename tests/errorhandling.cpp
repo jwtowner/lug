@@ -14,7 +14,7 @@ using namespace std::string_view_literals;
 
 void test_simple_error_no_recovery()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define grammar rule that matches:
 	// - Zero or more 'A's followed by 'B'
@@ -43,7 +43,7 @@ void test_simple_error_no_recovery()
 
 void test_simple_error_recovery()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define recovery rule that accepts "XYZ" without skipping whitespace
 	rule TermRecovery = noskip[str("XYZ") ^ error_response::accept];
@@ -60,7 +60,7 @@ void test_simple_error_recovery()
 
 void test_simple_error_handling()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Variables to capture error information
 	syntax error_syntax;
@@ -98,7 +98,7 @@ void test_simple_error_handling()
 
 void test_calculator_errors_no_recovery()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define error handler that captures output
 	std::ostringstream error_output;
@@ -186,7 +186,7 @@ void test_calculator_errors_no_recovery()
 
 void test_calculator_errors_with_recovery_resume()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define error handler that captures output
 	std::ostringstream error_output;
@@ -294,7 +294,7 @@ void test_calculator_errors_with_recovery_resume()
 
 void test_calculator_errors_with_recovery_accept()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define error handler that captures output
 	std::ostringstream error_output;
@@ -400,7 +400,7 @@ void test_calculator_errors_with_recovery_accept()
 
 void test_error_suppression_in_negative_lookahead()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	environment E;
 
@@ -428,7 +428,7 @@ void test_error_suppression_in_negative_lookahead()
 
 void test_error_suppression_in_positive_lookahead()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// Define a handler that will be called when the error is raised
 	bool error_handler_called{false};

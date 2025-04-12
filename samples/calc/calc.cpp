@@ -9,7 +9,7 @@
 
 namespace samples::calc {
 
-using namespace lug::language;
+using namespace lug::dsl;
 
 int i;
 double e, l, n, r, s;

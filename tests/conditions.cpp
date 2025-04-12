@@ -10,7 +10,7 @@
 
 void test_condition()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule S;
 
@@ -38,7 +38,7 @@ void test_condition()
 
 void test_condition_block()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule S;
 

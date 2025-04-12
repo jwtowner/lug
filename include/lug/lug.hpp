@@ -37,6 +37,7 @@ template <class> class basic_parser;
 template <class> class failure;
 template <class> class recover_with;
 template <class> class recursive_wrapper;
+[[nodiscard]] grammar start(rule const& start_rule);
 [[nodiscard]] grammar start(rule const& start_rule, rule const& skip_rule);
 
 enum class error_response : std::uint_least8_t { halt, resume, accept, backtrack, rethrow };
@@ -1066,9 +1067,9 @@ public:
 		mode_.pop_back();
 	}
 
-	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives skip_ignore = directives::lexeme) const
+	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme) const
 	{
-		return ((((mode_.back() | callee_mode)) & (skip_ignore | directives::preskip)) == directives::preskip);
+		return ((((mode_.back() | callee_mode)) & (inhibit_mask | directives::preskip)) == directives::preskip);
 	}
 
 	encoder& commit_eps(directives callee_mode = directives::eps)
@@ -1080,16 +1081,16 @@ public:
 		return *this;
 	}
 
-	[[nodiscard]] bool prepare_skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	[[nodiscard]] bool prepare_skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme)
 	{
-		bool const result = should_skip(callee_mode, callee_skip);
+		bool const result = should_skip(callee_mode, inhibit_mask);
 		commit_eps(callee_mode);
 		return result;
 	}
 
-	encoder& skip(directives callee_mode = directives::eps, directives callee_skip = directives::lexeme)
+	encoder& skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme)
 	{
-		if (prepare_skip(callee_mode, callee_skip))
+		if (prepare_skip(callee_mode, inhibit_mask))
 			encode(opcode::skip_space);
 		return *this;
 	}
@@ -1717,18 +1718,10 @@ template <class E>
 inline constexpr bool is_expression_maybe_repeat_optimizable_v =
 	std::is_same_v<E, string_expression>;
 
-namespace detail {
-
-template <class E>
-inline constexpr bool is_expression_repeat_optimizable_impl_v =
-	is_expression_always_repeat_optimizable_v<E> ||
-	is_expression_maybe_repeat_optimizable_v<E>;
-
-} // namespace detail
-
 template <class E>
 inline constexpr bool is_expression_repeat_optimizable_v =
-	detail::is_expression_repeat_optimizable_impl_v<unwrap_directive_expression_t<E>>;
+	is_expression_always_repeat_optimizable_v<unwrap_directive_expression_t<E>> ||
+	is_expression_maybe_repeat_optimizable_v<unwrap_directive_expression_t<E>>;
 
 inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)();
 inline constexpr std::size_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
@@ -2364,7 +2357,7 @@ struct synthesize_unique_factory
 	}
 };
 
-namespace language {
+namespace dsl {
 
 using lug::environment; using lug::grammar; using lug::rule; using lug::start; using lug::forever; using lug::max_repetitions;
 using lug::error_context; using lug::error_response; using lug::recover_with; using lug::failure;
@@ -2619,7 +2612,7 @@ template <error_response Response>
 	return noskip[eps ^ Response];
 }
 
-} // namespace language
+} // namespace dsl
 
 [[nodiscard]] inline grammar start(rule const& start_rule, rule const& skip_rule)
 {
@@ -2696,7 +2689,7 @@ template <error_response Response>
 
 [[nodiscard]] inline grammar start(rule const& start_rule)
 {
-	return start(start_rule, rule{language::noskip[language::operator*(language::space)]});
+	return start(start_rule, rule{dsl::noskip[dsl::operator*(dsl::space)]});
 }
 
 enum class source_options : std::uint_least8_t { none = 0, interactive = 1 };

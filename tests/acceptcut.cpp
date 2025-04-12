@@ -37,16 +37,16 @@ struct test_environment : public lug::environment
 
 void test_accept_choice()
 {
-	namespace ll = lug::language;
-	using namespace ll::operators;
+	namespace dsl = lug::dsl;
+	using namespace dsl::operators;
 
 	test_environment E;
 
 	// Test accept behavior in: e1 > cut > e2 | e3
-	ll::rule A = ll::noskip["a"_sx < [&]{ E.action_counts["accept"]++; } > ll::accept > "b"_sx];
-	ll::rule B = ll::noskip["c"_sx > "d"_sx];
-	ll::rule S = ll::noskip[(A | B) > ll::eoi];
-	ll::grammar G = start(S);
+	dsl::rule A = dsl::noskip["a"_sx < [&]{ E.action_counts["accept"]++; } > dsl::accept > "b"_sx];
+	dsl::rule B = dsl::noskip["c"_sx > "d"_sx];
+	dsl::rule S = dsl::noskip[(A | B) > dsl::eoi];
+	dsl::grammar G = dsl::start(S);
 
 	// Should succeed with complete match
 	assert(lug::parse("ab", G, E));
@@ -79,15 +79,15 @@ void test_accept_choice()
 
 void test_accept_repetition()
 {
-	namespace ll = lug::language;
-	using namespace ll::operators;
+	namespace dsl = lug::dsl;
+	using namespace dsl::operators;
 
 	test_environment E;
 	
 	// Test cut behavior in *(e1 > cut > e2)
-	ll::rule A = ll::noskip["a"_sx < [&]{ E.action_counts["accept"]++; } > ll::accept > "b"_sx];
-	ll::rule S = ll::noskip[*A > ll::eoi];
-	ll::grammar G = start(S);
+	dsl::rule A = dsl::noskip["a"_sx < [&]{ E.action_counts["accept"]++; } > dsl::accept > "b"_sx];
+	dsl::rule S = dsl::noskip[*A > dsl::eoi];
+	dsl::grammar G = dsl::start(S);
 
 	// Empty input should succeed with zero repetitions
 	assert(lug::parse("", G, E));
@@ -164,7 +164,7 @@ void test_accept_repetition()
 
 void test_cut_choice()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	test_environment E;
 
@@ -205,7 +205,7 @@ void test_cut_choice()
 
 void test_cut_repetition()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	test_environment E;
 	
@@ -289,7 +289,7 @@ void test_cut_repetition()
 
 void test_cut_nested()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	
 	test_environment E;
 

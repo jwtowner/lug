@@ -13,7 +13,7 @@
 int main()
 {
     // Import the namespace containing the embedded DSL operators and types
-    using namespace lug::language;
+    using namespace lug::dsl;
 
     // Define attribute variables for the recursive rules
     int lhs = 0;

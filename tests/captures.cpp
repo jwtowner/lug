@@ -35,7 +35,7 @@ void test_capture_email_syntax()
 
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		return start(lexeme[capture(username)[+"a-zA-Z0-9._%+-"_bx] > '@' >
 							capture(domain)[+"a-zA-Z0-9-"_bx] > '.' >
 							capture(tld)["a-zA-Z"_bx > +"a-zA-Z"_bx]]);
@@ -69,7 +69,7 @@ void test_capture_url_syntax()
 
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		return start(lexeme[capture(protocol)["http"_sx > ~'s'_cx] > "://"_sx >
 							capture(domain)[+"a-zA-Z0-9.-"_bx] >
 							capture(path)['/' > *"^?#"_bx]]);
@@ -111,7 +111,7 @@ void test_capture_comma_delimited_list()
 
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		return start((capture(item)[lexeme[+"a-zA-Z0-9_-"_bx]] <[&]{items.emplace_back(item);}) >> ',');
 	}();
 
@@ -164,7 +164,7 @@ void test_capture_nested_calls()
 
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		rule call;
 		call = lexeme[capture(name)["a-zA-Z"_bx > *"a-zA-Z0-9"_bx]] > ~('(' > call > ')') < add_to_sequence;
 		return start(call > eoi);
@@ -206,7 +206,7 @@ void test_capture_arithmetic_expressions()
 
 	lug::grammar const G = [&]
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 		rule expression;
 		rule number = capture(add_number)[lexeme[+"0-9"_bx]];
 		rule operation = capture(add_operation)['+'_cx | '-' | '*' | '/'];

@@ -10,7 +10,7 @@
 
 void test_sequence()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ chr('a') > any > chr('b') > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("a2b", G));
@@ -26,7 +26,7 @@ void test_sequence()
 
 void test_sequence_with_skip()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = chr('a') > any > chr('b') > eoi;
 	grammar G = start(S);
 	assert(lug::parse("a2b", G));
@@ -45,7 +45,7 @@ void test_sequence_with_skip()
 
 void test_choice()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ (chr('a') | chr('b')) > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("a", G));
@@ -58,7 +58,7 @@ void test_choice()
 
 void test_choice_with_skip()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = (chr('a') | chr('b')) > eoi;
 	grammar G = start(S);
 	assert(lug::parse("a", G));
@@ -80,7 +80,7 @@ void test_choice_with_skip()
 
 void test_zero_or_one()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ ~chr('x') > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -94,7 +94,7 @@ void test_zero_or_one()
 
 void test_zero_or_one_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ ~str("abc") > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -113,7 +113,7 @@ void test_zero_or_one_string()
 
 void test_zero_or_many()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ *chr('x') > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -131,7 +131,7 @@ void test_zero_or_many()
 
 void test_zero_or_many_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ *str("abc") > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -151,7 +151,7 @@ void test_zero_or_many_string()
 
 void test_one_or_many()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ +chr('x') > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("x", G));
@@ -168,7 +168,7 @@ void test_one_or_many()
 
 void test_one_or_many_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ +str("abc") > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("abc", G));
@@ -186,7 +186,7 @@ void test_one_or_many_string()
 
 void test_repeat()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ repeat<3, 5>[ chr('x') ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("xxx", G));
@@ -203,7 +203,7 @@ void test_repeat()
 
 void test_repeat_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ repeat<3, 5>[ str("abc") ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("abcabcabc", G));
@@ -221,7 +221,7 @@ void test_repeat_string()
 
 void test_at_least()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ at_least<2>[ chr('x') ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("xx", G));
@@ -240,7 +240,7 @@ void test_at_least()
 
 void test_at_least_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ at_least<2>[ str("abc") ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("abcabc", G));
@@ -259,7 +259,7 @@ void test_at_least_string()
 
 void test_at_most()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ at_most<4>[ chr('x') ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -279,7 +279,7 @@ void test_at_most()
 
 void test_at_most_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ at_most<4>[ str("abc") ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -300,7 +300,7 @@ void test_at_most_string()
 
 void test_exactly()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ exactly<4>[ chr('x') ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("xxxx", G));
@@ -312,7 +312,7 @@ void test_exactly()
 
 void test_exactly_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ exactly<4>[ str("abc") ] > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("abcabcabcabc", G));
@@ -331,7 +331,7 @@ void test_exactly_string()
 
 void test_not()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ !chr('x') > any > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("y", G));
@@ -347,7 +347,7 @@ void test_not()
 
 void test_predicate()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ &chr('x') > any > any > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("xx", G));
@@ -366,7 +366,7 @@ void test_predicate()
 
 void test_list()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ chr('a') >> "," > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("a", G));

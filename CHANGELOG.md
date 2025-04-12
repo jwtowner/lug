@@ -2,6 +2,7 @@
 
 ## Release v0.6.0 (Under Development)
 
+* Renamed the `language` namespace to `dsl` to better reflect its purpose as a domain-specific language for grammar definition.
 * Implemented optimized `synthesize_collect_expression` that combines synthesize and collect operations into a single semantic action, eliminating redundant attribute stack operations and improving performance for building complex data structures.
 * Replaced the basic regular expression (BRE) implementation with bracket expressions (`_bx`). This change improves performance and reduces code complexity as the previous implementation was only partially complete and primarily used for character sets or ranges. The new bracket expressions provide the same functionality with better optimization opportunities in the expression tree, resulting in smaller code size, faster parsing and faster compilation times.
 * Completely redesigned repeat mechanism with a highly optimized implementation that dramatically reduces bytecode size and significantly improves parsing performance for repetitive patterns. Introduced more expressive control directives: `repeat<min,max>[e]` for bounded repetition, `at_least<min>[e]` for minimum repetition, `at_most<max>[e]` for maximum repetition, and `exactly<count>[e]` for fixed repetition.

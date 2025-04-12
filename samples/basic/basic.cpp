@@ -28,7 +28,7 @@ class basic_interpreter
 public:
 	basic_interpreter()
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 
 		rule Expr;
 		rule Stmnt;

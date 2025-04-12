@@ -14,8 +14,8 @@ class xml_matcher
 public:
 	xml_matcher()
 	{
-		using namespace lug::language;
-		namespace lang = lug::language;
+		using namespace lug::dsl;
+		namespace lang = lug::dsl;
 
 		rule SP = noskip[*bkt(" \t\r\n")];
 		rule Text = noskip[+(!chr('<') > any)];

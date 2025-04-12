@@ -54,7 +54,7 @@ class json_parser
 public:
 	json_parser()
 	{
-		using namespace lug::language;
+		using namespace lug::dsl;
 
 		// JSON node value factory functions
 		auto MakeNull = []{ return json_node{json_null{}}; };

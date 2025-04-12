@@ -10,7 +10,7 @@
 
 void test_empty()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ eps > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("", G));
@@ -23,7 +23,7 @@ void test_empty()
 
 void test_eol()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ eol > eoi ];
 	grammar G = start(S);
 
@@ -78,7 +78,7 @@ void test_eol()
 
 void test_any()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	rule S = noskip[ any > eoi ];
 	grammar G = start(S);
 	assert(lug::parse("a", G));
@@ -94,7 +94,7 @@ void test_any()
 
 void test_char()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// ASCII character
 	rule S = noskip[ chr('a') > eoi ];
@@ -117,7 +117,7 @@ void test_char()
 
 void test_char_range()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// ASCII character range
 	rule S1 = noskip[ chr('d', 'g') > eoi ];
@@ -170,7 +170,7 @@ void test_char_range()
 
 void test_string()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	// ASCII string
 	rule S = noskip[ str("hello world") > eoi ];
@@ -192,7 +192,7 @@ void test_string()
 
 void test_bracket()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule S1 = noskip[ bkt("oO") > eoi ];
 	grammar G1 = start(S1);
@@ -289,7 +289,7 @@ void test_bracket()
 
 void test_character_classes()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 	
 	// Test digit character class
 	rule S1 = noskip[ digit > eoi ];

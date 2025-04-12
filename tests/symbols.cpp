@@ -10,7 +10,7 @@
 
 void test_symbol_exists()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	int Count = 0;
 
@@ -35,7 +35,7 @@ void test_symbol_exists()
 
 void test_symbol_match()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
@@ -81,7 +81,7 @@ void test_symbol_match()
 
 void test_symbol_definition_and_match()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
@@ -122,7 +122,7 @@ void test_symbol_definition_and_match()
 
 void test_symbol_definition_and_match_2()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > match("fruit");
@@ -142,7 +142,7 @@ void test_symbol_definition_and_match_2()
 
 void test_symbol_definition_and_match_3()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match("fruit");
@@ -170,7 +170,7 @@ void test_symbol_definition_and_match_3()
 
 void test_symbol_definition_and_match_any()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match_any("fruit");
@@ -202,7 +202,7 @@ void test_symbol_definition_and_match_any()
 
 void test_symbol_definition_and_match_all()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Name = lexeme[+alpha];
 	rule FruitSet = symbol("fruit")[Name] > symbol("fruit")[Name] > match_all("fruit");
@@ -235,7 +235,7 @@ void test_symbol_definition_and_match_all()
 
 void test_symbol_nested_definition_and_match()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Xml, Inner, Name;
 
@@ -272,7 +272,7 @@ void test_symbol_nested_definition_and_match()
 
 void test_symbol_match_caseless()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
@@ -328,7 +328,7 @@ void test_symbol_match_caseless()
 
 void test_symbol_definition_and_match_caseless()
 {
-	using namespace lug::language;
+	using namespace lug::dsl;
 
 	rule Xml, Name;
 	Name = lexeme[alpha > *alnum];
