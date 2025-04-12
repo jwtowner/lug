@@ -1233,41 +1233,42 @@ struct leaf_expression_node_interface : common_expression_node_interface<Derived
 template <class Derived, class E1>
 struct unary_expression_node_interface : common_expression_node_interface<Derived>
 {
-	static constexpr effect_traits static_effects = E1::static_effects;
-	static constexpr certainty static_nofail = E1::static_nofail;
-	static constexpr certainty static_nullable = E1::static_nullable;
-	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
 	using inner_expression_type = E1;
 	E1 e1;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr explicit unary_expression_node_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return this->e1.first(d, follow); }
+	static constexpr effect_traits static_effects = E1::static_effects;
+	static constexpr certainty static_nofail = E1::static_nofail;
+	static constexpr certainty static_nullable = E1::static_nullable;
+	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
 };
 
 template <class Derived, class E1, class E2>
 struct binary_expression_node_interface : common_expression_node_interface<Derived>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | E2::static_effects;
 	using left_expression_type = E1;
 	using right_expression_type = E2;
 	E1 e1;
 	E2 e2;
 	template <class X1, class X2, class = std::enable_if_t<std::is_constructible_v<E1, X1&&> && std::is_constructible_v<E2, X2&&>>>
 	constexpr binary_expression_node_interface(X1&& x1, X2&& x2) : e1(std::forward<X1>(x1)), e2(std::forward<X2>(x2)) {}
+	static constexpr effect_traits static_effects = E1::static_effects | E2::static_effects;
 };
 
 template <class Recovery>
 struct raise_expression : leaf_expression_node_interface<raise_expression<Recovery>>
 {
-	static constexpr effect_traits static_effects = effect_traits::raises;
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
 	void evaluate(encoder& d) const { return d.raise_failure(reason); }
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	static constexpr effect_traits static_effects = effect_traits::raises;
 };
 
 template <class E1, class Recovery>
 struct expect_expression : unary_expression_node_interface<expect_expression<E1, Recovery>, E1>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::raises;
 	using base_type = unary_expression_node_interface<expect_expression<E1, Recovery>, E1>;
 	failure<Recovery> reason;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
@@ -1282,6 +1283,9 @@ struct expect_expression : unary_expression_node_interface<expect_expression<E1,
 		d.raise_failure(reason);
 		d.jump_to_here(commit);
 	}
+
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::raises;
 };
 
 template <class E1, class Recovery>
@@ -1315,11 +1319,12 @@ struct recover_with_expression : unary_expression_node_interface<recover_with_ex
 
 struct recover_response_expression : leaf_expression_node_interface<recover_response_expression>
 {
-	static constexpr certainty static_nofail = certainty::always;
-	static constexpr certainty static_nullable = certainty::always;
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
 	void evaluate(encoder& d) const { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	static constexpr certainty static_nofail = certainty::always;
+	static constexpr certainty static_nullable = certainty::always;
 };
 
 template <class E1, class Handler>
@@ -1366,10 +1371,11 @@ template <class Derived> template <class Handler, class>
 
 struct bracket_expression : leaf_expression_node_interface<bracket_expression>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	static constexpr certainty static_head_optimizable = certainty::always;
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1411,40 +1417,52 @@ struct bracket_expression : leaf_expression_node_interface<bracket_expression>
 
 struct string_expression : leaf_expression_node_interface<string_expression>
 {
-	static constexpr certainty static_nofail = certainty::maybe;
-	static constexpr certainty static_nullable = certainty::maybe;
-	static constexpr certainty static_head_optimizable = certainty::maybe;
 	std::string_view text;
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	void evaluate(encoder& d) const { d.match(text); }
+
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	{
+		if (text.empty())
+			return rune_pattern::none();
+		return rune_pattern{utf8::decode_rune(text.begin(), text.end()).second};
+	}
+
 	[[nodiscard]] constexpr bool nofail() const noexcept { return text.empty(); }
 	[[nodiscard]] constexpr bool nullable() const noexcept { return text.empty(); }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return !text.empty(); }
+
+	static constexpr certainty static_nofail = certainty::maybe;
+	static constexpr certainty static_nullable = certainty::maybe;
+	static constexpr certainty static_head_optimizable = certainty::maybe;
 };
 
 struct char_expression : leaf_expression_node_interface<char_expression>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.match(std::string_view{&c, 1}); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{static_cast<char32_t>(c)}; }
+	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
 struct rune_expression : leaf_expression_node_interface<rune_expression>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{c}; }
+	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
 struct rune_range_expression : leaf_expression_node_interface<rune_range_expression>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	char32_t start;
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	static constexpr certainty static_head_optimizable = certainty::always;
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1454,11 +1472,12 @@ struct rune_range_expression : leaf_expression_node_interface<rune_range_express
 
 struct rune_set_expression : leaf_expression_node_interface<rune_set_expression>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	rune_set set;
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
 	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	static constexpr certainty static_head_optimizable = certainty::always;
 
 	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
 	{
@@ -1471,30 +1490,32 @@ struct rune_set_expression : leaf_expression_node_interface<rune_set_expression>
 template <class Target>
 struct callable_expression : leaf_expression_node_interface<callable_expression<Target>>
 {
-	static constexpr effect_traits static_effects = effect_traits::runtime;
-	static constexpr certainty static_nofail = certainty::maybe;
-	static constexpr certainty static_nullable = certainty::maybe;
-	static constexpr certainty static_head_optimizable = certainty::maybe;
 	std::reference_wrapper<Target> target;
 	std::uint_least16_t prec{0};
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
 	constexpr explicit callable_expression(Target& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
 	void evaluate(encoder& d) const { d.call_with_frame(target.get(), prec); }
+	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); } // TODO: implement
 	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_traits().effects | target.get().follow_traits().effects; }
 	[[nodiscard]] constexpr bool nofail() const noexcept { return target.get().first_traits().nofail ? target.get().follow_traits().nofail : false; }
 	[[nodiscard]] constexpr bool nullable() const noexcept { return target.get().first_traits().nullable ? target.get().follow_traits().nullable : false; }
 	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return target.get().first_traits().head_optimizable ? target.get().follow_traits().nofail : false; }
+	static constexpr effect_traits static_effects = effect_traits::runtime;
+	static constexpr certainty static_nofail = certainty::maybe;
+	static constexpr certainty static_nullable = certainty::maybe;
+	static constexpr certainty static_head_optimizable = certainty::maybe;
 };
 
 template <class Pred>
 struct predicate_expression : leaf_expression_node_interface<predicate_expression<Pred>>
 {
-	static constexpr certainty static_nofail = certainty::never;
-	static constexpr certainty static_nullable = certainty::always;
-	static constexpr certainty static_head_optimizable = certainty::never;
 	Pred pred;
 	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	void evaluate(encoder& d) const { d.encode(opcode::predicate, syntactic_predicate{pred}); }
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return follow; }
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = certainty::never;
 };
 
 template <class P> predicate_expression(P&&) -> predicate_expression<std::decay_t<P>>;
@@ -1562,6 +1583,7 @@ template <class E1>
 struct directive_expression : unary_expression_node_interface<directive_expression<E1>, E1>
 {
 	using base_type = unary_expression_node_interface<directive_expression<E1>, E1>;
+
 	directives enable_mask{directives::none};
 	directives disable_mask{directives::none};
 	directives relay_mask{directives::none};
@@ -1575,6 +1597,14 @@ struct directive_expression : unary_expression_node_interface<directive_expressi
 		d.dpsh(enable_mask, disable_mask);
 		this->e1.evaluate(d);
 		d.dpop(relay_mask);
+	}
+
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	{
+		d.dpsh(enable_mask, disable_mask);
+		auto result = this->e1.first(d, follow);
+		d.ddrop();
+		return result;
 	}
 };
 
@@ -1600,31 +1630,35 @@ struct directive_modifier
 
 struct accept_cut_expression : leaf_expression_node_interface<accept_cut_expression>
 {
-	static constexpr effect_traits static_effects = effect_traits::cuts;
-	static constexpr certainty static_nofail = certainty::always;
-	static constexpr certainty static_nullable = certainty::always;
 	std::uint_least8_t imm8;
 	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
 	void evaluate(encoder& d) const { d.encode(opcode::accept, 0, imm8); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	static constexpr effect_traits static_effects = effect_traits::cuts;
+	static constexpr certainty static_nofail = certainty::always;
+	static constexpr certainty static_nullable = certainty::always;
 };
 
 struct eoi_expression : leaf_expression_node_interface<eoi_expression>
 {
+	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::none(); }
 	static constexpr certainty static_nofail = certainty::never;
 	static constexpr certainty static_nullable = certainty::always;
-	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
 };
 
 struct eol_expression : leaf_expression_node_interface<eol_expression>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::ref(ascii::eol_rune_set()); }
 };
 
 struct eps_expression : leaf_expression_node_interface<eps_expression>
 {
+	void evaluate(encoder& /*d*/) const {}
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
 	static constexpr certainty static_nofail = certainty::always;
 	static constexpr certainty static_nullable = certainty::always;
-	void evaluate(encoder& /*d*/) const {}
 };
 
 template <class Property>
@@ -1634,6 +1668,7 @@ struct match_class_expression : leaf_expression_node_interface<match_class_expre
 	Property property;
 	constexpr match_class_expression(opcode op, Property prop) noexcept : mop{op}, property{prop} {}
 	void evaluate(encoder& d) const { d.match_class(mop, property); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
 };
 
 struct match_class_combinator
@@ -1646,16 +1681,15 @@ struct match_class_combinator
 
 struct match_any_expression : leaf_expression_node_interface<match_any_expression>, match_class_combinator
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
 	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::match_any); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
 template <ascii::ctype Property>
 struct ascii_ctype_expression : leaf_expression_node_interface<ascii_ctype_expression<Property>>
 {
-	static constexpr certainty static_head_optimizable = certainty::always;
-
 	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == ascii::ctype::blank) {
@@ -1667,17 +1701,28 @@ struct ascii_ctype_expression : leaf_expression_node_interface<ascii_ctype_expre
 		}
 	}
 
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	{
+		if constexpr (Property == ascii::ctype::blank) {
+			return rune_pattern::ref(ascii::blank_rune_set());
+		} else if constexpr (Property == ascii::ctype::space) {
+			return rune_pattern::ref(ascii::space_rune_set());
+		} else {
+			return rune_pattern{make_rune_set(d.mode())};
+		}
+	}
+
 	[[nodiscard]] rune_set make_rune_set([[maybe_unused]] directives mode = directives::none) const
 	{
 		return ascii::ctype_rune_set(Property);
 	}
+
+	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
 template <unicode::ctype Property>
 struct unicode_ctype_expression : leaf_expression_node_interface<unicode_ctype_expression<Property>>
 {
-	static constexpr certainty static_head_optimizable = ((Property == unicode::ctype::blank) || (Property == unicode::ctype::space)) ? certainty::always : certainty::never;
-
 	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == unicode::ctype::blank) {
@@ -1688,16 +1733,30 @@ struct unicode_ctype_expression : leaf_expression_node_interface<unicode_ctype_e
 			d.match_class(opcode::match_any_of, Property);
 		}
 	}
+
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	{
+		if constexpr (Property == unicode::ctype::blank) {
+			return rune_pattern::ref(unicode::blank_rune_set());
+		} else if constexpr (Property == unicode::ctype::space) {
+			return rune_pattern::ref(unicode::space_rune_set());
+		} else {
+			return rune_pattern::all();
+		}
+	}
+
+	static constexpr certainty static_head_optimizable = ((Property == unicode::ctype::blank) || (Property == unicode::ctype::space)) ? certainty::always : certainty::never;
 };
 
 struct condition_test_expression : leaf_expression_node_interface<condition_test_expression>
 {
-	static constexpr certainty static_nofail = certainty::never;
-	static constexpr certainty static_nullable = certainty::always;
 	std::string_view name;
 	std::uint_least8_t imm8;
 	constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 	void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
 };
 
 struct condition_test_combinator
@@ -1747,12 +1806,13 @@ struct condition_block_combinator
 
 struct symbol_exists_expression : leaf_expression_node_interface<symbol_exists_expression>
 {
-	static constexpr certainty static_nofail = certainty::never;
-	static constexpr certainty static_nullable = certainty::always;
 	std::string_view name;
 	std::uint_least8_t imm8;
 	constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 	void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
 };
 
 struct symbol_exists_combinator
@@ -1769,6 +1829,7 @@ struct symbol_match_expression : leaf_expression_node_interface<symbol_match_exp
 	std::string_view name;
 	constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
 	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name);}
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
 };
 
 struct symbol_match_combinator
@@ -1787,6 +1848,7 @@ struct symbol_match_offset_expression : leaf_expression_node_interface<symbol_ma
 	std::uint_least8_t offset;
 	constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
 	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); }
+	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
 };
 
 struct symbol_match_offset_combinator
@@ -1800,9 +1862,6 @@ struct symbol_match_offset_combinator
 template <class E1>
 struct negative_lookahead_expression : unary_expression_node_interface<negative_lookahead_expression<E1>, E1>
 {
-	static constexpr certainty static_nofail = certainty::never;
-	static constexpr certainty static_nullable = certainty::always;
-	static constexpr certainty static_head_optimizable = certainty::never;
 	using base_type = unary_expression_node_interface<negative_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
@@ -1815,14 +1874,21 @@ struct negative_lookahead_expression : unary_expression_node_interface<negative_
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
 	}
+
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	{
+		// TODO: negate return this->e1.first(d, follow);
+		return follow;
+	}
+
+	static constexpr certainty static_nofail = certainty::never;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = certainty::never;
 };
 
 template <class E1>
 struct positive_lookahead_expression : unary_expression_node_interface<positive_lookahead_expression<E1>, E1>
 {
-	static constexpr certainty static_nofail = E1::static_nofail;
-	static constexpr certainty static_nullable = certainty::always;
-	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
 	using base_type = unary_expression_node_interface<positive_lookahead_expression<E1>, E1>;
 	using base_type::base_type;
 
@@ -1836,6 +1902,15 @@ struct positive_lookahead_expression : unary_expression_node_interface<positive_
 		d.jump_to_here(choice);
 		d.encode(opcode::fail, 0, 1);
 	}
+
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	{
+		return this->e1.first(d, follow).intersect_with(follow);
+	}
+
+	static constexpr certainty static_nofail = E1::static_nofail;
+	static constexpr certainty static_nullable = certainty::always;
+	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;	
 };
 
 template <class E>
@@ -1922,11 +1997,12 @@ struct repetition_expression_base : unary_expression_node_interface<Derived, E1>
 	static_assert((NMax <= max_repetitions) || (NMax == forever), "repetition maximum is out of bounds");
 	static_assert(E1::static_nofail != certainty::always, "non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
 	static_assert(E1::static_nullable != certainty::always, "non-progressing infinite loop: repetition sub-expression must not be potentially nullable");
+	using base_type = unary_expression_node_interface<Derived, E1>;
+	using base_type::base_type;
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return this->e1.first(d, follow).union_with(follow); }
 	static constexpr certainty static_nofail = (NMin == 0) ? certainty::always : certainty::never;
 	static constexpr certainty static_nullable = (NMin == 0) ? certainty::always : certainty::never;
 	static constexpr certainty static_head_optimizable = certainty::never;
-	using base_type = unary_expression_node_interface<Derived, E1>;
-	using base_type::base_type;
 };
 
 template <class E1, std::size_t NMin, std::size_t NMax>
@@ -2058,10 +2134,10 @@ struct repetition_expression<E1, 0, NMax> : repetition_expression_base<repetitio
 template <class E1>
 struct repetition_expression<E1, 0, 0> : repetition_expression_base<repetition_expression<E1, 0, 0>, E1, 0, 0>
 {
-	static constexpr effect_traits static_effects = effect_traits::none;
 	using base_type = repetition_expression_base<repetition_expression<E1, 0, 0>, E1, 0, 0>;
 	using base_type::base_type;
 	void evaluate(encoder& /*d*/) const {}
+	static constexpr effect_traits static_effects = effect_traits::none;
 };
 
 template <class E1>
@@ -2209,6 +2285,13 @@ struct choice_expression : binary_expression_node_interface<choice_expression<E1
 		d.jump_to_here(commit);
 	}
 
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	{
+		auto const pattern1 = this->e1.first(d, follow);
+		auto const pattern2 = this->e2.first(d, follow);
+		return pattern1.union_with(pattern2);
+	}
+
 	[[nodiscard]] constexpr bool nofail() const noexcept
 	{
 		if constexpr (E2::static_nofail == certainty::always) {
@@ -2285,6 +2368,21 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 		d.dpsh(directives::preskip, directives::postskip);
 		this->e2.evaluate(d);
 		d.dpop(directives::eps);
+	}
+
+	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	{
+		if constexpr (E1::static_nullable == certainty::never) {
+			return this->e1.first(d, follow);
+		} else {
+			if constexpr (E1::static_nullable == certainty::maybe) {
+				if (!lug::is_expression_nullable(this->e1)) {
+					return this->e1.first(d, follow);
+				}
+			}
+			auto const pattern2 = this->e2.first(d, follow);
+			return this->e1.first(d, pattern2);
+		}
 	}
 
 	[[nodiscard]] constexpr bool nofail() const noexcept
@@ -2383,59 +2481,59 @@ struct attribute_bind_to_expression : attribute_action_expression<Derived, E1, T
 template <class E1, class Action>
 struct action_expression : attribute_action_expression<action_expression<E1, Action>, E1, Action>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action;
 	using base_type = attribute_action_expression<action_expression<E1, Action>, E1, Action>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[a = this->operand](environment& envr) { a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), a = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}); }}); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action;
 };
 
 template <class E1, class Action>
 struct capture_expression : attribute_action_expression<capture_expression<E1, Action>, E1, Action>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::captures;
 	using base_type = attribute_action_expression<capture_expression<E1, Action>, E1, Action>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[a = this->operand](environment& envr, syntax const& sx) { a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), a = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); a(detail::dynamic_cast_if_base_of<environment&>{envr}, sx); }}); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::captures;
 };
 
 template <class E1, class Target>
 struct assign_to_expression : attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	using base_type = attribute_bind_to_expression<assign_to_expression<E1, Target>, E1, Target>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& /*d*/) const {}
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::action, semantic_action{[t = this->operand](environment& envr) { *t = envr.pop_attribute<Target>(); }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::action, semantic_action{[f = d.get_frame_handle(), t = this->operand](environment& envr) mutable { envr.pop_attribute_frame(f); *t = envr.pop_attribute<Target>(); }}); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 };
 
 template <class E1, class Target>
 struct capture_to_expression : attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding | effect_traits::captures;
 	using base_type = attribute_bind_to_expression<capture_to_expression<E1, Target>, E1, Target>;
 	using base_type::base_type;
 	constexpr void do_prologue(encoder& d) const { d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[t = this->operand](environment&, syntax const& sx) { *t = sx; }}); }
 	constexpr void do_prologue_inlined(encoder& d) const { d.encode(opcode::attribute_push, d.get_frame_handle_index()); d.skip().encode(opcode::capture_start); }
 	constexpr void do_epilogue_inlined(encoder& d) const { d.encode(opcode::capture_end, semantic_capture_action{[f = d.get_frame_handle(), t = this->operand](environment& envr, syntax const& sx) mutable { envr.pop_attribute_frame(f); *t = sx; }}); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding | effect_traits::captures;
 };
 
 template <class E1>
 struct symbol_assign_expression : unary_expression_node_interface<symbol_assign_expression<E1>, E1>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::captures;
 	using base_type = unary_expression_node_interface<symbol_assign_expression<E1>, E1>;
 	std::string_view name;
 	template <class X1> constexpr symbol_assign_expression(X1&& x1, std::string_view n) : base_type{std::forward<X1>(x1)}, name{n} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::symbol_start, name); this->e1.evaluate(d); d.encode(opcode::symbol_end); }
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::captures;
 };
 
 template <class E1>
@@ -2521,7 +2619,6 @@ template <class Container, class... As, std::size_t... Is>
 template <class E1, class Container, class... ElementArgs>
 struct collect_expression : unary_expression_node_interface<collect_expression<E1, Container, ElementArgs...>, E1>
 {
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression" );
 	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types" );
 	using base_type = unary_expression_node_interface<collect_expression<E1, Container, ElementArgs...>, E1>;
@@ -2533,6 +2630,8 @@ struct collect_expression : unary_expression_node_interface<collect_expression<E
 		this->e1.evaluate(d);
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{})); }});
 	}
+
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 };
 
 template <class X1, class C, class... As> collect_expression(X1&&, std::in_place_type_t<C>, std::in_place_type_t<As>...) -> collect_expression<std::decay_t<X1>, C, As...>;
@@ -2556,7 +2655,6 @@ struct synthesize_expression : unary_expression_node_interface<synthesize_expres
 {
 	static_assert(sizeof...(Args) > 0, "no arguments types provided to synthesize expression" );
 	static_assert(std::is_constructible_v<T, std::decay_t<Args>...>, "synthesized type T does not support the provided constructor arguments" );
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	using base_type = unary_expression_node_interface<synthesize_expression<E1, Factory, T, Args...>, E1>;
 	template <class X1, class F, class U, class... As> constexpr synthesize_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<U> /*u*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
@@ -2574,6 +2672,8 @@ struct synthesize_expression : unary_expression_node_interface<synthesize_expres
 			return Factory{}(std::in_place_type<T>, attributes.template read_front<As, Is>()...);
 		}());
 	}
+
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 };
 
 template <class X1, class F, class T, class... As> synthesize_expression(X1&&, std::in_place_type_t<F>, std::in_place_type_t<T>, std::in_place_type_t<As>...) -> synthesize_expression<std::decay_t<X1>, F, T, As...>;
@@ -2598,7 +2698,6 @@ struct synthesize_collect_expression : unary_expression_node_interface<synthesiz
 	static_assert(sizeof...(ElementArgs) > 0, "no element types provided to collect expression");
 	static_assert(std::is_constructible_v<typename Container::value_type, std::decay_t<ElementArgs>...>, "synthesized element type does not support the provided constructor argument types");
 	static_assert(std::is_constructible_v<T, Container>, "synthesized type T not constructible from Container type argument");
-	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 	using base_type = unary_expression_node_interface<synthesize_collect_expression<E1, Factory, T, Container, ElementArgs...>, E1>;
 	template <class X1, class F, class V, class C, class... As> constexpr synthesize_collect_expression(X1&& x1, std::in_place_type_t<F> /*f*/, std::in_place_type_t<V> /*v*/, std::in_place_type_t<C> /*c*/, std::in_place_type_t<As>... /*a*/) noexcept : base_type{std::forward<X1>(x1)} {}
 
@@ -2608,6 +2707,8 @@ struct synthesize_collect_expression : unary_expression_node_interface<synthesiz
 		this->e1.evaluate(d);
 		d.encode(opcode::action, semantic_action{[](environment& envr) { envr.push_attribute(Factory{}(std::in_place_type<T>, lug::build_container<Container, ElementArgs...>(envr, std::index_sequence_for<ElementArgs...>{}))); }});
 	}
+
+	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::action | effect_traits::binding;
 };
 
 template <class X1, class F, class V, class C, class... As> synthesize_collect_expression(X1&&, std::in_place_type_t<F>, std::in_place_type_t<V>, std::in_place_type_t<C>, std::in_place_type_t<As>...) -> synthesize_collect_expression<std::decay_t<X1>, F, V, C, As...>;
@@ -2771,19 +2872,21 @@ inline namespace operators {
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 [[nodiscard]] constexpr auto operator|(E1 const& e1, E2 const& e2)
 {
-	if constexpr (detail::is_template_instantiation_of_v<E1, choice_expression>)
+	if constexpr (detail::is_template_instantiation_of_v<E1, choice_expression>) {
 		return choice_expression{e1.e1, e1.e2 | e2};
-	else
+	} else {
 		return choice_expression{make_expression(e1), make_expression(e2)};
+	}
 }
 
 template <class E1, class E2, class = std::enable_if_t<is_expression_v<E1> && is_expression_v<E2>>>
 [[nodiscard]] constexpr auto operator>(E1 const& e1, E2 const& e2)
 {
-	if constexpr (detail::is_template_instantiation_of_v<E1, sequence_expression>)
+	if constexpr (detail::is_template_instantiation_of_v<E1, sequence_expression>) {
 		return sequence_expression{e1.e1, e1.e2 > e2};
-	else
+	} else {
 		return sequence_expression{make_expression(e1), make_expression(e2)};
+	}
 }
 
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator!(E const& e) { return negative_lookahead_expression{make_expression(e)}; }

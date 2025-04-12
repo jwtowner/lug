@@ -197,6 +197,8 @@ public:
 		return true;
 	}
 
+	[[nodiscard]] rune_set complement() const;
+
 private:
 	static constexpr char32_t ascii_limit = U'\U00000080';
 	static constexpr char32_t unicode_limit = U'\U0010FFFF';
@@ -422,6 +424,11 @@ private:
 	return std::move(rune_set_builder{}.negate()).build();
 }
 
+[[nodiscard]] inline rune_set rune_set::complement() const
+{
+	return std::move(rune_set_builder{}.negate().add_rune_set(*this)).build();
+}
+
 class rune_pattern
 {
 public:
@@ -440,15 +447,38 @@ public:
 	explicit rune_pattern(char32_t rune) : data_{rune} {}
 	explicit rune_pattern(rune_set const& set) : data_{set} {}
 
-	/*[[nodiscard]] friend bool operator==(rune_pattern const& left, rune_pattern const& right) noexcept
+	[[nodiscard]] friend bool operator==(rune_pattern const& left, rune_pattern const& right)
 	{
-		return left.data_ == right.data_;
+		if (&left == &right) {
+			return true;
+		}
+		if (left.empty() && right.empty()) {
+			return true;
+		}
+		if (left.full() && right.full()) {
+			return true;
+		}
+		if (auto const lr = left.as_rune(); lr) {
+			if (auto const rr = right.as_rune(); rr) {
+				return *lr == *rr;
+			}
+			return false;
+		}
+		auto const* const left_set = left.as_rune_set_pointer();
+		auto const* const right_set = right.as_rune_set_pointer();
+		if (left_set == right_set) {
+			return true;
+		}
+		if (left_set == nullptr || right_set == nullptr) {
+			return false;
+		}
+		return *left_set == *right_set;
 	}
 
-	[[nodiscard]] friend bool operator!=(rune_pattern const& left, rune_pattern const& right) noexcept
+	[[nodiscard]] friend bool operator!=(rune_pattern const& left, rune_pattern const& right)
 	{
 		return !(left == right);
-	}*/
+	}
 
 	[[nodiscard]] constexpr bool empty() const
 	{
@@ -603,6 +633,55 @@ public:
 		return left_set->disjoint(*right_set);
 	}
 
+	[[nodiscard]] rune_pattern complement() const
+	{
+		return std::visit([](auto&& arg) -> rune_pattern {
+			using T = std::decay_t<decltype(arg)>;
+			if constexpr (std::is_same_v<T, std::monostate>) {
+				return all();
+			} else if constexpr (std::is_same_v<T, allstate>) {
+				return none();
+			} else if constexpr (std::is_same_v<T, char32_t>) {
+				return rune_pattern{std::move(rune_set_builder{}.negate().add_rune(arg)).build()};
+			} else if constexpr (std::is_same_v<T, std::reference_wrapper<const rune_set>>) {
+				return rune_pattern::optimize(arg.get().complement());
+			} else if constexpr (std::is_same_v<T, rune_set>) {
+				return rune_pattern::optimize(arg.complement());
+			}
+		}, data_);
+	}
+
+	[[nodiscard]] rune_pattern intersect_with(rune_pattern const& other) const
+	{
+		if ((this == &other) || other.full()) {
+			return *this;
+		}
+		if (full()) {
+			return other;
+		}
+		if (empty() || other.empty()) {
+			return none();
+		}
+		if (auto const lr = as_rune(); lr) {
+			if (other.contains(*lr)) {
+				return *this;
+			}
+			return none();
+		}
+		if (auto const rr = other.as_rune(); rr) {
+			if (contains(*rr)) {
+				return other;
+			}
+			return none();
+		}
+		auto const* const left_set = as_rune_set_pointer();
+		auto const* const right_set = other.as_rune_set_pointer();
+		if (left_set == nullptr || right_set == nullptr) {
+			return none();
+		}
+		return optimize(std::move(rune_set_builder{}.negate().add_rune_set(left_set->complement()).add_rune_set(right_set->complement())).build());
+	}
+
 	[[nodiscard]] rune_pattern union_with(rune_pattern const& other) const
 	{
 		if ((this == &other) || other.empty()) {
@@ -628,7 +707,12 @@ public:
 	}
 
 private:
-	struct allstate {};
+	struct allstate
+	{
+		[[nodiscard]] friend constexpr bool operator==(allstate const& /*lhs*/, allstate const& /*rhs*/) noexcept { return true; }
+		[[nodiscard]] friend constexpr bool operator!=(allstate const& /*lhs*/, allstate const& /*rhs*/) noexcept { return false; }
+	};
+
 	using storage_type = std::variant<std::monostate, allstate, char32_t, rune_set, std::reference_wrapper<const rune_set>>;
 
 	template <class T, class... Args>
