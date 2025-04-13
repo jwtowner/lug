@@ -21,6 +21,14 @@ using ascii_bitset = std::bitset<ascii_bitset_size>;
 class rune_set;
 class rune_set_builder;
 
+enum class rune_set_kind
+{
+	empty,
+	full,
+	single,
+	many
+};
+
 class rune_set
 {
 	friend class rune_set_builder;
@@ -152,12 +160,31 @@ public:
 
 	[[nodiscard]] bool full() const noexcept
 	{
-		return ascii_set_.all() && (intervals_size_ == 1) && (intervals_.get()->first == ascii_limit) && (intervals_.get()->second == rune_max);
+		return ascii_set_.all() && (intervals_size_ == 1) && (intervals_->first == ascii_limit) && (intervals_->second == rune_max);
 	}
 
 	[[nodiscard]] bool single() const noexcept
 	{
-		return ((ascii_set_.count() == 1) && (intervals_size_ == 0)) || ((ascii_set_.count() == 0) && (intervals_size_ == 1) && (intervals_.get()->first == intervals_.get()->second));
+		return ((ascii_set_.count() == 1) && (intervals_size_ == 0)) || ((ascii_set_.count() == 0) && (intervals_size_ == 1) && (intervals_->first == intervals_->second));
+	}
+
+	[[nodiscard]] rune_set_kind kind() const noexcept
+	{
+		auto const unit_count = ascii_set_.count();
+		if (intervals_size_ == 0) {
+			if (unit_count == 0)
+				return rune_set_kind::empty;
+			if (unit_count == 1)
+				return rune_set_kind::single;
+			return rune_set_kind::many;
+		}
+		if (intervals_size_ == 1) {
+			if ((unit_count == 0) && (intervals_->first == intervals_->second))
+				return rune_set_kind::single;
+			if ((unit_count == ascii_bitset_size) && (intervals_->first == ascii_limit) && (intervals_->second == rune_max))
+				return rune_set_kind::full;
+		}
+		return rune_set_kind::many;
 	}
 
 	[[nodiscard]] std::optional<char32_t> as_rune() const noexcept
@@ -170,8 +197,8 @@ public:
 			}
 			return std::nullopt;
 		}
-		if ((ascii_set_.count() == 0) && (intervals_size_ == 1) && (intervals_.get()->first == intervals_.get()->second)) {
-			return intervals_.get()->first;
+		if ((ascii_set_.count() == 0) && (intervals_size_ == 1) && (intervals_->first == intervals_->second)) {
+			return intervals_->first;
 		}
 		return std::nullopt;
 	}

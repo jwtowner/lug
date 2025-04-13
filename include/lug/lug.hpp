@@ -62,24 +62,37 @@ struct registers
 	error_response rr{error_response::resume}; // recovery response latch register
 };
 
+static constexpr std::uint_least8_t test_opcode = 0b0100'0000;
+static constexpr std::uint_least8_t string_opcode = 0b1000'0000;
+
 enum class opcode : std::uint_least8_t
 {
-	jump,           choice,         commit,         commit_back,    commit_partial,
-	rewind,         accept,         call,           ret,            fail,
-	recover_push,   recover_pop,    recover_resp,   report_push,    report_pop,
-	predicate,      action,         capture_start,  capture_end,    capture_full,
-	attribute_push, attribute_pop,  condition_pop,  symbol_end,     symbol_pop,
-	match_any,      match_blank,    match_space,    match_eol,      match_eoi,
-	match_unit,     match_set,      match_all_of,   match_any_of,   match_none_of,
-	repeat_any,     repeat_blank,   repeat_space,   skip_blank,     skip_space,
-	repeat_unit,    repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
-	test_any,       test_blank,     test_space,     test_eol,       test_eoi,
-	test_unit,      test_set,       test_all_of,    test_any_of,    test_none_of,
-	match,          match_cf,       condition_test, condition_push,
-	symbol_exists,  symbol_all,     symbol_all_cf,  symbol_any,
-	symbol_any_cf,  symbol_head,    symbol_head_cf, symbol_tail,
-	symbol_tail_cf, symbol_start,   symbol_push,    raise
+	jump,                   choice,         commit,         commit_back,    commit_partial,
+	rewind,                 accept,         call,           ret,            fail,
+	recover_push,           recover_pop,    recover_resp,   report_push,    report_pop,
+	predicate,              action,         capture_start,  capture_end,    capture_full,
+	attribute_push,         attribute_pop,  condition_pop,  symbol_end,     symbol_pop,
+	match_any,              match_blank,    match_space,    match_eol,      match_eoi,
+	match_unit,             match_set,      match_all_of,   match_any_of,   match_none_of,
+	repeat_any,             repeat_blank,   repeat_space,   skip_blank,     skip_space,
+	repeat_unit,            repeat_set,     repeat_all_of,  repeat_any_of,  repeat_none_of,
+	test_any = test_opcode, test_blank,     test_space,     test_eol,       test_eoi,
+	test_unit,              test_set,       test_all_of,    test_any_of,    test_none_of,
+	match = string_opcode,  match_cf,       condition_test, condition_push,
+	symbol_exists,          symbol_all,     symbol_all_cf,  symbol_any,
+	symbol_any_cf,          symbol_head,    symbol_head_cf, symbol_tail,
+	symbol_tail_cf,         symbol_start,   symbol_push,    raise
 };
+
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool is_test_opcode(opcode op) noexcept
+{
+	return (static_cast<std::uint_least8_t>(op) & test_opcode) != 0;
+}
+
+[[nodiscard]] LUG_ALWAYS_INLINE constexpr bool is_string_opcode(opcode op) noexcept
+{
+	return (static_cast<std::uint_least8_t>(op) & string_opcode) != 0;
+}
 
 struct alignas(std::uint_least64_t) instruction
 {
@@ -286,7 +299,7 @@ private:
 		return std::all_of(descriptors_.begin(), descriptors_.end(), [target, type](descriptor const& desc) {
 			if (desc.target == target) {
 				if LUG_UNLIKELY(desc.type != type)
-					lug::throw_exception<attribute_stack_error>();
+					throw_exception<attribute_stack_error>();
 				return false;
 			}
 			return true;
@@ -357,7 +370,7 @@ struct program
 		instructions.reserve(detail::checked_add<program_limit_error>(instructions.size(), src.instructions.size()));
 		for (auto const& instr : src.instructions) {
 			instruction new_instr{instr};
-			if (new_instr.op < opcode::match) {
+			if (!is_string_opcode(new_instr.op)) {
 				std::optional<std::size_t> object;
 				switch (new_instr.op) {
 					case opcode::match_any_of: case opcode::match_all_of: case opcode::match_none_of:
@@ -504,6 +517,7 @@ class environment
 public:
 	static constexpr std::uint_least32_t default_tab_width{8};
 	static constexpr std::uint_least32_t default_tab_alignment{8};
+
 	environment() = default;
 	environment(environment const&) = delete;
 	environment(environment&&) noexcept = default;
@@ -745,24 +759,37 @@ class attribute_collection
 public:
 	attribute_collection(attribute_collection&& other) noexcept
 		: envr_{std::exchange(other.envr_, nullptr)}
-		, first_initial_{std::exchange(other.first_initial_, 0)}, last_initial_{std::exchange(other.last_initial_, 0)}
-		, first_{std::exchange(other.first_, 0)}, last_{std::exchange(other.last_, 0)} {}
-	~attribute_collection() { if (first_initial_ < last_initial_) envr_->attribute_result_stack_.resize(first_initial_); }
+		, first_initial_{std::exchange(other.first_initial_, 0)}
+		, last_initial_{std::exchange(other.last_initial_, 0)}
+		, first_{std::exchange(other.first_, 0)}
+		, last_{std::exchange(other.last_, 0)}
+	{}
+
+	~attribute_collection()
+	{
+		if (first_initial_ < last_initial_)
+			envr_->attribute_result_stack_.resize(first_initial_);
+	}
+
+	attribute_collection(attribute_collection const&) = delete;
+	attribute_collection& operator=(attribute_collection const&) = delete;
+	attribute_collection& operator=(attribute_collection&&) = delete;
+
 	[[nodiscard]] bool empty() const noexcept { return first_ >= last_; }
 	[[nodiscard]] std::size_t size() const noexcept { return (first_ < last_) ? (last_ - first_) : 0; }
 	void consume_front(std::size_t n) noexcept { first_ += n; }
 	void consume_back(std::size_t n) noexcept { last_ -= (std::min)(n, last_); }
 	template <class T, std::size_t I> [[nodiscard]] T read_front() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[first_ + I])); }
 	template <class T, std::size_t I, std::size_t N> [[nodiscard]] T read_back() { return detail::move_only_any_cast<T>(std::move(envr_->attribute_result_stack_[last_ - N + I])); }
-	attribute_collection(attribute_collection const&) = delete;
-	attribute_collection& operator=(attribute_collection const&) = delete;
-	attribute_collection& operator=(attribute_collection&&) = delete;
 
 private:
 	attribute_collection(environment* envr, std::size_t first) noexcept
 		: envr_{envr}
-		, first_initial_{first}, last_initial_{envr_->attribute_result_stack_.size()}
-		, first_{first_initial_}, last_{last_initial_} {}
+		, first_initial_{first}
+		, last_initial_{envr_->attribute_result_stack_.size()}
+		, first_{first_initial_}
+		, last_{last_initial_}
+	{}
 
 	environment* envr_;
 	std::size_t first_initial_;
@@ -1063,6 +1090,42 @@ public:
 		return encode(op, add_item(program_->uniforms, static_cast<std::uint_least64_t>(properties)), static_cast<std::uint_least8_t>(unicode::to_property_enum_v<std::decay_t<T>>));
 	}
 
+	template <typename RS, class = std::enable_if_t<std::is_same_v<rune_set, std::decay_t<RS>>>>
+	std::ptrdiff_t encode_set(RS&& set)
+	{
+		std::ptrdiff_t result{0};
+		switch (set.kind()) {
+			case rune_set_kind::empty: result = encode(opcode::fail, 0, 1); break;
+			case rune_set_kind::full: result = encode(opcode::match_any); break;
+			case rune_set_kind::single: {
+				if (auto const rune = set.as_rune(); rune && ascii::isascii(*rune)) {
+					result = encode(opcode::match_unit, 0, static_cast<std::uint_least8_t>(*rune));
+					break;
+				}
+			} [[fallthrough]];
+			default: result = encode(opcode::match_set, add_rune_set(std::forward<RS>(set))); break;
+		}
+		return result;
+	}
+
+	template <typename RS, class = std::enable_if_t<std::is_same_v<rune_set, std::decay_t<RS>>>>
+	std::ptrdiff_t encode_test_set(RS&& set)
+	{
+		std::ptrdiff_t result{0};
+		switch (set.kind()) {
+			case rune_set_kind::empty: result = encode(opcode::jump); break;
+			case rune_set_kind::full: result = encode(opcode::test_any); break;
+			case rune_set_kind::single: {
+				if (auto const rune = set.as_rune(); rune && ascii::isascii(*rune)) {
+					result = encode(opcode::test_unit, 0, static_cast<std::uint_least8_t>(*rune));
+					break;
+				}
+			} [[fallthrough]];
+			default: result = encode(opcode::test_set, add_rune_set(std::forward<RS>(set))); break;
+		}
+		return result;
+	}
+
 	template <class T, class = std::enable_if_t<std::is_same_v<std::decay_t<T>, char> || std::is_same_v<std::decay_t<T>, char32_t>>>
 	std::ptrdiff_t encode_unit_or_set(opcode unit_op, opcode set_op, T value, std::size_t nmin = 0, std::size_t nmax = (std::numeric_limits<std::size_t>::max)())
 	{
@@ -1094,10 +1157,10 @@ public:
 		return skip().encode_class(op, properties);
 	}
 
-	template <typename RS, class = std::enable_if_t<std::is_constructible_v<rune_set, RS&&>>>
+	template <typename RS, class = std::enable_if_t<std::is_same_v<rune_set, std::decay_t<RS>>>>
 	std::ptrdiff_t match_set(RS&& set)
 	{
-		return skip().encode(opcode::match_set, add_rune_set(std::forward<RS>(set)));
+		return skip().encode_set(std::forward<RS>(set));
 	}
 
 	encoder& skip(directive_traits callee_mode = directive_traits::none, directive_traits inhibit_mask = directive_traits::lexeme)
@@ -1120,7 +1183,8 @@ public:
 	}
 
 	void dcommit() noexcept { *std::exchange(program_directives_, &token_directives_) = directives_ & commit_mask; }
-	void drestore(directive_traits prior) noexcept { directives_ = prior; }
+	[[nodiscard]] directive_traits dsave() const noexcept { return directives_; }
+	void drestore(directive_traits value) noexcept { directives_ = value; }
 
 	[[nodiscard]] directive_traits dpush(directive_traits enable, directive_traits disable) noexcept
 	{
@@ -2008,7 +2072,7 @@ struct negative_lookahead_expression : unary_expression_node_interface<negative_
 
 	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const
 	{
-		// TODO: negate return this->e1.first(d, follow);
+		// TODO: if the size of the subexpression is 1, then we can take the complement of the first set
 		return follow;
 	}
 
@@ -3350,7 +3414,7 @@ public:
 	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
 	[[nodiscard]] lug::registers& registers() noexcept { return registers_; }
 	[[nodiscard]] lug::registers const& registers() const noexcept { return registers_; }
-	
+
 protected:
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 	static constexpr std::size_t actioncode = (std::numeric_limits<std::size_t>::max)();
@@ -3625,9 +3689,11 @@ public:
 		needs_reset_ = true;
 		detail::scope_fail const fixup_max_subject_position{[this]() noexcept { registers_.mr = (std::max)(registers_.mr, registers_.sr); }};
 		std::ptrdiff_t fail_count{0};
+		std::size_t test_sink{0};
 		for (auto instr_index = static_cast<std::size_t>(registers_.pc++); instr_index < program_->instructions.size(); instr_index = static_cast<std::size_t>(registers_.pc++)) {
 			instruction const instr{program_->instructions[instr_index]};
 			std::string_view const str{program_->data.data() + instr.offset32, instr.immediate16};
+			std::size_t* const sr_out{is_test_opcode(instr.op) ? &test_sink : &registers_.sr};
 			switch (instr.op) {
 				case opcode::jump: {
 					registers_.pc += instr.offset32;
@@ -3753,64 +3819,64 @@ public:
 					registers_.rc = responses_.size();
 				} break;
 				case opcode::match: {
-					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::compare));
+					fail_count = match_sequence(*sr_out, registers_.sr, str, std::mem_fn(&basic_parser::compare));
 				} break;
 				case opcode::match_cf: {
-					fail_count = match_sequence(registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
+					fail_count = match_sequence(*sr_out, registers_.sr, str, std::mem_fn(&basic_parser::casefold_compare));
 				} break;
 				case opcode::match_any: case opcode::test_any: {
-					fail_count = match_any(registers_.sr);
+					fail_count = match_any(*sr_out, registers_.sr);
 				} break;
 				case opcode::match_blank: case opcode::test_blank: {
-					fail_count = match_blank(registers_.sr);
+					fail_count = match_blank(*sr_out, registers_.sr);
 				} break;
 				case opcode::match_space: case opcode::test_space: {
-					fail_count = match_space(registers_.sr);
+					fail_count = match_space(*sr_out, registers_.sr);
 				} break;
 				case opcode::match_eol: case opcode::test_eol: {
-					fail_count = match_eol(registers_.sr, instr.immediate8);
+					fail_count = match_eol(*sr_out, registers_.sr, instr.immediate8);
 				} break;
 				case opcode::match_eoi: case opcode::test_eoi: {
-					fail_count = match_eoi(registers_.sr, instr.immediate8);
+					fail_count = match_eoi(*sr_out, registers_.sr, instr.immediate8);
 				} break;
 				case opcode::match_unit: case opcode::test_unit: {
-					fail_count = match_unit(registers_.sr, instr.immediate8);
+					fail_count = match_unit(*sr_out, registers_.sr, instr.immediate8);
 				} break;
 				case opcode::match_set: case opcode::test_set: {
-					fail_count = match_set(registers_.sr, program_->runesets[instr.immediate16]);
+					fail_count = match_set(*sr_out, registers_.sr, program_->runesets[instr.immediate16]);
 				} break;
 				case opcode::match_all_of: case opcode::test_all_of: {
-					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::all_of, instr));
+					fail_count = match_rune(*sr_out, registers_.sr, make_property_matcher(unicode::all_of, instr));
 				} break;
 				case opcode::match_any_of: case opcode::test_any_of: {
-					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::any_of, instr));
+					fail_count = match_rune(*sr_out, registers_.sr, make_property_matcher(unicode::any_of, instr));
 				} break;
 				case opcode::match_none_of: case opcode::test_none_of: {
-					fail_count = match_rune(registers_.sr, make_property_matcher(unicode::none_of, instr));
+					fail_count = match_rune(*sr_out, registers_.sr, make_property_matcher(unicode::none_of, instr));
 				} break;
 				case opcode::repeat_any: {
-					fail_count = repeat_any(registers_.sr, instr.unpack_min(), instr.unpack_max());
+					fail_count = repeat_any(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_blank: case opcode::skip_blank: {
-					fail_count = repeat_blank(registers_.sr, instr.unpack_min(), instr.unpack_max());
+					fail_count = repeat_blank(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_space: case opcode::skip_space: {
-					fail_count = repeat_space(registers_.sr, instr.unpack_min(), instr.unpack_max());
+					fail_count = repeat_space(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max());
 				} break;
 				case opcode::repeat_unit: {
-					fail_count = repeat_unit(registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
+					fail_count = repeat_unit(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max(), instr.immediate8);
 				} break;
 				case opcode::repeat_set: {
-					fail_count = repeat_set(registers_.sr, instr.unpack_min(), instr.unpack_max(), program_->runesets[instr.immediate16]);
+					fail_count = repeat_set(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max(), program_->runesets[instr.immediate16]);
 				} break;
 				case opcode::repeat_all_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::all_of, instr));
+					fail_count = repeat_rune(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::all_of, instr));
 				} break;
 				case opcode::repeat_any_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::any_of, instr));
+					fail_count = repeat_rune(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::any_of, instr));
 				} break;
 				case opcode::repeat_none_of: {
-					fail_count = repeat_rune(registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::none_of, instr));
+					fail_count = repeat_rune(*sr_out, registers_.sr, instr.unpack_min(), instr.unpack_max(), make_property_matcher(unicode::none_of, instr));
 				} break;
 				case opcode::condition_test: {
 					fail_count = (environment_->has_condition(str) != (instr.immediate8 != 0)) ? 1 : 0;
@@ -3879,7 +3945,7 @@ public:
 				default: throw_exception<bad_opcode>();
 			}
 			if (fail_count > 0) {
-				if ((instr.op >= opcode::test_any) && (instr.op <= opcode::test_none_of)) {
+				if (is_test_opcode(instr.op)) {
 					registers_.pc += instr.offset32;
 				} else {
 					if LUG_UNLIKELY(!fail(fail_count))
@@ -3953,26 +4019,25 @@ private:
 	}
 
 	template <class MatchOneFn, class... ExtraArgs>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchOneFn const& match_one, ExtraArgs const&... extra_args)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax, MatchOneFn const& match_one, ExtraArgs const&... extra_args)
 	{
-		std::size_t const i = sr;
 		std::size_t n = 0;
 		for ( ; n <= nmax; ++n) {
-			if (match_one(*this, sr, extra_args...) != 0)
+			if (match_one(*this, sr, sr, extra_args...) != 0)
 				break;
 		}
-		if (n >= nmin)
+		if (n >= nmin) {
+			sr_out = sr;
 			return 0;
-		sr = i;
+		}
 		return 1;
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_buffered(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
 	{
-		std::size_t const i = sr;
 		std::size_t n = 0;
-		auto const [first, last] = input_buffer_no_fill(i);
+		auto const [first, last] = input_buffer_no_fill(sr);
 		auto curr = first;
 		for ( ; n <= nmax; ++n) {
 			auto const next = match(curr, last);
@@ -3981,46 +4046,44 @@ private:
 			curr = *next;
 		}
 		if (n >= nmin) {
-			sr = i + static_cast<std::size_t>(curr - first);
+			sr_out = sr + static_cast<std::size_t>(curr - first);
 			return 0;
 		}
 		return 1;
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr_out, std::size_t sr, MatchFn const& match)
 	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
+		auto const [curr, last] = input_buffer(sr);
 		if (auto const next = match(curr, last); next) {
-			sr = i + static_cast<std::size_t>(*next - curr);
+			sr_out = sr + static_cast<std::size_t>(*next - curr);
 			return 0;
 		}
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr_out, std::size_t sr)
 	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
+		auto const [curr, last] = input_buffer(sr);
 		if LUG_LIKELY(curr != last) {
 			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
-			sr = i + static_cast<std::size_t>(next - curr);
+			sr_out = sr + static_cast<std::size_t>(next - curr);
 			return 0;
 		}
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_any(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
 		} else {
 			if ((nmin == 0) && (nmax == forever)) {
-				sr = input_source_.buffer().size();
+				sr_out = input_source_.buffer().size();
 				return 0;
 			}
-			return repeat_match_buffered(sr, nmin, nmax, [](auto curr, auto last) -> std::optional<std::decay_t<decltype(curr)>> {
+			return repeat_match_buffered(sr_out, sr, nmin, nmax, [](auto curr, auto last) -> std::optional<std::decay_t<decltype(curr)>> {
 				if LUG_LIKELY(curr != last) {
 					auto const next = std::find_if(curr + 1, last, utf8::is_lead_or_ascii);
 					if (next != curr)
@@ -4031,109 +4094,105 @@ private:
 		}
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr_out, std::size_t sr)
 	{
-		return match_with(sr, ascii::match_blank);
+		return match_with(sr_out, sr, ascii::match_blank);
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_blank(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
 		} else {
-			return repeat_match_buffered(sr, nmin, nmax, ascii::match_blank);
+			return repeat_match_buffered(sr_out, sr, nmin, nmax, ascii::match_blank);
 		}
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr_out, std::size_t sr)
 	{
-		return match_with(sr, ascii::match_space);
+		return match_with(sr_out, sr, ascii::match_space);
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_space(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
 		} else {
-			return repeat_match_buffered(sr, nmin, nmax, ascii::match_space);
+			return repeat_match_buffered(sr_out, sr, nmin, nmax, ascii::match_space);
 		}
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr_out, std::size_t sr, std::uint_least8_t mode)
 	{
-		std::size_t i = sr;
 		if (mode != 0)
-			(void)repeat_blank(i, 0, forever);
-		if (std::ptrdiff_t const eol_fail_count = match_with(i, ascii::match_eol); eol_fail_count != 0)
+			(void)repeat_blank(sr, sr, 0, forever);
+		if (std::ptrdiff_t const eol_fail_count = match_with(sr, sr, ascii::match_eol); eol_fail_count != 0)
 			return eol_fail_count;
-		sr = i;
+		sr_out = sr;
 		return 0;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t& sr_out, std::size_t sr, std::uint_least8_t mode)
 	{
-		std::size_t i = sr;
 		if constexpr (detail::input_source_has_options<InputSource>::value) {
 			if ((input_source_.options() & source_options::interactive) != source_options::none) {
 				if (mode != 0)
-					(void)repeat_match_buffered(i, 0, forever, ascii::match_space);
-				if (i >= input_source_.buffer().size()) {
-					sr = i;
+					(void)repeat_match_buffered(sr, sr, 0, forever, ascii::match_space);
+				if (sr >= input_source_.buffer().size()) {
+					sr_out = sr;
 					return 0;
 				}
 				return 1;
 			}
 		}
 		if (mode != 0)
-			(void)repeat_space(i, 0, forever);
-		if (!available(i)) {
-			sr = i;
+			(void)repeat_space(sr, sr, 0, forever);
+		if (!available(sr)) {
+			sr_out = sr;
 			return 0;
 		}
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr, std::uint_least8_t value)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr_out, std::size_t sr, std::uint_least8_t const value)
 	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
+		auto const [curr, last] = input_buffer(sr);
 		if LUG_LIKELY(curr != last) {
 			if (static_cast<unsigned char>(*curr) == value) {
-				sr = i + 1;
+				sr_out = sr + 1;
 				return 0;
 			}
 		}
 		return 1;
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_unit(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t unit)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_unit(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t unit)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
 		} else {
-			std::size_t const i = sr;
-			auto const [first, last] = input_buffer_no_fill(i);
+			auto const [first, last] = input_buffer_no_fill(sr);
 			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
 			auto const next = std::find_if(first, tail, [unit](auto const c) { return static_cast<unsigned char>(c) != unit; });
 			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
-				sr = i + count;
+				sr_out = sr + count;
 				return 0;
 			}
 			return 1;
 		}
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_set(std::size_t& sr, rune_set const& set)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_set(std::size_t& sr_out, std::size_t sr, rune_set const& set)
 	{
-		return match_with(sr, set);
+		return match_with(sr_out, sr, set);
 	}
 
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_set(std::size_t& sr, std::size_t nmin, std::size_t nmax, rune_set const& set)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_set(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax, rune_set const& set)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_set), set);
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_set), set);
 		} else {
-			return repeat_match_buffered(sr, nmin, nmax, set);
+			return repeat_match_buffered(sr_out, sr, nmin, nmax, set);
 		}
 	}
 
@@ -4157,32 +4216,31 @@ private:
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
+	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr_out, std::size_t sr, MatchFn const& match)
 	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
+		auto const [curr, last] = input_buffer(sr);
 		if (auto const next = decode_and_match_rune(curr, last, match); next) {
-			sr = i + static_cast<std::size_t>(*next - curr);
+			sr_out = sr + static_cast<std::size_t>(*next - curr);
 			return 0;
 		}
 		return 1;
 	}
 
 	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr_out, std::size_t sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
 	{
 		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
+			return repeat_match_incrementally(sr_out, sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
 		} else {
-			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last) { return decode_and_match_rune(first, last, match); });
+			return repeat_match_buffered(sr_out, sr, nmin, nmax, [&match](auto first, auto last) { return decode_and_match_rune(first, last, match); });
 		}
 	}
 
 	template <class Compare>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_sequence(std::size_t& sr_out, std::size_t sr, std::string_view str, Compare const& comp)
 	{
-		if (std::size_t const i = sr, n = str.size(); !n || (available(i, n) && comp(*this, i, n, str))) {
-			sr = i + n;
+		if (std::size_t const n = str.size(); !n || (available(sr, n) && comp(*this, sr, n, str))) {
+			sr_out = sr + n;
 			return 0;
 		}
 		return 1;
@@ -4192,7 +4250,7 @@ private:
 	[[nodiscard]] std::ptrdiff_t match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(tsr, mod(symbol), comp) == 0); })) {
+		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(tsr, tsr, mod(symbol), comp) == 0); })) {
 			sr = tsr;
 			return 0;
 		}
@@ -4203,21 +4261,21 @@ private:
 	[[nodiscard]] std::ptrdiff_t match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(sr, mod(symbol), comp) == 0); }) ? 0 : 1;
+		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(sr, sr, mod(symbol), comp) == 0); }) ? 0 : 1;
 	}
 
 	template <class Modify, class Compare>
 	[[nodiscard]] std::ptrdiff_t match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : 1;
+		return (symbol_index < symbols.size()) ? match_sequence(sr, sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : 1;
 	}
 
 	template <class Modify, class Compare>
 	[[nodiscard]] std::ptrdiff_t match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
 	{
 		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
+		return (symbol_index < symbols.size()) ? match_sequence(sr, sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
 	}
 
 	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
