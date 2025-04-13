@@ -14,6 +14,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string>
 #include <string_view>
@@ -424,6 +425,13 @@ template <class T, class = std::enable_if_t<std::is_signed_v<T>>>
 		auto const sign_mask = static_cast<U>(-static_cast<T>(x < 0)) << (static_cast<unsigned int>(std::numeric_limits<U>::digits) - n);
 		return static_cast<T>(shifted | sign_mask);
 	}
+}
+
+template <class T>
+[[nodiscard]] std::shared_ptr<T> make_shared_array(std::size_t size)
+{
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
+	return std::shared_ptr<T>(new T[size], std::default_delete<T[]>());
 }
 
 template <class T> struct type_info_tag { constexpr type_info_tag() noexcept = default; };

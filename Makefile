@@ -23,7 +23,7 @@ CXXSTD = -std=c++17
 CXXWARNFLAGS = -pedantic -Wall -Wconversion -Wextra -Wextra-semi -Wformat -Wformat=2 -Werror=format-security -Wimplicit-fallthrough -Wshadow -Wsign-conversion -Wsuggest-override -Wno-parentheses -Wno-logical-not-parentheses
 CXXOPTFLAGS = -Os -ffunction-sections -fdata-sections
 CXXCGENFLAGS = -fexceptions -frtti -fstack-clash-protection -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
-CXXEXTRAFLAGS =
+CXXEXTRAFLAGS = 
 CXXFLAGS = $(CXXSTD) $(CXXWARNFLAGS) $(CXXOPTFLAGS) $(CXXCGENFLAGS) $(CXXEXTRAFLAGS) -Iinclude
 LDFLAGS = $(CXXSTD) -s -fPIE -Wl,-z,nodlopen -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now -Wl,--as-needed -Wl,--no-copy-dt-needed-entries
 CLANGTIDY = clang-tidy
@@ -49,7 +49,7 @@ TOOLS_BIN = $(TOOLS:%=tools/%)
 TOOLS_OBJ = $(TOOLS:%=tools/%.o)
 
 # header dependencies
-HEADER_NAMES = ascii config detail error iostream stdio unicode utf8 lug
+HEADER_NAMES = ascii config detail error iostream sets stdio unicode utf8 lug
 HEADERS = $(HEADER_NAMES:%=include/lug/%.hpp)
 
 # shell scripts
@@ -161,6 +161,8 @@ install: all
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/error.hpp
 	@cp -f include/lug/iostream.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
+	@cp -f include/lug/sets.hpp $(DESTDIR)$(PREFIX)/include/lug
+	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/sets.hpp
 	@cp -f include/lug/stdio.hpp $(DESTDIR)$(PREFIX)/include/lug
 	@chmod 644 $(DESTDIR)$(PREFIX)/include/lug/stdio.hpp
 	@cp -f include/lug/unicode.hpp $(DESTDIR)$(PREFIX)/include/lug
@@ -176,6 +178,7 @@ uninstall:
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/detail.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/error.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/iostream.hpp
+	@rm -f $(DESTDIR)$(PREFIX)/include/lug/sets.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/stdio.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/unicode.hpp
 	@rm -f $(DESTDIR)$(PREFIX)/include/lug/utf8.hpp

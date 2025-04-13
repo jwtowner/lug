@@ -8,7 +8,6 @@
 #include <lug/detail.hpp>
 
 #include <array>
-#include <bitset>
 #include <optional>
 
 #undef isascii

@@ -134,12 +134,12 @@ void test_directives_stack_no_skip_operations()
 	lug::program prog;
 	lug::program_callees prog_callees;
 	for (int i = 0; i < 256; ++i) {
-		auto const initial_mode = static_cast<lug::directives>(static_cast<std::uint_least8_t>(i));
-		lug::encoder enc{prog, prog_callees, initial_mode};
-		enc.dpsh(lug::directives::none, lug::directives::none);
-		assert(enc.mode() == initial_mode); // No change
-		enc.dpop(lug::directives::none);
-		assert(enc.mode() == initial_mode); // No change
+		auto const dinitial = static_cast<lug::directive_traits>(static_cast<std::uint_least8_t>(i));
+		lug::encoder enc{prog, prog_callees, dinitial};
+		auto const dprior = enc.dpush(lug::directive_traits::none, lug::directive_traits::none);
+		assert(enc.directives() == dinitial); // No change
+		enc.dpop(dprior);
+		assert(enc.directives() == dinitial); // No change
 		assert(prog.instructions.empty()); // No instructions added
 	}
 }

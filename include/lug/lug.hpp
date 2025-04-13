@@ -7,7 +7,7 @@
 
 #include <lug/ascii.hpp>
 #include <lug/utf8.hpp>
-#include <lug/rune.hpp>
+#include <lug/sets.hpp>
 
 #include <memory>
 #include <numeric>
@@ -143,27 +143,38 @@ template <class A> inline constexpr bool is_capture_action_v = std::is_invocable
 template <class T> inline constexpr bool is_capture_target_v = std::is_same_v<std::decay_t<T>, syntax> || std::is_assignable_v<std::decay_t<T>, syntax const&>;
 template <class E> inline constexpr bool is_expression_v = is_expression_node_v<E> || is_callable_expression_v<E> || is_primitive_expression_v<E> || is_predicate_v<E>;
 
-enum class directives : std::uint_least8_t { none = 0U, caseless = 1U, eps = 2U, lexeme = 4U, noskip = 8U, preskip = 16U, postskip = 32U };
-template <> inline constexpr bool is_flag_enum_v<directives> = true;
-enum class effect_traits : std::uint_least8_t { none = 0U, action = 1U, binding = 2U, captures = 4U, cuts = 8U, raises = 8U, runtime = 16U };
-template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
-
-struct program_traits
-{
-	effect_traits effects{effect_traits::none};
-	bool nofail{true};
-	bool nullable{true};
-	bool head_optimizable{false};
-	constexpr program_traits() noexcept = default;
-	constexpr program_traits(effect_traits in_effects, bool in_nofail, bool in_nullable, bool in_head_optimizable) noexcept
-		: effects{in_effects}, nofail{in_nofail}, nullable{in_nullable}, head_optimizable{in_head_optimizable} {}
-};
-
-using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, directives>>;
+using program_callees = std::vector<std::tuple<lug::rule const*, lug::program const*, std::ptrdiff_t, bool>>;
 using error_handler = std::function<error_response(error_context&)>;
 using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
+
+enum class directive_traits : std::uint_least8_t { none = 0U, caseless = 1U, lexeme = 2U, noskip = 4U, preskip = 8U, postskip = 16U, all = 31U };
+template <> inline constexpr bool is_flag_enum_v<directive_traits> = true;
+enum class effect_traits : std::uint_least8_t { none = 0U, action = 1U, binding = 2U, captures = 4U, cuts = 8U, raises = 8U, runtime = 16U, all = 31U };
+template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
+
+struct program_traits
+{
+	rune_set first;
+	directive_traits directives{directive_traits::none};
+	effect_traits effects{effect_traits::none};
+	bool nofail{true};
+	bool nullable{true};
+	bool head_optimizable{false};
+	bool opaque{true};
+
+	void swap(program_traits& other) noexcept
+	{
+		first.swap(other.first);
+		std::swap(directives, other.directives);
+		std::swap(effects, other.effects);
+		std::swap(nofail, other.nofail);
+		std::swap(nullable, other.nullable);
+		std::swap(head_optimizable, other.head_optimizable);
+		std::swap(opaque, other.opaque);
+	}
+};
 
 template <class T>
 inline constexpr bool is_attribute_frame_persistable_v =
@@ -328,13 +339,10 @@ struct program
 	std::vector<semantic_action> actions;
 	std::vector<semantic_capture_action> captures;
 	std::vector<attribute_frame_handle> frames;
-	directives entry_mode{directives::eps};
-	program_traits first;
-	program_traits follow;
+	program_traits info;
 
 	void concatenate(program const& src)
 	{
-		bool const was_empty = instructions.empty();
 		std::size_t const data_offset = data.size();
 		std::size_t const handlers_offset = handlers.size();
 		std::size_t const predicates_offset = predicates.size();
@@ -376,16 +384,8 @@ struct program
 		actions.insert(actions.end(), src.actions.begin(), src.actions.end());
 		captures.insert(captures.end(), src.captures.begin(), src.captures.end());
 		frames.insert(frames.end(), src.frames.begin(), src.frames.end());
-		entry_mode = (entry_mode & ~directives::eps) | (entry_mode & src.entry_mode & directives::eps);
-		if (was_empty) {
-			first = src.first;
-			follow = src.follow;
-		} else {
-			follow.effects |= src.first.effects | src.follow.effects;
-			follow.nofail = follow.nofail && src.first.nofail && src.follow.nofail;
-			follow.nullable = follow.nullable && src.first.nullable && src.follow.nullable;
-			follow.head_optimizable = follow.head_optimizable && src.first.nofail && src.follow.nofail;
-		}
+		if (info.opaque)
+			info = src.info;
 	}
 
 	void swap(program& p) noexcept
@@ -398,13 +398,10 @@ struct program
 		predicates.swap(p.predicates);
 		actions.swap(p.actions);
 		captures.swap(p.captures);
-		std::swap(entry_mode, p.entry_mode);
-		std::swap(first, p.first);
-		std::swap(follow, p.follow);
+		info.swap(p.info);
 	}
 
-	[[nodiscard]] program_traits const& first_traits() const noexcept { return first; }
-	[[nodiscard]] program_traits const& follow_traits() const noexcept { return follow; }
+	[[nodiscard]] program_traits const& traits() const noexcept { return info; }
 };
 
 class rule
@@ -413,8 +410,6 @@ class rule
 	friend grammar start(rule const& start_rule, rule const& skip_rule);
 	program program_;
 	program_callees callees_;
-	program_traits first_{effect_traits::captures | effect_traits::cuts | effect_traits::raises, false, false, false};
-	program_traits follow_{effect_traits::captures | effect_traits::cuts | effect_traits::raises, false, false, false};
 	bool currently_encoding_{false};
 public:
 	rule() noexcept = default;
@@ -429,8 +424,7 @@ public:
 	template <class Recovery> [[nodiscard]] auto operator[](failure<Recovery> const& reason) const;
 	template <class Recovery> [[nodiscard]] auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] auto operator^=(Handler&& handler) const;
-	[[nodiscard]] program_traits const& first_traits() const noexcept { return first_; }
-	[[nodiscard]] program_traits const& follow_traits() const noexcept { return follow_; }
+	[[nodiscard]] program_traits const& traits() const noexcept { return program_.traits(); }
 };
 
 class grammar
@@ -442,8 +436,7 @@ public:
 	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
-	[[nodiscard]] program_traits const& first_traits() const noexcept { return program_.first_traits(); }
-	[[nodiscard]] program_traits const& follow_traits() const noexcept { return program_.follow_traits(); }
+	[[nodiscard]] program_traits const& traits() const noexcept { return program_.traits(); }
 };
 
 struct syntax_position
@@ -885,60 +878,74 @@ failure(std::string_view) -> failure<void>;
 
 class encoder
 {
-	static constexpr std::size_t inline_max_instructions{8};
-	static constexpr std::size_t inline_max_objects{4};
-
-	rule* rule_{nullptr};
-	program* program_{nullptr};
-	program_callees* callees_{nullptr};
-	std::shared_ptr<attribute_frame_info> attribute_frame_info_;
-	std::vector<directives> mode_;
-	directives entry_mode_{directives::none};
-
-	template <class Item, class ItemValue, class = std::enable_if_t<std::is_constructible_v<Item, ItemValue&&>>>
-	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, ItemValue&& item)
-	{
-		if constexpr (std::is_same_v<std::decay_t<Item>, std::decay_t<ItemValue>> && detail::is_equality_comparable_v<std::decay_t<Item>>) {
-			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(detail::push_back_unique(items, std::forward<ItemValue>(item)));
-		} else {
-			items.push_back(std::forward<ItemValue>(item));
-			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
-		}
-	}
-
-	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> add_string(std::string_view str)
-	{
-		std::size_t const index = program_->data.size();
-		program_->data.insert(program_->data.end(), str.begin(), str.end());
-		return {
-			detail::checked_cast<std::int_least32_t, resource_limit_error>(index, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)())),
-			detail::checked_cast<std::uint_least16_t, resource_limit_error>(str.size(), 0U, (std::numeric_limits<std::uint_least16_t>::max)())
-		};
-	}
-
-	[[nodiscard]] LUG_NONNULL(3) std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
-	{
-		directives const callee_mode = mode_.back();
-		skip(p->entry_mode ^ directives::eps, directives::noskip);
-		callees_->emplace_back(r, p, here(), callee_mode);
-		return encode(opcode::call, off, prec, 0);
-	}
-
 public:
-	explicit encoder(program& p, program_callees& c, directives initial = directives::eps) : program_{&p}, callees_{&c}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{initial} {}
-	explicit encoder(rule& r) : rule_{&r}, program_{&r.program_}, callees_{&r.callees_}, attribute_frame_info_{std::make_shared<attribute_frame_info>()}, mode_{directives::eps} { rule_->currently_encoding_ = true; }
+	explicit encoder(program& p, program_callees& c, directive_traits initial = directive_traits::none)
+		: program_{&p}
+		, callees_{&c}
+		, frame_info_{std::make_shared<attribute_frame_info>()}
+		, program_directives_{&program_->info.directives}
+		, directives_{initial}
+	{}
+
+	explicit encoder(rule& r)
+		: rule_{&r}
+		, program_{&r.program_}
+		, callees_{&r.callees_}
+		, frame_info_{std::make_shared<attribute_frame_info>()}
+		, program_directives_{&program_->info.directives}
+		, directives_{directive_traits::none}
+	{
+		rule_->currently_encoding_ = true;
+	}
+
+	encoder(encoder&& other) noexcept
+		: rule_{std::exchange(other.rule_, nullptr)}
+		, program_{std::exchange(other.program_, nullptr)}
+		, callees_{std::exchange(other.callees_, nullptr)}
+		, frame_info_{std::exchange(other.frame_info_, nullptr)}
+		, program_directives_{(other.program_directives_ == &other.token_directives_) ? &token_directives_ : std::exchange(other.program_directives_, nullptr)}
+		, token_directives_{std::exchange(other.token_directives_, directive_traits::none)}
+		, directives_{std::exchange(other.directives_, directive_traits::none)}
+		, nullable_{std::exchange(other.nullable_, true)}
+	{}
+
+	encoder& operator=(encoder&& e) noexcept
+	{
+		encoder{std::move(e)}.swap(*this);
+		return *this;
+	}
+
+	~encoder()
+	{
+		if (rule_ != nullptr)
+			rule_->currently_encoding_ = false;
+	}
+
 	encoder(encoder const&) = delete;
-	encoder(encoder&& e) noexcept : rule_{std::exchange(e.rule_, nullptr)}, program_{std::exchange(e.program_, nullptr)}, callees_{std::exchange(e.callees_, nullptr)}, attribute_frame_info_{std::exchange(e.attribute_frame_info_, nullptr)}, mode_{std::move(e.mode_)}, entry_mode_{e.entry_mode_} {}
 	encoder& operator=(encoder const&) = delete;
-	encoder& operator=(encoder&& e) noexcept { encoder{std::move(e)}.swap(*this); return *this; }
-	~encoder() { if (program_ != nullptr) { program_->entry_mode = entry_mode(); } if (rule_ != nullptr) { rule_->currently_encoding_ = false; } }
-	void swap(encoder& e) noexcept { std::swap(rule_, e.rule_); std::swap(program_, e.program_); std::swap(callees_, e.callees_); mode_.swap(e.mode_); std::swap(entry_mode_, e.entry_mode_); }
-	[[nodiscard]] bool is_frame_empty() const noexcept { return attribute_frame_info_->empty(); }
-	[[nodiscard]] attribute_frame_handle get_frame_handle() const noexcept { return attribute_frame_info_->handle(); }
-	[[nodiscard]] std::uint_least16_t get_frame_handle_index() { return add_item(program_->frames, attribute_frame_info_->handle()); }
-	template <class Target, class = std::enable_if_t<is_attribute_frame_persistable_v<Target>>> LUG_NONNULL(2) void add_to_frame(Target* target) { attribute_frame_info_->add(target); }
-	[[nodiscard]] directives mode() const noexcept { return mode_.back(); }
-	[[nodiscard]] directives entry_mode() const noexcept { return (entry_mode_ & ~directives::eps) | mode_.back(); }
+
+	void swap(encoder& other) noexcept
+	{
+		std::swap(rule_, other.rule_);
+		std::swap(program_, other.program_);
+		std::swap(callees_, other.callees_);
+		frame_info_.swap(other.frame_info_);
+		auto const old_program_directives = (program_directives_ == &token_directives_) ? &other.token_directives_ : program_directives_;
+		auto const old_other_program_directives = (other.program_directives_ == &other.token_directives_) ? &token_directives_ : other.program_directives_;
+		program_directives_ = old_other_program_directives;
+		other.program_directives_ = old_program_directives;
+		std::swap(token_directives_, other.token_directives_);
+		std::swap(directives_, other.directives_);
+		std::swap(nullable_, other.nullable_);
+	}
+
+	[[nodiscard]] bool is_frame_empty() const noexcept { return frame_info_->empty(); }
+	[[nodiscard]] attribute_frame_handle get_frame_handle() const noexcept { return frame_info_->handle(); }
+	[[nodiscard]] std::uint_least16_t get_frame_handle_index() { return add_item(program_->frames, frame_info_->handle()); }
+	template <class Target, class = std::enable_if_t<is_attribute_frame_persistable_v<Target>>> LUG_NONNULL(2) void add_to_frame(Target* target) { frame_info_->add(target); }
+	[[nodiscard]] bool caseless() const noexcept { return (directives_ & directive_traits::caseless) != directive_traits::none; }
+	[[nodiscard]] directive_traits directives() const noexcept { return directives_; }
+	template <class E, class = std::enable_if_t<is_expression_node_v<E> || is_callable_expression_v<E>>> void derive_traits(E const& e);
 	[[nodiscard]] std::ptrdiff_t here() const noexcept { return static_cast<std::ptrdiff_t>(program_->instructions.size()); }
 	[[nodiscard]] instruction& instruction_at(std::ptrdiff_t addr) { return program_->instructions[static_cast<std::size_t>(addr)]; }
 	void jump_to_target(std::ptrdiff_t addr, std::ptrdiff_t target) { instruction_at(addr).offset32 = detail::checked_cast<std::int_least32_t, program_limit_error>(target - addr - 1); }
@@ -967,7 +974,7 @@ public:
 										(!p.instructions.empty() && (p.instructions.size() <= inline_max_instructions)) &&
 										((p.uniforms.size() + p.runesets.size() + p.handlers.size() + p.actions.size() +
 										  p.captures.size() + p.predicates.size()) <= inline_max_objects))
-			return skip(p.entry_mode, directives::noskip).append(p);
+			return skip(p.info.directives, directive_traits::noskip).append(p);
 		return do_call(&r, &r.program_, 0, prec);
 	}
 
@@ -975,19 +982,19 @@ public:
 	std::ptrdiff_t call_with_frame(T&& target, std::uint_least16_t prec, Args&&... args)
 	{
 		std::uint_least16_t handle_index{0};
-		if (!attribute_frame_info_->empty()) {
+		if (!frame_info_->empty()) {
 			handle_index = get_frame_handle_index();
 			encode(opcode::attribute_push, handle_index);
 		}
 		std::ptrdiff_t const result{call(std::forward<T>(target), prec, std::forward<Args>(args)...)};
-		if (!attribute_frame_info_->empty())
+		if (!frame_info_->empty())
 			encode(opcode::attribute_pop, handle_index);
 		return result;
 	}
 
 	std::ptrdiff_t recover_push_call(rule const& r)
 	{
-		callees_->emplace_back(&r, &r.program_, here(), mode_.back());
+		callees_->emplace_back(&r, &r.program_, here(), nullable_);
 		return encode(opcode::recover_push, 0, 0, 0);
 	}
 
@@ -1019,7 +1026,7 @@ public:
 	template <class T, class = std::enable_if_t<std::is_same_v<std::decay_t<T>, char> || std::is_same_v<std::decay_t<T>, char32_t>>>
 	std::ptrdiff_t encode_unit_or_set(opcode unit_op, opcode set_op, T value, std::size_t nmin = 0, std::size_t nmax = (std::numeric_limits<std::size_t>::max)())
 	{
-		if ((mode() & directives::caseless) != directives::none) {
+		if (caseless()) {
 			auto const rune = static_cast<char32_t>(static_cast<std::make_unsigned_t<T>>(value));
 			if (auto const properties = unicode::query(rune).properties(); ((properties & unicode::ptype::Cased) != unicode::ptype::None))
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(rune)).build()));
@@ -1032,10 +1039,10 @@ public:
 
 	std::ptrdiff_t match(std::string_view pattern)
 	{
-		skip(!pattern.empty() ? directives::eps : directives::none);
+		skip();
 		if (pattern.size() == 1)
 			return encode_unit_or_set(opcode::match_unit, opcode::match_set, pattern.front());
-		if (!pattern.empty() && ((mode() & directives::caseless) != directives::none))
+		if (!pattern.empty() && caseless())
 			return encode(opcode::match_cf, utf8::tocasefold(pattern));
 		return encode(opcode::match, pattern);
 	}
@@ -1052,68 +1059,104 @@ public:
 		return skip().encode(opcode::match_set, add_rune_set(std::forward<RS>(set)));
 	}
 
-	void dpsh(directives enable, directives disable)
-	{
-		mode_.push_back((mode_.back() & ~disable) | enable);
-	}
-
-	void dpop(directives relay)
-	{
-		directives const prev_mode = detail::pop_back(mode_);
-		directives& curr_mode = mode_.back();
-		curr_mode = (curr_mode & ~relay) | (prev_mode & relay);
-		if (((curr_mode & directives::postskip) == directives::none) && ((prev_mode & (directives::lexeme | directives::noskip | directives::postskip)) == directives::postskip))
-			encode(opcode::skip_space);
-	}
-
-	void ddrop()
-	{
-		mode_.pop_back();
-	}
-
-	[[nodiscard]] bool should_skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme) const
-	{
-		return ((((mode_.back() | callee_mode)) & (inhibit_mask | directives::preskip)) == directives::preskip);
-	}
-
-	encoder& commit_eps(directives callee_mode = directives::eps)
-	{
-		directives& curr_mode = mode_.back();
-		if (entry_mode_ == directives::none)
-			entry_mode_ = (curr_mode & (directives::caseless | directives::lexeme | directives::noskip)) | directives::eps;
-		curr_mode &= ~(callee_mode & directives::eps);
-		return *this;
-	}
-
-	[[nodiscard]] bool prepare_skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme)
-	{
-		bool const result = should_skip(callee_mode, inhibit_mask);
-		commit_eps(callee_mode);
-		return result;
-	}
-
-	encoder& skip(directives callee_mode = directives::eps, directives inhibit_mask = directives::lexeme)
+	encoder& skip(directive_traits callee_mode = directive_traits::none, directive_traits inhibit_mask = directive_traits::lexeme)
 	{
 		if (prepare_skip(callee_mode, inhibit_mask))
 			encode(opcode::skip_space);
 		return *this;
 	}
+
+	[[nodiscard]] bool should_skip(directive_traits callee_mode = directive_traits::none, directive_traits inhibit_mask = directive_traits::lexeme) const
+	{
+		return ((directives_ | callee_mode) & (inhibit_mask | directive_traits::preskip)) == directive_traits::preskip;
+	}
+
+	[[nodiscard]] bool prepare_skip(directive_traits callee_mode = directive_traits::none, directive_traits inhibit_mask = directive_traits::lexeme)
+	{
+		bool const result = should_skip(callee_mode, inhibit_mask);
+		dcommit();
+		return result;
+	}
+
+	void dcommit() noexcept { *std::exchange(program_directives_, &token_directives_) = directives_ & commit_mask; }
+	void drestore(directive_traits prior) noexcept { directives_ = prior; }
+
+	[[nodiscard]] directive_traits dpush(directive_traits enable, directive_traits disable) noexcept
+	{
+		auto const prior = directives_;
+		directives_ = (prior & ~disable) | enable;
+		return prior;
+	}
+
+	void dpop(directive_traits prior)
+	{
+		if (((prior & directive_traits::postskip) == directive_traits::none) && ((directives_ & postskip_mask) == directive_traits::postskip))
+			encode(opcode::skip_space);
+		directives_ = prior;
+	}
+
+	[[nodiscard]] bool nsave() const noexcept { return nullable_; }
+	void nrestore(bool value) noexcept { nullable_ = value; }
+	void njoin(bool value) noexcept { nullable_ = nullable_ && value; }
+
+private:
+	static constexpr directive_traits commit_mask{directive_traits::caseless | directive_traits::lexeme | directive_traits::noskip};
+	static constexpr directive_traits postskip_mask{directive_traits::lexeme | directive_traits::noskip | directive_traits::postskip};
+	static constexpr std::size_t inline_max_instructions{8};
+	static constexpr std::size_t inline_max_objects{4};
+
+	template <class Item, class ItemValue, class = std::enable_if_t<std::is_constructible_v<Item, ItemValue&&>>>
+	[[nodiscard]] std::uint_least16_t add_item(std::vector<Item>& items, ItemValue&& item)
+	{
+		if constexpr (std::is_same_v<std::decay_t<Item>, std::decay_t<ItemValue>> && detail::is_equality_comparable_v<std::decay_t<Item>>) {
+			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(detail::push_back_unique(items, std::forward<ItemValue>(item)));
+		} else {
+			items.push_back(std::forward<ItemValue>(item));
+			return detail::checked_cast<std::uint_least16_t, resource_limit_error>(items.size() - 1);
+		}
+	}
+
+	[[nodiscard]] std::pair<std::int_least32_t, std::uint_least16_t> add_string(std::string_view str)
+	{
+		std::size_t const index = program_->data.size();
+		program_->data.insert(program_->data.end(), str.begin(), str.end());
+		return {
+			detail::checked_cast<std::int_least32_t, resource_limit_error>(index, 0U, static_cast<std::size_t>((std::numeric_limits<std::int_least32_t>::max)())),
+			detail::checked_cast<std::uint_least16_t, resource_limit_error>(str.size(), 0U, (std::numeric_limits<std::uint_least16_t>::max)())
+		};
+	}
+
+	[[nodiscard]] LUG_NONNULL(3) std::ptrdiff_t do_call(rule const* r, program const* p, std::ptrdiff_t off, std::uint_least16_t prec)
+	{
+		skip(p->info.directives, directive_traits::noskip);
+		callees_->emplace_back(r, p, here(), nullable_);
+		return encode(opcode::call, off, prec, 0);
+	}
+
+	rule* rule_{nullptr};
+	program* program_{nullptr};
+	program_callees* callees_{nullptr};
+	std::shared_ptr<attribute_frame_info> frame_info_;
+	directive_traits* program_directives_{nullptr};
+	directive_traits token_directives_{directive_traits::none};
+	directive_traits directives_{directive_traits::none};
+	bool nullable_{true};
 };
 
 template <class E, class = void> struct expression_node_has_effects_property : std::false_type {};
-template <class E> struct expression_node_has_effects_property<E, std::enable_if_t<std::is_same_v<effect_traits, decltype(std::declval<E const&>().effects())>>> : std::true_type {};
+template <class E> struct expression_node_has_effects_property<E, std::enable_if_t<std::is_same_v<effect_traits, decltype(std::declval<E const&>().effects(std::declval<effect_traits>()))>>> : std::true_type {};
 template <class E> inline constexpr bool expression_node_has_effects_property_v = expression_node_has_effects_property<E>::value;
 
 template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
-[[nodiscard]] constexpr effect_traits expression_effects([[maybe_unused]] E const& e) noexcept
+[[nodiscard]] constexpr effect_traits expression_effects([[maybe_unused]] E const& e, [[maybe_unused]] effect_traits opaque_effects = effect_traits::all) noexcept
 {
 	if constexpr ((E::static_effects & effect_traits::runtime) != effect_traits::none) {
 		if constexpr (expression_node_has_effects_property_v<E>) {
-			return e.effects();
+			return e.effects(opaque_effects);
 		} else if constexpr (is_unary_expression_node_v<E>) {
-			return lug::expression_effects(e.e1);
+			return lug::expression_effects(e.e1, opaque_effects);
 		} else if constexpr (is_binary_expression_node_v<E>) {
-			return lug::expression_effects(e.e1) | lug::expression_effects(e.e2);
+			return lug::expression_effects(e.e1, opaque_effects) | lug::expression_effects(e.e2, opaque_effects);
 		} else {
 			static_assert(detail::always_false_v<E>, "expression node has no effects property and is not a unary or binary expression node");
 		}
@@ -1210,6 +1253,32 @@ template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 	}
 }
 
+template <class E, class>
+void encoder::derive_traits(E const& e)
+{
+	auto& traits = program_->info;
+	if constexpr (is_expression_node_v<E>) {
+		traits.first = e.first(*this, rune_set::all());
+		traits.effects = lug::expression_effects(e, effect_traits::none);
+		traits.nofail = lug::is_expression_nofail(e);
+		traits.nullable = lug::is_expression_nullable(e);
+		traits.head_optimizable = lug::is_expression_head_optimizable(e);
+		traits.opaque = false;
+	} else {
+		if (auto& callee_traits = e.traits(); callee_traits.opaque) {
+			traits.first = rune_set::all();
+			traits.effects = effect_traits::none;
+			traits.nofail = false;
+			traits.nullable = false;
+			traits.head_optimizable = false;
+			traits.opaque = false;
+		} else {
+			traits = callee_traits;
+		}
+	}
+	traits.directives = directive_traits::none;
+}
+
 template <class Derived>
 struct common_expression_node_interface
 {
@@ -1237,7 +1306,7 @@ struct unary_expression_node_interface : common_expression_node_interface<Derive
 	E1 e1;
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
 	constexpr explicit unary_expression_node_interface(X1&& x1) : e1(std::forward<X1>(x1)) {}
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return this->e1.first(d, follow); }
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const { return this->e1.first(d, follow); }
 	static constexpr effect_traits static_effects = E1::static_effects;
 	static constexpr certainty static_nofail = E1::static_nofail;
 	static constexpr certainty static_nullable = E1::static_nullable;
@@ -1262,7 +1331,7 @@ struct raise_expression : leaf_expression_node_interface<raise_expression<Recove
 	failure<Recovery> reason;
 	constexpr explicit raise_expression(failure<Recovery> const& fail) noexcept : reason{fail} {}
 	void evaluate(encoder& d) const { return d.raise_failure(reason); }
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 	static constexpr effect_traits static_effects = effect_traits::raises;
 };
 
@@ -1284,7 +1353,7 @@ struct expect_expression : unary_expression_node_interface<expect_expression<E1,
 		d.jump_to_here(commit);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 	static constexpr effect_traits static_effects = E1::static_effects | effect_traits::raises;
 };
 
@@ -1322,7 +1391,7 @@ struct recover_response_expression : leaf_expression_node_interface<recover_resp
 	error_response response;
 	constexpr explicit recover_response_expression(error_response r) noexcept : response{r} {}
 	void evaluate(encoder& d) const { d.encode(opcode::recover_resp, 0, static_cast<std::uint_least8_t>(response)); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 	static constexpr certainty static_nofail = certainty::always;
 	static constexpr certainty static_nullable = certainty::always;
 };
@@ -1373,14 +1442,14 @@ struct bracket_expression : leaf_expression_node_interface<bracket_expression>
 {
 	std::string_view pattern;
 	constexpr explicit bracket_expression(std::string_view s) noexcept : pattern{s} {}
-	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.caseless())); }
+	[[nodiscard]] rune_set first(encoder& d, [[maybe_unused]] rune_set const& follow) const { return make_rune_set(d.caseless()); }
 	static constexpr certainty static_head_optimizable = certainty::always;
 
-	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
+	[[nodiscard]] rune_set make_rune_set(bool casefold) const
 	{
 		rune_set_builder builder;
-		builder.casefold((mode & directives::caseless) != directives::none);
+		builder.casefold(casefold);
 		bool left_rune_present{false};
 		char32_t left_rune{U'\0'};
 		auto curr = pattern.begin();
@@ -1421,11 +1490,11 @@ struct string_expression : leaf_expression_node_interface<string_expression>
 	constexpr explicit string_expression(std::string_view t) noexcept : text{t} {}
 	void evaluate(encoder& d) const { d.match(text); }
 
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const
 	{
 		if (text.empty())
-			return rune_pattern::none();
-		return rune_pattern{utf8::decode_rune(text.begin(), text.end()).second};
+			return rune_set::none();
+		return rune_set{utf8::decode_rune(text.begin(), text.end()).second};
 	}
 
 	[[nodiscard]] constexpr bool nofail() const noexcept { return text.empty(); }
@@ -1442,7 +1511,7 @@ struct char_expression : leaf_expression_node_interface<char_expression>
 	char c;
 	constexpr explicit char_expression(char x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.match(std::string_view{&c, 1}); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{static_cast<char32_t>(c)}; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set{static_cast<char32_t>(c)}; }
 	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
@@ -1451,7 +1520,7 @@ struct rune_expression : leaf_expression_node_interface<rune_expression>
 	char32_t c;
 	constexpr explicit rune_expression(char32_t x) noexcept : c{x} {}
 	void evaluate(encoder& d) const { d.skip().encode_unit_or_set(opcode::match_unit, opcode::match_set, c); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{c}; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set{c}; }
 	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
@@ -1460,14 +1529,10 @@ struct rune_range_expression : leaf_expression_node_interface<rune_range_express
 	char32_t start;
 	char32_t end;
 	constexpr rune_range_expression(char32_t first, char32_t last) noexcept : start{first}, end{last} {}
-	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.caseless())); }
+	[[nodiscard]] rune_set first(encoder& d, [[maybe_unused]] rune_set const& follow) const { return make_rune_set(d.caseless()); }
+	[[nodiscard]] rune_set make_rune_set(bool casefold) const { return std::move(rune_set_builder{}.casefold(casefold).add_range(start, end)).build(); }
 	static constexpr certainty static_head_optimizable = certainty::always;
-
-	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
-	{
-		return std::move(rune_set_builder{}.casefold((mode & directives::caseless) != directives::none).add_range(start, end)).build();
-	}
 };
 
 struct rune_set_expression : leaf_expression_node_interface<rune_set_expression>
@@ -1475,16 +1540,10 @@ struct rune_set_expression : leaf_expression_node_interface<rune_set_expression>
 	rune_set set;
 	explicit rune_set_expression(rune_set const& rs) noexcept : set{rs} {}
 	explicit rune_set_expression(rune_set&& rs) noexcept : set{std::move(rs)} {}
-	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.mode())); }
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern{make_rune_set(d.mode())}; }
+	void evaluate(encoder& d) const { d.match_set(make_rune_set(d.caseless())); }
+	[[nodiscard]] rune_set first(encoder& d, [[maybe_unused]] rune_set const& follow) const { return make_rune_set(d.caseless()); }
+	[[nodiscard]] rune_set make_rune_set(bool casefold) const { return casefold ? std::move(rune_set_builder{}.casefold().add_rune_set(set)).build() : set; }
 	static constexpr certainty static_head_optimizable = certainty::always;
-
-	[[nodiscard]] rune_set make_rune_set(directives mode = directives::none) const
-	{
-		if ((mode & directives::caseless) != directives::none)
-			return std::move(rune_set_builder{}.casefold().add_rune_set(set)).build();
-		return set;
-	}
 };
 
 template <class Target>
@@ -1495,11 +1554,37 @@ struct callable_expression : leaf_expression_node_interface<callable_expression<
 	constexpr explicit callable_expression(Target& t) noexcept : target{t} {}
 	constexpr explicit callable_expression(Target& t, std::uint_least16_t p) noexcept : target{t}, prec{p} {}
 	void evaluate(encoder& d) const { d.call_with_frame(target.get(), prec); }
-	[[nodiscard]] rune_pattern first(encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); } // TODO: implement
-	[[nodiscard]] constexpr effect_traits effects() const noexcept { return target.get().first_traits().effects | target.get().follow_traits().effects; }
-	[[nodiscard]] constexpr bool nofail() const noexcept { return target.get().first_traits().nofail ? target.get().follow_traits().nofail : false; }
-	[[nodiscard]] constexpr bool nullable() const noexcept { return target.get().first_traits().nullable ? target.get().follow_traits().nullable : false; }
-	[[nodiscard]] constexpr bool head_optimizable() const noexcept { return target.get().first_traits().head_optimizable ? target.get().follow_traits().nofail : false; }
+
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const
+	{
+		auto const& traits = target.get().traits();
+		return !traits.opaque ? traits.first : rune_set::all();
+	}
+
+	[[nodiscard]] effect_traits effects(effect_traits opaque_effects = effect_traits::all) const noexcept
+	{
+		auto const& traits = target.get().traits();
+		return !traits.opaque ? traits.effects : opaque_effects;
+	}
+
+	[[nodiscard]] bool nofail() const noexcept
+	{
+		auto const& traits = target.get().traits();
+		return !traits.opaque ? traits.nofail : false;
+	}
+
+	[[nodiscard]] bool nullable() const noexcept
+	{
+		auto const& traits = target.get().traits();
+		return !traits.opaque ? traits.nullable : false;
+	}
+
+	[[nodiscard]] bool head_optimizable() const noexcept
+	{
+		auto const& traits = target.get().traits();
+		return !traits.opaque ? traits.head_optimizable : false;
+	}
+
 	static constexpr effect_traits static_effects = effect_traits::runtime;
 	static constexpr certainty static_nofail = certainty::maybe;
 	static constexpr certainty static_nullable = certainty::maybe;
@@ -1512,7 +1597,7 @@ struct predicate_expression : leaf_expression_node_interface<predicate_expressio
 	Pred pred;
 	template <class P, class = std::enable_if_t<std::is_constructible_v<Pred, P&&>>> constexpr explicit predicate_expression(P&& p) noexcept(std::is_nothrow_constructible_v<Pred, P&&>) : pred(std::forward<P>(p)) {}
 	void evaluate(encoder& d) const { d.encode(opcode::predicate, syntactic_predicate{pred}); }
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return follow; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const { return follow; }
 	static constexpr certainty static_nofail = certainty::never;
 	static constexpr certainty static_nullable = certainty::always;
 	static constexpr certainty static_head_optimizable = certainty::never;
@@ -1547,12 +1632,15 @@ template <class E, class>
 inline rule::rule(E const& e)
 {
 	encoder rule_encoder{*this};
-	(void)make_expression(e).evaluate(rule_encoder);
+	auto const& node_expr = make_expression(e);
+	rule_encoder.derive_traits(node_expr);
+	node_expr.evaluate(rule_encoder);
 }
 
 inline rule::rule(rule const& r)
 {
 	encoder rule_encoder{*this};
+	rule_encoder.derive_traits(r);
 	rule_encoder.call(r, 1);
 }
 
@@ -1584,26 +1672,26 @@ struct directive_expression : unary_expression_node_interface<directive_expressi
 {
 	using base_type = unary_expression_node_interface<directive_expression<E1>, E1>;
 
-	directives enable_mask{directives::none};
-	directives disable_mask{directives::none};
-	directives relay_mask{directives::none};
+	directive_traits enable_mask{directive_traits::none};
+	directive_traits disable_mask{directive_traits::none};
+	directive_traits relay_mask{directive_traits::none};
 
 	template <class X1, class = std::enable_if_t<std::is_constructible_v<E1, X1&&>>>
-	constexpr directive_expression(X1&& x1, directives enable, directives disable, directives relay)
+	constexpr directive_expression(X1&& x1, directive_traits enable, directive_traits disable, directive_traits relay)
 		: base_type{std::forward<X1>(x1)}, enable_mask{enable}, disable_mask{disable}, relay_mask{relay} {}
 
 	void evaluate(encoder& d) const
 	{
-		d.dpsh(enable_mask, disable_mask);
+		auto const dprior = d.dpush(enable_mask, disable_mask);
 		this->e1.evaluate(d);
-		d.dpop(relay_mask);
+		d.dpop(dprior);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const
 	{
-		d.dpsh(enable_mask, disable_mask);
+		auto const dprior = d.dpush(enable_mask, disable_mask);
 		auto result = this->e1.first(d, follow);
-		d.ddrop();
+		d.drestore(dprior);
 		return result;
 	}
 };
@@ -1612,7 +1700,7 @@ template <class E> struct unwrap_directive_expression { using type = E; };
 template <class E> struct unwrap_directive_expression<directive_expression<E>> { using type = typename unwrap_directive_expression<E>::type; };
 template <class E> using unwrap_directive_expression_t = typename unwrap_directive_expression<std::decay_t<E>>::type;
 
-template <directives EnableMask, directives DisableMask, directives RelayMask>
+template <directive_traits EnableMask, directive_traits DisableMask, directive_traits RelayMask>
 struct directive_modifier
 {
 	template <class E, class = std::enable_if_t<is_expression_v<E>>>
@@ -1633,7 +1721,7 @@ struct accept_cut_expression : leaf_expression_node_interface<accept_cut_express
 	std::uint_least8_t imm8;
 	constexpr explicit accept_cut_expression(std::size_t flags) noexcept : imm8{static_cast<std::uint_least8_t>(flags >> registers::ignore_errors_shift)} {}
 	void evaluate(encoder& d) const { d.encode(opcode::accept, 0, imm8); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const { return follow; }
 	static constexpr effect_traits static_effects = effect_traits::cuts;
 	static constexpr certainty static_nofail = certainty::always;
 	static constexpr certainty static_nullable = certainty::always;
@@ -1642,7 +1730,7 @@ struct accept_cut_expression : leaf_expression_node_interface<accept_cut_express
 struct eoi_expression : leaf_expression_node_interface<eoi_expression>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eoi, 0, d.prepare_skip() ? 1 : 0); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::none(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::none(); }
 	static constexpr certainty static_nofail = certainty::never;
 	static constexpr certainty static_nullable = certainty::always;
 };
@@ -1650,13 +1738,13 @@ struct eoi_expression : leaf_expression_node_interface<eoi_expression>
 struct eol_expression : leaf_expression_node_interface<eol_expression>
 {
 	void evaluate(encoder& d) const { d.encode(opcode::match_eol, 0, d.prepare_skip() ? 1 : 0); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::ref(ascii::eol_rune_set()); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return ascii::eol_rune_set(); }
 };
 
 struct eps_expression : leaf_expression_node_interface<eps_expression>
 {
 	void evaluate(encoder& /*d*/) const {}
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const { return follow; }
 	static constexpr certainty static_nofail = certainty::always;
 	static constexpr certainty static_nullable = certainty::always;
 };
@@ -1668,7 +1756,7 @@ struct match_class_expression : leaf_expression_node_interface<match_class_expre
 	Property property;
 	constexpr match_class_expression(opcode op, Property prop) noexcept : mop{op}, property{prop} {}
 	void evaluate(encoder& d) const { d.match_class(mop, property); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 };
 
 struct match_class_combinator
@@ -1683,7 +1771,7 @@ struct match_any_expression : leaf_expression_node_interface<match_any_expressio
 {
 	constexpr match_any_expression() noexcept : match_class_combinator{opcode::match_any_of} {}
 	void evaluate(encoder& d) const { d.skip().encode(opcode::match_any); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 	static constexpr certainty static_head_optimizable = certainty::always;
 };
 
@@ -1693,26 +1781,26 @@ struct ascii_ctype_expression : leaf_expression_node_interface<ascii_ctype_expre
 	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == ascii::ctype::blank) {
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_blank);
+			d.skip(directive_traits::lexeme).encode(opcode::match_blank);
 		} else if constexpr (Property == ascii::ctype::space) {
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_space);
+			d.skip(directive_traits::lexeme).encode(opcode::match_space);
 		} else {
-			d.match_set(make_rune_set(d.mode()));
+			d.match_set(make_rune_set(d.caseless()));
 		}
 	}
 
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const
 	{
 		if constexpr (Property == ascii::ctype::blank) {
-			return rune_pattern::ref(ascii::blank_rune_set());
+			return ascii::blank_rune_set();
 		} else if constexpr (Property == ascii::ctype::space) {
-			return rune_pattern::ref(ascii::space_rune_set());
+			return ascii::space_rune_set();
 		} else {
-			return rune_pattern{make_rune_set(d.mode())};
+			return make_rune_set(d.caseless());
 		}
 	}
 
-	[[nodiscard]] rune_set make_rune_set([[maybe_unused]] directives mode = directives::none) const
+	[[nodiscard]] rune_set make_rune_set([[maybe_unused]] bool casefold) const
 	{
 		return ascii::ctype_rune_set(Property);
 	}
@@ -1726,22 +1814,22 @@ struct unicode_ctype_expression : leaf_expression_node_interface<unicode_ctype_e
 	void evaluate(encoder& d) const
 	{
 		if constexpr (Property == unicode::ctype::blank) {
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_set, d.add_rune_set(unicode::blank_rune_set()));
+			d.skip(directive_traits::lexeme).encode(opcode::match_set, d.add_rune_set(unicode::blank_rune_set()));
 		} else if constexpr (Property == unicode::ctype::space) {
-			d.skip(directives::lexeme | directives::eps).encode(opcode::match_set, d.add_rune_set(unicode::space_rune_set()));
+			d.skip(directive_traits::lexeme).encode(opcode::match_set, d.add_rune_set(unicode::space_rune_set()));
 		} else {
 			d.match_class(opcode::match_any_of, Property);
 		}
 	}
 
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const
 	{
 		if constexpr (Property == unicode::ctype::blank) {
-			return rune_pattern::ref(unicode::blank_rune_set());
+			return unicode::blank_rune_set();
 		} else if constexpr (Property == unicode::ctype::space) {
-			return rune_pattern::ref(unicode::space_rune_set());
+			return unicode::space_rune_set();
 		} else {
-			return rune_pattern::all();
+			return rune_set::all();
 		}
 	}
 
@@ -1754,7 +1842,7 @@ struct condition_test_expression : leaf_expression_node_interface<condition_test
 	std::uint_least8_t imm8;
 	constexpr condition_test_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 	void evaluate(encoder& d) const { d.encode(opcode::condition_test, name, imm8); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const { return follow; }
 	static constexpr certainty static_nofail = certainty::never;
 	static constexpr certainty static_nullable = certainty::always;
 };
@@ -1810,7 +1898,7 @@ struct symbol_exists_expression : leaf_expression_node_interface<symbol_exists_e
 	std::uint_least8_t imm8;
 	constexpr symbol_exists_expression(std::string_view n, std::uint_least8_t i) noexcept : name{n}, imm8{i} {}
 	void evaluate(encoder& d) const { d.encode(opcode::symbol_exists, name, imm8); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, rune_pattern const& follow) const { return follow; }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const { return follow; }
 	static constexpr certainty static_nofail = certainty::never;
 	static constexpr certainty static_nullable = certainty::always;
 };
@@ -1828,8 +1916,8 @@ struct symbol_match_expression : leaf_expression_node_interface<symbol_match_exp
 	opcode mopcf;
 	std::string_view name;
 	constexpr symbol_match_expression(opcode op, opcode opcf, std::string_view n) noexcept : mop{op}, mopcf{opcf}, name{n} {}
-	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name);}
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	void evaluate(encoder& d) const { d.skip().encode(d.caseless() ? mopcf : mop, name);}
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 };
 
 struct symbol_match_combinator
@@ -1847,8 +1935,8 @@ struct symbol_match_offset_expression : leaf_expression_node_interface<symbol_ma
 	std::string_view name;
 	std::uint_least8_t offset;
 	constexpr symbol_match_offset_expression(opcode op, opcode opcf, std::string_view n, std::uint_least8_t o) noexcept : mop{op}, mopcf{opcf}, name{n}, offset{o} {}
-	void evaluate(encoder& d) const { d.skip().encode(((d.mode() & directives::caseless) != directives::none) ? mopcf : mop, name, offset); }
-	[[nodiscard]] rune_pattern first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_pattern const& follow) const { return rune_pattern::all(); }
+	void evaluate(encoder& d) const { d.skip().encode(d.caseless() ? mopcf : mop, name, offset); }
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, [[maybe_unused]] rune_set const& follow) const { return rune_set::all(); }
 };
 
 struct symbol_match_offset_combinator
@@ -1868,14 +1956,16 @@ struct negative_lookahead_expression : unary_expression_node_interface<negative_
 	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
-		d.dpsh(directives::none, directives::none);
+		auto const nprior = d.nsave();
+		auto const dprior = d.dpush(directive_traits::none, directive_traits::none);
 		this->e1.evaluate(d);
-		d.dpop(directives::none);
+		d.dpop(dprior);
+		d.nrestore(nprior);
 		d.encode(opcode::fail, 0, 2);
 		d.jump_to_here(choice);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	[[nodiscard]] rune_set first([[maybe_unused]] encoder& d, rune_set const& follow) const
 	{
 		// TODO: negate return this->e1.first(d, follow);
 		return follow;
@@ -1895,22 +1985,24 @@ struct positive_lookahead_expression : unary_expression_node_interface<positive_
 	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice, 0, 1);
-		d.dpsh(directives::none, directives::none);
+		auto const nprior = d.nsave();
+		auto const dprior = d.dpush(directive_traits::none, directive_traits::none);
 		this->e1.evaluate(d);
-		d.dpop(directives::none);
+		d.dpop(dprior);
+		d.nrestore(nprior);
 		d.encode(opcode::commit_back, 1, 0, 0);
 		d.jump_to_here(choice);
 		d.encode(opcode::fail, 0, 1);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const
 	{
 		return this->e1.first(d, follow).intersect_with(follow);
 	}
 
 	static constexpr certainty static_nofail = E1::static_nofail;
 	static constexpr certainty static_nullable = certainty::always;
-	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;	
+	static constexpr certainty static_head_optimizable = E1::static_head_optimizable;
 };
 
 template <class E>
@@ -1939,9 +2031,9 @@ template <class E>
 [[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, encoder& d, std::size_t nmin, std::size_t nmax)
 {
 	if constexpr (is_expression_always_repeat_optimizable_v<std::decay_t<E>>) {
-		if (d.should_skip(directives::preskip, directives::lexeme | directives::noskip | directives::postskip))
+		if (d.should_skip(directive_traits::preskip, directive_traits::lexeme | directive_traits::noskip | directive_traits::postskip))
 			return false;
-		d.commit_eps();
+		d.dcommit();
 		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>)
 			d.encode_min_max(opcode::repeat_any, nmin, nmax);
 		else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::blank>>)
@@ -1954,20 +2046,21 @@ template <class E>
 							std::is_same_v<std::decay_t<E>, rune_set_expression> ||
 							std::is_same_v<std::decay_t<E>, bracket_expression> ||
 							detail::is_template_non_type_instantiation_of_v<std::decay_t<E>, ascii_ctype_expression>)
-			d.encode_min_max(opcode::repeat_set, nmin, nmax, d.add_rune_set(e.make_rune_set(d.mode())));
+			d.encode_min_max(opcode::repeat_set, nmin, nmax, d.add_rune_set(e.make_rune_set(d.caseless())));
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
-		if (d.should_skip(directives::preskip, directives::lexeme | directives::noskip | directives::postskip))
+		if (d.should_skip(directive_traits::preskip, directive_traits::lexeme | directive_traits::noskip | directive_traits::postskip))
 			return false;
 		auto const [rest, rune] = utf8::decode_rune(e.text.begin(), e.text.end());
 		if (rest != e.text.end())
 			return false;
-		d.commit_eps().encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, rune, nmin, nmax);
+		d.dcommit();
+		d.encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, rune, nmin, nmax);
 		return true;
 	} else if constexpr (detail::is_template_instantiation_of_v<std::decay_t<E>, directive_expression>) {
-		d.dpsh(e.enable_mask, e.disable_mask);
+		auto const dprior = d.dpush(e.enable_mask, e.disable_mask);
 		bool const result = repetition_encode_optimized(e.e1, d, nmin, nmax);
-		d.ddrop();
+		d.drestore(dprior);
 		return result;
 	} else {
 		static_assert(detail::always_false_v<E>, "unsupported repetition expression");
@@ -1978,13 +2071,13 @@ template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 constexpr void repetition_validate_forward_progress(E const& e)
 {
 	if constexpr (E::static_nofail == certainty::maybe) {
-		if LUG_UNLIKELY(is_expression_nofail(e)) {
-			lug::throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
+		if LUG_UNLIKELY(lug::is_expression_nofail(e)) {
+			throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
 		}
 	}
 	if constexpr (E::static_nullable == certainty::maybe) {
-		if LUG_UNLIKELY(is_expression_nullable(e)) {
-			lug::throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be nullable");
+		if LUG_UNLIKELY(lug::is_expression_nullable(e)) {
+			throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be nullable");
 		}
 	}
 }
@@ -1999,7 +2092,7 @@ struct repetition_expression_base : unary_expression_node_interface<Derived, E1>
 	static_assert(E1::static_nullable != certainty::always, "non-progressing infinite loop: repetition sub-expression must not be potentially nullable");
 	using base_type = unary_expression_node_interface<Derived, E1>;
 	using base_type::base_type;
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const { return this->e1.first(d, follow).union_with(follow); }
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const { return this->e1.first(d, follow).union_with(follow); }
 	static constexpr certainty static_nofail = (NMin == 0) ? certainty::always : certainty::never;
 	static constexpr certainty static_nullable = (NMin == 0) ? certainty::always : certainty::never;
 	static constexpr certainty static_head_optimizable = certainty::never;
@@ -2019,12 +2112,14 @@ struct repetition_expression : repetition_expression_base<repetition_expression<
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
 				return;
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(loop_directives);
+		d.nrestore(loop_nullable);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (std::size_t i = 0; i < NMin; ++i)
@@ -2053,12 +2148,14 @@ struct repetition_expression<E1, NCount, NCount> : repetition_expression_base<re
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
 				return;
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(loop_directives);
+		d.nrestore(loop_nullable);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (std::size_t i = 0; i < NCount; ++i)
@@ -2080,12 +2177,14 @@ struct repetition_expression<E1, NMin, forever> : repetition_expression_base<rep
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, NMin, forever))
 				return;
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(NMin > 0 ? directives::eps : directives::none);
+		d.dpop(loop_directives);
+		d.nrestore(loop_nullable);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		for (std::size_t i = 0; i < NMin; ++i)
@@ -2113,12 +2212,14 @@ struct repetition_expression<E1, 0, NMax> : repetition_expression_base<repetitio
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, NMax))
 				return;
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::none);
+		d.dpop(loop_directives);
+		d.nrestore(loop_nullable);
 		d.encode(opcode::ret);
 		d.jump_to_here(start);
 		std::ptrdiff_t const loop_end = (3 * static_cast<std::ptrdiff_t>(NMax)) + d.here();
@@ -2154,9 +2255,11 @@ struct repetition_expression<E1, 0, 1> : repetition_expression_base<repetition_e
 			if (repetition_encode_optimized(this->e1, d, 0, 1))
 				return;
 		auto const choice = d.encode(opcode::choice);
-		d.dpsh(directives::none, directives::none);
+		auto const choice_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::none, directive_traits::none);
 		this->e1.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(loop_directives);
+		d.nrestore(choice_nullable);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.jump_to_here(commit);
@@ -2176,15 +2279,17 @@ struct repetition_expression<E1, 0, forever> : repetition_expression_base<repeti
 		if constexpr (is_expression_repeat_optimizable_v<E1>)
 			if (repetition_encode_optimized(this->e1, d, 0, forever))
 				return;
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const choice = d.encode(opcode::choice);
-		auto const expression = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_body = d.here();
+		auto const loop_nullable = d.nsave();
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::none);
+		d.dpop(loop_directives);
+		d.nrestore(loop_nullable);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
-		d.jump_to_target(commit, expression);
+		d.jump_to_target(commit, loop_body);
 	}
 };
 
@@ -2217,9 +2322,9 @@ struct repetition_expression<E1, 1, 2> : repetition_expression_base<repetition_e
 				return;
 		this->e1.evaluate(d);
 		auto const choice = d.encode(opcode::choice);
-		d.dpsh(directives::preskip, directives::postskip);
+		auto const loop_directives = d.dpush(directive_traits::preskip, directive_traits::postskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(loop_directives);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
 		d.jump_to_here(commit);
@@ -2240,12 +2345,12 @@ struct repetition_expression<E1, 1, forever> : repetition_expression_base<repeti
 			if (repetition_encode_optimized(this->e1, d, 1, forever))
 				return;
 		this->e1.evaluate(d);
-		d.skip(directives::none, directives::lexeme | directives::noskip);
+		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const expression = d.here();
-		d.dpsh(directives::postskip, directives::preskip);
+		auto const loop_directives = d.dpush(directive_traits::postskip, directive_traits::preskip);
 		this->e1.evaluate(d);
-		d.dpop(directives::none);
+		d.dpop(loop_directives);
 		auto const commit = d.encode(opcode::commit_partial);
 		d.jump_to_here(choice);
 		d.jump_to_target(commit, expression);
@@ -2265,27 +2370,27 @@ struct repetition_combinator
 template <class E1, class E2>
 struct choice_expression : binary_expression_node_interface<choice_expression<E1, E2>, E1, E2>
 {
-	static constexpr certainty static_nofail  = static_certainty_or(E1::static_nofail, E2::static_nofail);
-	static constexpr certainty static_nullable = static_certainty_or(E1::static_nullable, E2::static_nullable);
-	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_head_optimizable);
 	using base_type = binary_expression_node_interface<choice_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
 		auto const choice = d.encode(opcode::choice);
-		d.dpsh(directives::none, directives::none);
+		auto const choice_nullable = d.nsave();
+		auto const left_directives = d.dpush(directive_traits::none, directive_traits::none);
 		this->e1.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(left_directives);
+		d.nrestore(choice_nullable);
 		auto const commit = d.encode(opcode::commit);
 		d.jump_to_here(choice);
-		d.dpsh(directives::none, directives::none);
+		auto const right_directives = d.dpush(directive_traits::none, directive_traits::none);
 		this->e2.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(right_directives);
+		d.nrestore(choice_nullable);
 		d.jump_to_here(commit);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const
 	{
 		auto const pattern1 = this->e1.first(d, follow);
 		auto const pattern2 = this->e2.first(d, follow);
@@ -2351,26 +2456,28 @@ struct choice_expression : binary_expression_node_interface<choice_expression<E1
 			}
 		}
 	}
+
+	static constexpr certainty static_nofail  = static_certainty_or(E1::static_nofail, E2::static_nofail);
+	static constexpr certainty static_nullable = static_certainty_or(E1::static_nullable, E2::static_nullable);
+	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_head_optimizable);	
 };
 
 template <class E1, class E2>
 struct sequence_expression : binary_expression_node_interface<sequence_expression<E1, E2>, E1, E2>
 {
-	static constexpr certainty static_nofail  = static_certainty_and(E1::static_nofail, E2::static_nofail);
-	static constexpr certainty static_nullable = static_certainty_and(E1::static_nullable, E2::static_nullable);
-	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_nofail);
 	using base_type = binary_expression_node_interface<sequence_expression<E1, E2>, E1, E2>;
 	using base_type::base_type;
 
 	void evaluate(encoder& d) const
 	{
 		this->e1.evaluate(d);
-		d.dpsh(directives::preskip, directives::postskip);
+		d.njoin(lug::is_expression_nullable(this->e1));
+		auto const dprior = d.dpush(directive_traits::preskip, directive_traits::postskip);
 		this->e2.evaluate(d);
-		d.dpop(directives::eps);
+		d.dpop(dprior);
 	}
 
-	[[nodiscard]] rune_pattern first(encoder& d, rune_pattern const& follow) const
+	[[nodiscard]] rune_set first(encoder& d, rune_set const& follow) const
 	{
 		if constexpr (E1::static_nullable == certainty::never) {
 			return this->e1.first(d, follow);
@@ -2444,6 +2551,10 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 			}
 		}
 	}
+
+	static constexpr certainty static_nofail  = static_certainty_and(E1::static_nofail, E2::static_nofail);
+	static constexpr certainty static_nullable = static_certainty_and(E1::static_nullable, E2::static_nullable);
+	static constexpr certainty static_head_optimizable = static_certainty_and(E1::static_head_optimizable, E2::static_nofail);
 };
 
 template <class Derived, class E1, class Operand>
@@ -2759,11 +2870,11 @@ namespace dsl {
 using lug::environment; using lug::grammar; using lug::rule; using lug::start; using lug::forever; using lug::max_repetitions;
 using lug::error_context; using lug::error_response; using lug::recover_with; using lug::failure;
 using lug::syntax; using lug::syntax_position; using lug::syntax_range; using lug::rune_set; using lug::rune_set_builder;
-inline constexpr directive_modifier<directives::none, directives::caseless, directives::eps> cased{};
-inline constexpr directive_modifier<directives::caseless, directives::none, directives::eps> caseless{};
-inline constexpr directive_modifier<directives::lexeme, directives::noskip, directives::eps> lexeme{};
-inline constexpr directive_modifier<directives::lexeme | directives::noskip, directives::none, directives::eps> noskip{};
-inline constexpr directive_modifier<directives::none, directives::lexeme | directives::noskip, directives::eps> skip{};
+inline constexpr directive_modifier<directive_traits::none, directive_traits::caseless, directive_traits::none> cased{};
+inline constexpr directive_modifier<directive_traits::caseless, directive_traits::none, directive_traits::none> caseless{};
+inline constexpr directive_modifier<directive_traits::lexeme, directive_traits::noskip, directive_traits::none> lexeme{};
+inline constexpr directive_modifier<directive_traits::lexeme | directive_traits::noskip, directive_traits::none, directive_traits::none> noskip{};
+inline constexpr directive_modifier<directive_traits::none, directive_traits::lexeme | directive_traits::noskip, directive_traits::none> skip{};
 inline constexpr accept_cut_expression accept{lug::registers::ignore_errors_flag}; inline constexpr accept_cut_expression cut{lug::registers::inhibited_flag};
 inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator all{opcode::match_all_of}; inline constexpr match_class_combinator none{opcode::match_none_of};
@@ -3017,8 +3128,9 @@ template <error_response Response>
 {
 	program grprogram;
 	program_callees grcallees;
-	encoder grencoder{grprogram, grcallees, directives::eps | directives::preskip};
-	grencoder.skip(start_rule.program_.entry_mode, directives::noskip);
+	encoder grencoder{grprogram, grcallees, directive_traits::preskip};
+	grencoder.derive_traits(start_rule);
+	grencoder.skip(start_rule.program_.info.directives, directive_traits::noskip);
 	std::vector<std::tuple<std::vector<std::pair<rule const*, bool>>, program const*, opcode>> unprocessed{
 		{std::vector<std::pair<rule const*, bool>>{{&skip_rule, false}}, &skip_rule.program_, opcode::ret},
 		{std::vector<std::pair<rule const*, bool>>{{&start_rule, false}}, &start_rule.program_, opcode::jump}};
@@ -3032,9 +3144,9 @@ template <error_response Response>
 			grencoder.append(*subprogram);
 			epilogue_addresses.emplace(subprogram, grencoder.encode(epilogue_op));
 			if (auto const top_rule = callstack.back().first; top_rule) {
-				for (auto&& [callee_rule, callee_program, instr_offset, callee_mode] : top_rule->callees_) {
+				for (auto&& [callee_rule, callee_program, instr_offset, callee_nullable] : top_rule->callees_) {
 					calls.emplace_back(callee_program, address + instr_offset);
-					if ((callee_rule != nullptr) && ((callee_mode & directives::eps) != directives::none) &&
+					if ((callee_rule != nullptr) && callee_nullable &&
 							detail::escaping_find_if(callstack.crbegin(), callstack.crend(), [callee = callee_rule](auto const& caller) {
 								if (caller.first == callee)
 									return 1;
@@ -3043,7 +3155,7 @@ template <error_response Response>
 						left_recursive.insert(callee_program);
 					} else if (callee_rule != &skip_rule) {
 						auto callee_callstack = callstack;
-						callee_callstack.emplace_back(callee_rule, (callee_mode & directives::eps) != directives::none);
+						callee_callstack.emplace_back(callee_rule, callee_nullable);
 						unprocessed.emplace_back(std::move(callee_callstack), callee_program, opcode::ret);
 					}
 				}
