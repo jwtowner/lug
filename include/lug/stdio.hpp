@@ -87,8 +87,6 @@ using std_file_ptr = std::unique_ptr<std::FILE, std_file_deleter>;
 
 class std_file_lock
 {
-	std::FILE* file_{nullptr};
-
 public:
 	explicit std_file_lock(std::FILE* file) noexcept
 		: file_{file}
@@ -142,6 +140,9 @@ public:
 	std_file_lock(std_file_lock&&) = delete;
 	std_file_lock& operator=(std_file_lock const&) = delete;
 	std_file_lock& operator=(std_file_lock&& other) = delete;
+
+private:
+	std::FILE* file_{nullptr};
 };
 
 [[nodiscard]] inline int fungetc_and_unlock(int ch, std_file_lock& lock) noexcept

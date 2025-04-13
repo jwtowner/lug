@@ -190,6 +190,31 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 {
 	friend class attribute_frame_handle;
 
+public:
+	attribute_frame_info() = default;
+	~attribute_frame_info() = default;
+	attribute_frame_info(attribute_frame_info const&) = delete;
+	attribute_frame_info(attribute_frame_info&&) = delete;
+	attribute_frame_info& operator=(attribute_frame_info const&) = delete;
+	attribute_frame_info& operator=(attribute_frame_info&&) = delete;
+	[[nodiscard]] bool empty() const noexcept { return descriptors_.size() <= 2; }
+	[[nodiscard]] std::size_t alignment() const noexcept { return align_bytes_; }
+	[[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
+	[[nodiscard]] attribute_frame_handle handle() const;
+
+	template <class T, class = std::enable_if_t<is_attribute_frame_persistable_v<T>>>
+	LUG_NONNULL(2) void add(T* target)
+	{
+		using U = std::remove_cv_t<T>;
+		if (is_target_unique(target, &detail::type_info_tag_v<U>)) {
+			std::size_t const offset{(size_bytes_ + (alignof(U) - 1)) & ~(alignof(U) - 1)};
+			descriptors_.emplace(descriptors_.end() - 1, offset, target, &detail::type_info_tag_v<U>, &operations<U>::persist, &operations<U>::restore, &operations<U>::destroy);
+			align_bytes_ = (std::max)(align_bytes_, alignof(U));
+			size_bytes_ = offset + sizeof(U);
+		}
+	}
+
+private:
 	struct descriptor;
 
 	struct sentinel_operations
@@ -256,10 +281,6 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 		}
 	};
 
-	std::vector<descriptor> descriptors_{2U, descriptor{}};
-	std::size_t align_bytes_{1};
-	std::size_t size_bytes_{0};
-
 	[[nodiscard]] bool is_target_unique(void* target, void const* type) const
 	{
 		return std::all_of(descriptors_.begin(), descriptors_.end(), [target, type](descriptor const& desc) {
@@ -272,40 +293,15 @@ class attribute_frame_info : public std::enable_shared_from_this<attribute_frame
 		});
 	}
 
-public:
-	attribute_frame_info() = default;
-	~attribute_frame_info() = default;
-	attribute_frame_info(attribute_frame_info const&) = delete;
-	attribute_frame_info(attribute_frame_info&&) = delete;
-	attribute_frame_info& operator=(attribute_frame_info const&) = delete;
-	attribute_frame_info& operator=(attribute_frame_info&&) = delete;
-	[[nodiscard]] bool empty() const noexcept { return descriptors_.size() <= 2; }
-	[[nodiscard]] std::size_t alignment() const noexcept { return align_bytes_; }
-	[[nodiscard]] std::size_t size_bytes() const noexcept { return size_bytes_; }
-	[[nodiscard]] attribute_frame_handle handle() const;
-
-	template <class T, class = std::enable_if_t<is_attribute_frame_persistable_v<T>>>
-	LUG_NONNULL(2) void add(T* target)
-	{
-		using U = std::remove_cv_t<T>;
-		if (is_target_unique(target, &detail::type_info_tag_v<U>)) {
-			std::size_t const offset{(size_bytes_ + (alignof(U) - 1)) & ~(alignof(U) - 1)};
-			descriptors_.emplace(descriptors_.end() - 1, offset, target, &detail::type_info_tag_v<U>, &operations<U>::persist, &operations<U>::restore, &operations<U>::destroy);
-			align_bytes_ = (std::max)(align_bytes_, alignof(U));
-			size_bytes_ = offset + sizeof(U);
-		}
-	}
+	std::vector<descriptor> descriptors_{2U, descriptor{}};
+	std::size_t align_bytes_{1};
+	std::size_t size_bytes_{0};
 };
 
 class attribute_frame_handle
 {
 	friend class attribute_frame_info;
-	std::shared_ptr<attribute_frame_info const> info_;
-	std::size_t head_{0};
-	std::size_t tail_{0};
-	attribute_frame_handle(std::shared_ptr<attribute_frame_info const> info, std::size_t first, std::size_t last) noexcept : info_{std::move(info)}, head_{first}, tail_{last} {}
-	[[nodiscard]] LUG_ALWAYS_INLINE auto head() const noexcept { return info_->descriptors_.data() + head_; }
-	[[nodiscard]] LUG_ALWAYS_INLINE auto tail() const noexcept { return info_->descriptors_.data() + tail_; }
+
 public:
 	constexpr attribute_frame_handle() noexcept = default;
 	attribute_frame_handle(attribute_frame_handle const&) noexcept = default;
@@ -321,6 +317,15 @@ public:
 	LUG_NONNULL(2) LUG_ALWAYS_INLINE void destroy(std::byte* buffer) const noexcept { auto const t = tail(); (*t->destroy)(buffer, t); }
 	[[nodiscard]] LUG_ALWAYS_INLINE bool operator==(attribute_frame_handle const& other) const noexcept { return (info_ == other.info_) && (head_ == other.head_) && (tail_ == other.tail_); }
 	[[nodiscard]] LUG_ALWAYS_INLINE bool operator!=(attribute_frame_handle const& other) const noexcept { return !(*this == other); }
+
+private:
+	attribute_frame_handle(std::shared_ptr<attribute_frame_info const> info, std::size_t first, std::size_t last) noexcept : info_{std::move(info)}, head_{first}, tail_{last} {}
+	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* head() const noexcept { return info_->descriptors_.data() + head_; }
+	[[nodiscard]] LUG_ALWAYS_INLINE attribute_frame_info::descriptor const* tail() const noexcept { return info_->descriptors_.data() + tail_; }
+
+	std::shared_ptr<attribute_frame_info const> info_;
+	std::size_t head_{0};
+	std::size_t tail_{0};
 };
 
 [[nodiscard]] inline attribute_frame_handle attribute_frame_info::handle() const
@@ -408,9 +413,7 @@ class rule
 {
 	friend class encoder;
 	friend grammar start(rule const& start_rule, rule const& skip_rule);
-	program program_;
-	program_callees callees_;
-	bool currently_encoding_{false};
+
 public:
 	rule() noexcept = default;
 	template <class E, class = std::enable_if_t<is_expression_v<E> && !std::is_same_v<E, rule>>> rule(E const& e); // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
@@ -425,18 +428,26 @@ public:
 	template <class Recovery> [[nodiscard]] auto operator[](recover_with<Recovery> const& rec) const;
 	template <class Handler, class = std::enable_if_t<is_error_handler_v<Handler>>> [[nodiscard]] auto operator^=(Handler&& handler) const;
 	[[nodiscard]] program_traits const& traits() const noexcept { return program_.traits(); }
+
+private:
+	program program_;
+	program_callees callees_;
+	bool currently_encoding_{false};
 };
 
 class grammar
 {
 	friend grammar start(rule const& start_rule, rule const& skip_rule);
-	lug::program program_;
-	explicit grammar(lug::program&& p) noexcept : program_{std::move(p)} {}
+
 public:
 	grammar() noexcept = default;
 	void swap(grammar& g) noexcept { program_.swap(g.program_); }
 	[[nodiscard]] lug::program const& program() const noexcept { return program_; }
 	[[nodiscard]] program_traits const& traits() const noexcept { return program_.traits(); }
+
+private:
+	explicit grammar(lug::program&& p) noexcept : program_{std::move(p)} {}
+	lug::program program_;
 };
 
 struct syntax_position
@@ -465,8 +476,6 @@ struct syntax_range
 
 class syntax
 {
-	std::string_view str_;
-	std::size_t index_{0};
 public:
 	constexpr syntax() noexcept = default;
 	constexpr syntax(std::string_view c, std::size_t i) noexcept : str_{c}, index_{i} {}
@@ -480,6 +489,10 @@ public:
 	[[nodiscard]] constexpr std::size_t size() const noexcept { return str_.size(); }
 	[[nodiscard]] constexpr bool operator==(syntax const& other) const noexcept { return str_ == other.str_ && index_ == other.index_; }
 	[[nodiscard]] constexpr bool operator!=(syntax const& other) const noexcept { return str_ != other.str_ || index_ != other.index_; }
+
+private:
+	std::string_view str_;
+	std::size_t index_{0};
 };
 
 class environment
@@ -487,114 +500,6 @@ class environment
 	friend class attribute_collection;
 	friend class parser_base;
 	template <class> friend class basic_parser;
-
-	struct attribute_frame_instance
-	{
-		attribute_frame_instance* next;
-		std::byte* buffer;
-		attribute_frame_handle frame;
-		attribute_frame_instance(attribute_frame_instance* np, std::byte* bp, attribute_frame_handle fh) noexcept : next{np}, buffer{bp}, frame{std::move(fh)} {}
-	};
-
-	static inline std::vector<std::string> const empty_symbols_{};
-	detail::stack_allocator attribute_frame_allocator_;
-	attribute_frame_instance* attribute_frame_stack_{nullptr};
-	std::vector<detail::move_only_any> attribute_result_stack_;
-	std::vector<std::size_t> attribute_collection_stack_;
-	std::unordered_set<std::string_view> conditions_;
-	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
-	std::vector<std::pair<std::size_t, syntax_position>> positions_;
-	std::string_view match_;
-	std::string_view subject_;
-	std::size_t call_depth_{0};
-	std::size_t prune_depth_{(std::numeric_limits<std::size_t>::max)()};
-	syntax_position origin_{1, 1};
-	std::uint_least32_t tab_width_{default_tab_width};
-	std::uint_least32_t tab_alignment_{default_tab_alignment};
-	bool should_reset_on_parse_{true};
-	bool needs_reset_{false};
-
-	virtual void on_reset() {}
-	virtual void on_drain() {}
-	virtual void on_accept_started() {}
-	virtual void on_accept_ended() {}
-
-	void reset(std::string_view sub)
-	{
-		if (should_reset_on_parse_) {
-			if (needs_reset_) {
-				call_depth_ = 0;
-				prune_depth_ = (std::numeric_limits<std::size_t>::max)();
-				origin_ = position_at(match_.size());
-				set_match_and_subject(sub.substr(0, 0), sub);
-				clear_attribute_frame_stack();
-				attribute_result_stack_.clear();
-				attribute_collection_stack_.clear();
-			}
-			needs_reset_ = true;
-			on_reset();
-		}
-	}
-
-	void drain(std::string_view sub)
-	{
-		origin_ = position_at(match_.size());
-		set_match_and_subject(sub.substr(0, 0), sub);
-		on_drain();
-	}
-
-	[[nodiscard]] std::size_t start_accept()
-	{
-		on_accept_started();
-		return call_depth_;
-	}
-
-	void end_accept(std::size_t prior_call_depth)
-	{
-		on_accept_ended();
-		call_depth_ = prior_call_depth;
-		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
-	}
-
-	[[nodiscard]] bool accept_response(std::size_t response_call_depth) noexcept
-	{
-		if (prune_depth_ > response_call_depth) {
-			call_depth_ = response_call_depth;
-			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
-			return true;
-		}
-		return false;
-	}
-
-	void set_match_and_subject(std::string_view m, std::string_view s) noexcept
-	{
-		match_ = m;
-		subject_ = s;
-		positions_.clear();
-	}
-
-	void clear_attribute_frame_stack() noexcept
-	{
-		while (attribute_frame_stack_ != nullptr)
-			pop_attribute_frame_instance([](auto const& f, auto* b) noexcept { f.destroy(b); });
-	}
-
-	template <class FrameOp, class = std::enable_if_t<std::is_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>>>
-	void pop_attribute_frame_instance(FrameOp const& frame_op) noexcept(std::is_nothrow_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>)
-	{
-		attribute_frame_instance* const instance{attribute_frame_stack_};
-		attribute_frame_instance* const next_instance{instance->next};
-		std::byte* const buffer{instance->buffer};
-		attribute_frame_handle const frame{std::move(instance->frame)};
-		std::destroy_at(instance);
-		detail::scope_exit const release_memory{[this, &frame, buffer, instance, next_instance]() noexcept {
-			if (frame.size_bytes() >= attribute_frame_allocator_.large_object_threshold())
-				attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
-			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
-			attribute_frame_stack_ = next_instance;
-		}};
-		frame_op(frame, buffer);
-	}
 
 public:
 	static constexpr std::uint_least32_t default_tab_width{8};
@@ -721,20 +626,122 @@ public:
 			throw_exception<attribute_stack_error>();
 		return *detail::guarded_move_only_any_cast<T>(&attribute_result_stack_.back());
 	}
+
+protected:
+	virtual void on_reset() {}
+	virtual void on_drain() {}
+	virtual void on_accept_started() {}
+	virtual void on_accept_ended() {}
+
+private:
+	struct attribute_frame_instance
+	{
+		attribute_frame_instance* next;
+		std::byte* buffer;
+		attribute_frame_handle frame;
+		attribute_frame_instance(attribute_frame_instance* np, std::byte* bp, attribute_frame_handle fh) noexcept : next{np}, buffer{bp}, frame{std::move(fh)} {}
+	};
+
+	void reset(std::string_view sub)
+	{
+		if (should_reset_on_parse_) {
+			if (needs_reset_) {
+				call_depth_ = 0;
+				prune_depth_ = (std::numeric_limits<std::size_t>::max)();
+				origin_ = position_at(match_.size());
+				set_match_and_subject(sub.substr(0, 0), sub);
+				clear_attribute_frame_stack();
+				attribute_result_stack_.clear();
+				attribute_collection_stack_.clear();
+			}
+			needs_reset_ = true;
+			on_reset();
+		}
+	}
+
+	void drain(std::string_view sub)
+	{
+		origin_ = position_at(match_.size());
+		set_match_and_subject(sub.substr(0, 0), sub);
+		on_drain();
+	}
+
+	[[nodiscard]] std::size_t start_accept()
+	{
+		on_accept_started();
+		return call_depth_;
+	}
+
+	void end_accept(std::size_t prior_call_depth)
+	{
+		on_accept_ended();
+		call_depth_ = prior_call_depth;
+		prune_depth_ = (std::numeric_limits<std::size_t>::max)();
+	}
+
+	[[nodiscard]] bool accept_response(std::size_t response_call_depth) noexcept
+	{
+		if (prune_depth_ > response_call_depth) {
+			call_depth_ = response_call_depth;
+			prune_depth_ = (std::numeric_limits<std::size_t>::max)();
+			return true;
+		}
+		return false;
+	}
+
+	void set_match_and_subject(std::string_view m, std::string_view s) noexcept
+	{
+		match_ = m;
+		subject_ = s;
+		positions_.clear();
+	}
+
+	void clear_attribute_frame_stack() noexcept
+	{
+		while (attribute_frame_stack_ != nullptr)
+			pop_attribute_frame_instance([](auto const& f, auto* b) noexcept { f.destroy(b); });
+	}
+
+	template <class FrameOp, class = std::enable_if_t<std::is_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>>>
+	void pop_attribute_frame_instance(FrameOp const& frame_op) noexcept(std::is_nothrow_invocable_v<FrameOp, attribute_frame_handle const&, std::byte*>)
+	{
+		attribute_frame_instance* const instance{attribute_frame_stack_};
+		attribute_frame_instance* const next_instance{instance->next};
+		std::byte* const buffer{instance->buffer};
+		attribute_frame_handle const frame{std::move(instance->frame)};
+		std::destroy_at(instance);
+		detail::scope_exit const release_memory{[this, &frame, buffer, instance, next_instance]() noexcept {
+			if (frame.size_bytes() >= attribute_frame_allocator_.large_object_threshold())
+				attribute_frame_allocator_.rewind(buffer, frame.size_bytes(), frame.alignment());
+			attribute_frame_allocator_.rewind(instance, sizeof(attribute_frame_instance), alignof(attribute_frame_instance));
+			attribute_frame_stack_ = next_instance;
+		}};
+		frame_op(frame, buffer);
+	}
+
+	static inline std::vector<std::string> const empty_symbols_{};
+	detail::stack_allocator attribute_frame_allocator_;
+	attribute_frame_instance* attribute_frame_stack_{nullptr};
+	std::vector<detail::move_only_any> attribute_result_stack_;
+	std::vector<std::size_t> attribute_collection_stack_;
+	std::unordered_set<std::string_view> conditions_;
+	std::unordered_map<std::string_view, std::vector<std::string>> symbols_;
+	std::vector<std::pair<std::size_t, syntax_position>> positions_;
+	std::string_view match_;
+	std::string_view subject_;
+	std::size_t call_depth_{0};
+	std::size_t prune_depth_{(std::numeric_limits<std::size_t>::max)()};
+	syntax_position origin_{1, 1};
+	std::uint_least32_t tab_width_{default_tab_width};
+	std::uint_least32_t tab_alignment_{default_tab_alignment};
+	bool should_reset_on_parse_{true};
+	bool needs_reset_{false};
 };
 
 class attribute_collection
 {
 	friend class environment;
-	environment* envr_;
-	std::size_t first_initial_;
-	std::size_t last_initial_;
-	std::size_t first_;
-	std::size_t last_;
-	attribute_collection(environment* envr, std::size_t first) noexcept
-		: envr_{envr}
-		, first_initial_{first}, last_initial_{envr_->attribute_result_stack_.size()}
-		, first_{first_initial_}, last_{last_initial_} {}
+
 public:
 	attribute_collection(attribute_collection&& other) noexcept
 		: envr_{std::exchange(other.envr_, nullptr)}
@@ -750,6 +757,18 @@ public:
 	attribute_collection(attribute_collection const&) = delete;
 	attribute_collection& operator=(attribute_collection const&) = delete;
 	attribute_collection& operator=(attribute_collection&&) = delete;
+
+private:
+	attribute_collection(environment* envr, std::size_t first) noexcept
+		: envr_{envr}
+		, first_initial_{first}, last_initial_{envr_->attribute_result_stack_.size()}
+		, first_{first_initial_}, last_{last_initial_} {}
+
+	environment* envr_;
+	std::size_t first_initial_;
+	std::size_t last_initial_;
+	std::size_t first_;
+	std::size_t last_;
 };
 
 [[nodiscard]] inline attribute_collection environment::finish_attribute_collection(std::size_t element_multiple)
@@ -771,17 +790,17 @@ template <class T>
 class recursive_wrapper // NOLINT(cppcoreguidelines-special-member-functions,hicpp-special-member-functions)
 {
 	static_assert(std::is_move_constructible_v<T>, "T must be move constructible");
-	std::unique_ptr<T> ptr;
+
 public:
 	using type = T;
 	template <class U = T, class = std::enable_if_t<std::is_default_constructible_v<U>>>
-	recursive_wrapper() : ptr{std::make_unique<T>()} {}
+	recursive_wrapper() : ptr_{std::make_unique<T>()} {}
 	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
-	recursive_wrapper(U&& x) : ptr{std::make_unique<T>(std::forward<U>(x))} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	recursive_wrapper(U&& x) : ptr_{std::make_unique<T>(std::forward<U>(x))} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	template <class U = T, class = std::enable_if_t<!std::is_constructible_v<T, std::unique_ptr<U>&&>>>
-	explicit recursive_wrapper(std::unique_ptr<U>&& p) noexcept : ptr{std::move(p)} {}
+	explicit recursive_wrapper(std::unique_ptr<U>&& p) noexcept : ptr_{std::move(p)} {}
 	template <class U = T, class = std::enable_if_t<std::is_copy_constructible_v<U>>>
-	recursive_wrapper(recursive_wrapper const& other) : ptr{std::make_unique<T>(*other.ptr)} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	recursive_wrapper(recursive_wrapper const& other) : ptr_{std::make_unique<T>(*other.ptr_)} {} // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
 	recursive_wrapper(recursive_wrapper&&) noexcept = default;
 	recursive_wrapper& operator=(recursive_wrapper&&) noexcept = default;
 	~recursive_wrapper() = default;
@@ -795,34 +814,33 @@ public:
 	template <class U, class = std::enable_if_t<std::is_constructible_v<T, U&&> && !std::is_same_v<recursive_wrapper<T>, std::decay_t<U>>>>
 	recursive_wrapper& operator=(U&& x)
 	{
-		ptr = std::make_unique<T>(std::forward<U>(x));
+		ptr_ = std::make_unique<T>(std::forward<U>(x));
 		return *this;
 	}
 
 	template <class U = T, class = std::enable_if_t<!std::is_assignable_v<T, std::unique_ptr<U>&&>>>
 	recursive_wrapper& operator=(std::unique_ptr<U>&& p)
 	{
-		ptr = std::move(p);
+		ptr_ = std::move(p);
 		return *this;
 	}
 
-	void swap(recursive_wrapper& other) noexcept { ptr.swap(other.ptr); }
-	operator T&() noexcept { return *ptr; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
-	operator T const&() const noexcept { return *ptr; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
-	T& get() noexcept { return *ptr; }
-	T const & get() const noexcept { return *ptr; }
-	T* get_pointer() noexcept { return ptr.get(); }
-	T const* get_pointer() const noexcept { return ptr.get(); }
+	void swap(recursive_wrapper& other) noexcept { ptr_.swap(other.ptr_); }
+	operator T&() noexcept { return *ptr_; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	operator T const&() const noexcept { return *ptr_; } // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+	T& get() noexcept { return *ptr_; }
+	T const & get() const noexcept { return *ptr_; }
+	T* get_pointer() noexcept { return ptr_.get(); }
+	T const* get_pointer() const noexcept { return ptr_.get(); }
+
+private:
+	std::unique_ptr<T> ptr_;
 };
 
 template <class T> recursive_wrapper(T&&) -> recursive_wrapper<std::decay_t<T>>;
 
 class error_context
 {
-	std::reference_wrapper<lug::environment> envr_;
-	lug::syntax syntax_;
-	std::string_view label_;
-	error_response recovery_response_;
 public:
 	error_context(lug::environment& envr, lug::syntax const& syn, std::string_view lab, error_response resp) : envr_{envr}, syntax_{syn}, label_{lab}, recovery_response_{resp} {}
 	~error_context() = default;
@@ -837,25 +855,42 @@ public:
 	error_context& operator=(error_context const&) = delete;
 	error_context(error_context&&) = delete;
 	error_context& operator=(error_context&&) = delete;
+
+private:
+	std::reference_wrapper<lug::environment> envr_;
+	lug::syntax syntax_;
+	std::string_view label_;
+	error_response recovery_response_;
 };
 
 template <class Recovery>
 class recover_with
 {
-	using storage_type = std::conditional_t<std::is_void_v<Recovery>, std::nullptr_t, std::conditional_t<is_expression_node_v<Recovery>, Recovery, std::reference_wrapper<rule const>>>;
-	storage_type recovery_;
+	using storage_type = std::conditional_t<
+		std::is_void_v<Recovery>,
+		std::nullptr_t,
+		std::conditional_t<
+			is_expression_node_v<Recovery>,
+			Recovery,
+			std::reference_wrapper<rule const>>>;
+
 public:
 	template <class R = Recovery, class = std::enable_if_t<std::is_void_v<R>>>
 	constexpr recover_with() noexcept : recovery_{nullptr} {}
 	template <class R, class = std::enable_if_t<std::is_constructible_v<storage_type, R&&>>>
 	constexpr explicit recover_with(R&& r) noexcept(std::is_nothrow_constructible_v<storage_type, R&&>) : recovery_{std::forward<R>(r)} {}
 
-	[[nodiscard]] constexpr auto const& recovery() const noexcept {
-		if constexpr (is_expression_node_v<Recovery> || std::is_void_v<Recovery>)
+	[[nodiscard]] constexpr auto const& recovery() const noexcept
+	{
+		if constexpr (is_expression_node_v<Recovery> || std::is_void_v<Recovery>) {
 			return recovery_;
-		else
+		} else {
 			return recovery_.get();
+		}
 	}
+
+private:
+	storage_type recovery_;
 };
 
 template <class R, class = std::enable_if_t<is_recovery_expression_v<R>>> recover_with(R&&) -> recover_with<std::decay_t<R>>;
@@ -864,13 +899,18 @@ recover_with() -> recover_with<void>;
 template <class Recovery = void>
 class failure : public recover_with<Recovery>
 {
-	std::string_view label_;
 public:
 	template <class R = Recovery, class = std::enable_if_t<std::is_void_v<R>>>
 	constexpr explicit failure(std::string_view lab) noexcept : label_{lab} {}
+
 	template <class R, class = std::enable_if_t<std::is_constructible_v<recover_with<Recovery>, R&&>>>
-	constexpr explicit failure(std::string_view lab, R&& rec) noexcept(std::is_nothrow_constructible_v<recover_with<Recovery>, R&&>) : recover_with<Recovery>{std::forward<R>(rec)}, label_{lab} {}
+	constexpr explicit failure(std::string_view lab, R&& rec) noexcept(std::is_nothrow_constructible_v<recover_with<Recovery>, R&&>)
+		: recover_with<Recovery>{std::forward<R>(rec)}, label_{lab} {}
+
 	[[nodiscard]] constexpr std::string_view label() const noexcept { return label_; }
+
+private:
+	std::string_view label_;
 };
 
 template <class R, class = std::enable_if_t<is_recovery_expression_v<R>>> failure(std::string_view, R&&) -> failure<std::decay_t<R>>;
@@ -1031,9 +1071,10 @@ public:
 			if (auto const properties = unicode::query(rune).properties(); ((properties & unicode::ptype::Cased) != unicode::ptype::None))
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.casefold().add_rune(rune)).build()));
 		}
-		if constexpr (std::is_same_v<std::decay_t<T>, char32_t>)
+		if constexpr (std::is_same_v<std::decay_t<T>, char32_t>) {
 			if (!ascii::isascii(value))
 				return encode_min_max(set_op, nmin, nmax, add_rune_set(std::move(rune_set_builder{}.add_rune(value)).build()));
+		}
 		return encode_min_max(unit_op, nmin, nmax, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(static_cast<std::make_unsigned_t<T>>(value)));
 	}
 
@@ -1136,7 +1177,7 @@ private:
 	rule* rule_{nullptr};
 	program* program_{nullptr};
 	program_callees* callees_{nullptr};
-	std::shared_ptr<attribute_frame_info> frame_info_;
+	std::shared_ptr<attribute_frame_info> frame_info_{nullptr};
 	directive_traits* program_directives_{nullptr};
 	directive_traits token_directives_{directive_traits::none};
 	directive_traits directives_{directive_traits::none};
@@ -2028,25 +2069,26 @@ inline constexpr std::size_t forever = (std::numeric_limits<std::size_t>::max)()
 inline constexpr std::size_t max_repetitions = (forever != 0xffff) ? 0xffff : 0xfffe;
 
 template <class E>
-[[nodiscard]] constexpr bool repetition_encode_optimized([[maybe_unused]] E const& e, encoder& d, std::size_t nmin, std::size_t nmax)
+[[nodiscard]] bool repetition_encode_optimized([[maybe_unused]] E const& e, encoder& d, std::size_t nmin, std::size_t nmax)
 {
 	if constexpr (is_expression_always_repeat_optimizable_v<std::decay_t<E>>) {
 		if (d.should_skip(directive_traits::preskip, directive_traits::lexeme | directive_traits::noskip | directive_traits::postskip))
 			return false;
 		d.dcommit();
-		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>)
+		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>) {
 			d.encode_min_max(opcode::repeat_any, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::blank>>)
+		} else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::blank>>) {
 			d.encode_min_max(opcode::repeat_blank, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::space>>)
+		} else if constexpr (std::is_same_v<std::decay_t<E>, ascii_ctype_expression<ascii::ctype::space>>) {
 			d.encode_min_max(opcode::repeat_space, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, char_expression> || std::is_same_v<std::decay_t<E>, rune_expression>)
+		} else if constexpr (std::is_same_v<std::decay_t<E>, char_expression> || std::is_same_v<std::decay_t<E>, rune_expression>) {
 			d.encode_unit_or_set(opcode::repeat_unit, opcode::repeat_set, e.c, nmin, nmax);
-		else if constexpr (std::is_same_v<std::decay_t<E>, rune_range_expression> ||
+		} else if constexpr (std::is_same_v<std::decay_t<E>, rune_range_expression> ||
 							std::is_same_v<std::decay_t<E>, rune_set_expression> ||
 							std::is_same_v<std::decay_t<E>, bracket_expression> ||
-							detail::is_template_non_type_instantiation_of_v<std::decay_t<E>, ascii_ctype_expression>)
+							detail::is_template_non_type_instantiation_of_v<std::decay_t<E>, ascii_ctype_expression>) {
 			d.encode_min_max(opcode::repeat_set, nmin, nmax, d.add_rune_set(e.make_rune_set(d.caseless())));
+		}
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
 		if (d.should_skip(directive_traits::preskip, directive_traits::lexeme | directive_traits::noskip | directive_traits::postskip))
@@ -2071,14 +2113,12 @@ template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 constexpr void repetition_validate_forward_progress(E const& e)
 {
 	if constexpr (E::static_nofail == certainty::maybe) {
-		if LUG_UNLIKELY(lug::is_expression_nofail(e)) {
+		if LUG_UNLIKELY(lug::is_expression_nofail(e))
 			throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be potentially non-failing");
-		}
 	}
 	if constexpr (E::static_nullable == certainty::maybe) {
-		if LUG_UNLIKELY(lug::is_expression_nullable(e)) {
+		if LUG_UNLIKELY(lug::is_expression_nullable(e))
 			throw_exception<lug::invalid_argument>("non-progressing infinite loop: repetition sub-expression must not be nullable");
-		}
 	}
 }
 
@@ -2109,9 +2149,10 @@ struct repetition_expression : repetition_expression_base<repetition_expression<
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, NMin, NMax))
 				return;
+		}
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
@@ -2145,9 +2186,10 @@ struct repetition_expression<E1, NCount, NCount> : repetition_expression_base<re
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, NCount, NCount))
 				return;
+		}
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
@@ -2174,9 +2216,10 @@ struct repetition_expression<E1, NMin, forever> : repetition_expression_base<rep
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, NMin, forever))
 				return;
+		}
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
@@ -2209,9 +2252,10 @@ struct repetition_expression<E1, 0, NMax> : repetition_expression_base<repetitio
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, 0, NMax))
 				return;
+		}
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const start = d.encode(opcode::jump);
 		auto const loop_body = d.here();
@@ -2251,9 +2295,10 @@ struct repetition_expression<E1, 0, 1> : repetition_expression_base<repetition_e
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, 0, 1))
 				return;
+		}
 		auto const choice = d.encode(opcode::choice);
 		auto const choice_nullable = d.nsave();
 		auto const loop_directives = d.dpush(directive_traits::none, directive_traits::none);
@@ -2276,9 +2321,10 @@ struct repetition_expression<E1, 0, forever> : repetition_expression_base<repeti
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, 0, forever))
 				return;
+		}
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const choice = d.encode(opcode::choice);
 		auto const loop_body = d.here();
@@ -2317,9 +2363,10 @@ struct repetition_expression<E1, 1, 2> : repetition_expression_base<repetition_e
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, 1, 2))
 				return;
+		}
 		this->e1.evaluate(d);
 		auto const choice = d.encode(opcode::choice);
 		auto const loop_directives = d.dpush(directive_traits::preskip, directive_traits::postskip);
@@ -2341,9 +2388,10 @@ struct repetition_expression<E1, 1, forever> : repetition_expression_base<repeti
 	{
 		if constexpr (is_expression_maybe_nofail_or_nullable_v<E1>)
 			repetition_validate_forward_progress(this->e1);
-		if constexpr (is_expression_repeat_optimizable_v<E1>)
+		if constexpr (is_expression_repeat_optimizable_v<E1>) {
 			if (repetition_encode_optimized(this->e1, d, 1, forever))
 				return;
+		}
 		this->e1.evaluate(d);
 		d.skip(directive_traits::none, directive_traits::lexeme | directive_traits::noskip);
 		auto const choice = d.encode(opcode::choice);
@@ -2403,9 +2451,8 @@ struct choice_expression : binary_expression_node_interface<choice_expression<E1
 			return true;
 		} else {
 			if constexpr (E2::static_nofail == certainty::maybe) {
-				if (lug::is_expression_nofail(this->e2)) {
+				if (lug::is_expression_nofail(this->e2))
 					return true;
-				}
 			}
 			if constexpr (E1::static_nofail == certainty::maybe) {
 				return lug::is_expression_nofail(this->e1);
@@ -2423,9 +2470,8 @@ struct choice_expression : binary_expression_node_interface<choice_expression<E1
 			return true;
 		} else {
 			if constexpr (E2::static_nullable == certainty::maybe) {
-				if (lug::is_expression_nullable(this->e2)) {
+				if (lug::is_expression_nullable(this->e2))
 					return true;
-				}
 			}
 			if constexpr (E1::static_nullable == certainty::maybe) {
 				return lug::is_expression_nullable(this->e1);
@@ -2443,9 +2489,8 @@ struct choice_expression : binary_expression_node_interface<choice_expression<E1
 			return false;
 		} else {
 			if constexpr (E1::static_head_optimizable == certainty::maybe) {
-				if (!lug::is_expression_head_optimizable(this->e1)) {
+				if (!lug::is_expression_head_optimizable(this->e1))
 					return false;
-				}
 			}
 			if constexpr (E2::static_head_optimizable == certainty::maybe) {
 				return lug::is_expression_head_optimizable(this->e2);
@@ -2483,9 +2528,8 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 			return this->e1.first(d, follow);
 		} else {
 			if constexpr (E1::static_nullable == certainty::maybe) {
-				if (!lug::is_expression_nullable(this->e1)) {
+				if (!lug::is_expression_nullable(this->e1))
 					return this->e1.first(d, follow);
-				}
 			}
 			auto const pattern2 = this->e2.first(d, follow);
 			return this->e1.first(d, pattern2);
@@ -2498,9 +2542,8 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 			return false;
 		} else {
 			if constexpr (E1::static_nofail == certainty::maybe) {
-				if (!lug::is_expression_nofail(this->e1)) {
+				if (!lug::is_expression_nofail(this->e1))
 					return false;
-				}
 			}
 			if constexpr (E2::static_nofail == certainty::maybe) {
 				return lug::is_expression_nofail(this->e2);
@@ -2518,9 +2561,8 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 			return false;
 		} else {
 			if constexpr (E1::static_nullable == certainty::maybe) {
-				if (!lug::is_expression_nullable(this->e1)) {
+				if (!lug::is_expression_nullable(this->e1))
 					return false;
-				}
 			}
 			if constexpr (E2::static_nullable == certainty::maybe) {
 				return lug::is_expression_nullable(this->e2);
@@ -2538,9 +2580,8 @@ struct sequence_expression : binary_expression_node_interface<sequence_expressio
 			return false;
 		} else {
 			if constexpr (E2::static_nofail == certainty::maybe) {
-				if (!lug::is_expression_nofail(this->e2)) {
+				if (!lug::is_expression_nofail(this->e2))
 					return false;
-				}
 			}
 			if constexpr (E1::static_head_optimizable == certainty::maybe) {
 				return lug::is_expression_head_optimizable(this->e1);
@@ -3014,24 +3055,25 @@ template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] c
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 [[nodiscard]] constexpr auto operator<(E const& e, A&& a)
 {
-	if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>, syntax>)
+	if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>, syntax>) {
 		return capture_expression{make_expression(e), std::forward<A>(a)};
-	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>)
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>, syntax>) {
 		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr, syntax const& sx) { envr.push_attribute(aa(detail::dynamic_cast_if_base_of<environment&>{envr}, sx)); }};
-	else if constexpr (detail::is_invocable_r_exact_v<void, A, syntax>)
+	} else if constexpr (detail::is_invocable_r_exact_v<void, A, syntax>) {
 		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment&, syntax const& sx) { aa(sx); }};
-	else if constexpr (std::is_invocable_v<A, syntax>)
+	} else if constexpr (std::is_invocable_v<A, syntax>) {
 		return capture_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr, syntax const& sx) { envr.push_attribute(aa(sx)); }};
-	else if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>>)
+	} else if constexpr (detail::is_invocable_r_exact_v<void, A, detail::dynamic_cast_if_base_of<environment&>>) {
 		return action_expression{make_expression(e), std::forward<A>(a)};
-	else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>)
+	} else if constexpr (std::is_invocable_v<A, detail::dynamic_cast_if_base_of<environment&>>) {
 		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr) { envr.push_attribute(aa(detail::dynamic_cast_if_base_of<environment&>{envr})); }};
-	else if constexpr (detail::is_invocable_r_exact_v<void, A>)
+	} else if constexpr (detail::is_invocable_r_exact_v<void, A>) {
 		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment&) { aa(); }};
-	else if constexpr (std::is_invocable_v<A>)
+	} else if constexpr (std::is_invocable_v<A>) {
 		return action_expression{make_expression(e), [aa = std::forward<A>(a)](environment& envr) { envr.push_attribute(aa()); }};
-	else
+	} else {
 		static_assert(detail::always_false_v<A>, "invalid action type");
+	}
 }
 
 } // namespace operators
@@ -3101,19 +3143,21 @@ template <error_response Response = error_response::resume, class Pattern, class
 template <error_response Response = error_response::resume, class Pattern, class DefaultValue, class = std::enable_if_t<is_expression_v<Pattern>>>
 [[nodiscard]] constexpr auto sync_with_value(Pattern const& pattern, DefaultValue&& default_value)
 {
-	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>) {
 		return noskip[*(!pattern > any) < std::forward<DefaultValue>(default_value) ^ Response];
-	else
+	} else {
 		return noskip[*(!pattern > any) < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
+	}
 }
 
 template <error_response Response = error_response::resume, class DefaultValue>
 [[nodiscard]] constexpr auto with_value(DefaultValue&& default_value)
 {
-	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>)
+	if constexpr (std::is_invocable_v<std::add_const_t<std::decay_t<DefaultValue>>>) {
 		return noskip[eps < std::forward<DefaultValue>(default_value) ^ Response];
-	else
+	} else {
 		return noskip[eps < [value = std::forward<DefaultValue>(default_value)] { return value; } ^ Response];
+	}
 }
 
 template <error_response Response>
@@ -3203,7 +3247,7 @@ template <error_response Response>
 	return start(start_rule, rule{dsl::noskip[dsl::operator*(dsl::space)]});
 }
 
-enum class source_options : std::uint_least8_t { none = 0, interactive = 1 };
+enum class source_options : std::uint_least8_t { none = 0U, interactive = 1U };
 template <> inline constexpr bool is_flag_enum_v<source_options> = true;
 
 namespace detail {
@@ -3223,10 +3267,6 @@ template <typename T, class InputFunc> struct input_source_has_push_source<T, In
 
 class multi_input_source
 {
-	std::string buffer_;
-	std::vector<std::pair<std::function<bool(std::back_insert_iterator<std::string>, source_options)>, source_options>> sources_;
-	bool reading_{false};
-
 public:
 	[[nodiscard]] LUG_ALWAYS_INLINE std::string_view buffer() const noexcept { return buffer_; }
 	[[nodiscard]] source_options options() const noexcept { return !sources_.empty() ? sources_.back().second : source_options::none; }
@@ -3238,9 +3278,10 @@ public:
 			return false;
 		detail::reentrancy_sentinel<reenterant_read_error> const guard{reading_};
 		std::size_t const required_size = buffer_.size() + fill_required;
-		while (!sources_.empty() && (buffer_.size() < required_size))
+		while (!sources_.empty() && (buffer_.size() < required_size)) {
 			if (auto const& [func, opt] = sources_.back(); !func(std::back_inserter(buffer_), opt))
 				sources_.pop_back();
+		}
 		return buffer_.size() >= required_size;
 	}
 
@@ -3257,34 +3298,59 @@ public:
 	{
 		if LUG_UNLIKELY(reading_)
 			throw_exception<reenterant_read_error>();
-		if constexpr (std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>)
+		if constexpr (std::is_invocable_r_v<bool, InputFunc, std::back_insert_iterator<std::string>, source_options>) {
 			sources_.emplace_back(std::forward<InputFunc>(func), opt);
-		else
+		} else {
 			sources_.emplace_back([srcfn = std::forward<InputFunc>(func)](std::back_insert_iterator<std::string> out, source_options /*opt*/) -> bool { return srcfn(out); }, opt);
+		}
 	}
+
+private:
+	std::string buffer_;
+	std::vector<std::pair<std::function<bool(std::back_insert_iterator<std::string>, source_options)>, source_options>> sources_;
+	bool reading_{false};
 };
 
 class string_input_source
 {
-	std::string buffer_;
 public:
 	[[nodiscard]] LUG_ALWAYS_INLINE std::string_view buffer() const noexcept { return buffer_; }
 	void drain_buffer(std::size_t sr) { buffer_.erase(0, sr); }
 	template <class It, class = detail::enable_if_char_input_iterator_t<It>> void enqueue(It first, It last) { buffer_.insert(buffer_.end(), first, last); }
+
+private:
+	std::string buffer_;
 };
 
 class string_view_input_source
 {
-	std::string_view buffer_;
 public:
 	using enqueue_drains = std::true_type;
 	[[nodiscard]] LUG_ALWAYS_INLINE constexpr std::string_view buffer() const noexcept { return buffer_; }
 	constexpr void drain_buffer(std::size_t sr) noexcept { buffer_.remove_prefix(sr); }
 	template <class It, class = detail::enable_if_char_contiguous_iterator_t<It>> void enqueue(It first, It last) { buffer_ = (last > first) ? std::string_view{&(*first), static_cast<std::size_t>(last - first)} : std::string_view{}; }
+
+private:
+	std::string_view buffer_;
 };
 
 class parser_base
 {
+public:
+	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, program_{&g.program()}, environment_{&e} {}
+	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
+	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
+	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
+	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
+	[[nodiscard]] syntax_position subject_position() { return environment_->position_at(registers_.sr); }
+	[[nodiscard]] syntax_position max_subject_position() { return environment_->position_at(registers_.mr); }
+	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_->position_at(index); }
+	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_->position_at(range.index); }
+	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_->position_at(range.index + range.size); }
+	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
+	[[nodiscard]] lug::registers& registers() noexcept { return registers_; }
+	[[nodiscard]] lug::registers const& registers() const noexcept { return registers_; }
+	
 protected:
 	static constexpr std::size_t lrfailcode = (std::numeric_limits<std::size_t>::max)();
 	static constexpr std::size_t actioncode = (std::numeric_limits<std::size_t>::max)();
@@ -3303,19 +3369,6 @@ protected:
 	struct symbol_frame { std::string_view name; std::size_t sr; constexpr symbol_frame(std::string_view n, std::size_t s) noexcept : name{n}, sr{s} {} };
 	using symbol_table_frame = std::unordered_map<std::string_view, std::vector<std::string>>;
 	using stack_frame = std::variant<backtrack_frame, call_frame, capture_frame, condition_frame, lrmemo_frame, raise_frame, recover_frame, report_frame, symbol_frame, symbol_table_frame>;
-
-	// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
-	lug::grammar const* grammar_;
-	lug::program const* program_;
-	lug::environment* environment_;
-	std::vector<action_response> responses_;
-	std::vector<stack_frame> stack_frames_;
-	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
-	lug::registers registers_;
-	bool needs_reset_{false};
-	bool parsing_{false};
-	bool success_{true};
-	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
 
 	template <class Predicate>
 	[[nodiscard]] LUG_ALWAYS_INLINE auto make_property_matcher(Predicate const& pred, instruction const& instr) const noexcept
@@ -3499,540 +3552,23 @@ protected:
 		environment_->reset(sub);
 	}
 
-public:
-	explicit parser_base(lug::grammar const& g, lug::environment& e) : grammar_{&g}, program_{&g.program()}, environment_{&e} {}
-	[[nodiscard]] lug::grammar const& grammar() const noexcept { return *grammar_; }
-	[[nodiscard]] lug::environment& environment() const noexcept { return *environment_; }
-	[[nodiscard]] std::size_t subject_index() const noexcept { return registers_.sr; }
-	[[nodiscard]] std::size_t max_subject_index() const noexcept { return registers_.mr; }
-	[[nodiscard]] syntax_position subject_position() { return environment_->position_at(registers_.sr); }
-	[[nodiscard]] syntax_position max_subject_position() { return environment_->position_at(registers_.mr); }
-	[[nodiscard]] syntax_position position_at(std::size_t index) { return environment_->position_at(index); }
-	[[nodiscard]] syntax_position position_begin(syntax_range const& range) { return environment_->position_at(range.index); }
-	[[nodiscard]] syntax_position position_end(syntax_range const& range) { return environment_->position_at(range.index + range.size); }
-	[[nodiscard]] std::pair<syntax_position, syntax_position> position_range(syntax_range const& range) { return {position_begin(range), position_end(range)}; }
-	[[nodiscard]] lug::registers& registers() noexcept { return registers_; }
-	[[nodiscard]] lug::registers const& registers() const noexcept { return registers_; }
+	// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)
+	lug::grammar const* grammar_;
+	lug::program const* program_;
+	lug::environment* environment_;
+	std::vector<action_response> responses_;
+	std::vector<stack_frame> stack_frames_;
+	std::unordered_map<std::size_t, std::string> casefolded_subjects_;
+	lug::registers registers_;
+	bool needs_reset_{false};
+	bool parsing_{false};
+	bool success_{true};
+	// NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes,misc-non-private-member-variables-in-classes)	
 };
 
 template <class InputSource>
 class basic_parser : public parser_base
 {
-	InputSource input_source_;
-
-	[[nodiscard]] bool available(std::size_t position, std::size_t min_size = 1)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			for (;;) {
-				std::size_t const buffer_size = input_source_.buffer().size();
-				std::size_t const buffer_remaining = buffer_size - position;
-				if LUG_LIKELY(position < buffer_size) {
-					if LUG_LIKELY(min_size <= buffer_remaining)
-						return true;
-					if constexpr (detail::input_source_has_options<InputSource>::value)
-						if ((input_source_.options() & source_options::interactive) != source_options::none)
-							return false;
-				}
-				if LUG_UNLIKELY(!input_source_.fill_buffer(min_size - buffer_remaining))
-					return false;
-			}
-		} else {
-			std::size_t const buffer_size = input_source_.buffer().size();
-			return (position < buffer_size) && (min_size <= (buffer_size - position));
-		}
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer(std::size_t position, [[maybe_unused]] std::size_t min_size = 1)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			bool const result = available(position, min_size);
-			auto const buffer = input_source_.buffer();
-			if LUG_LIKELY(result)
-				return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
-			return std::pair{buffer.cend(), buffer.cend()};
-		} else {
-			auto const buffer = input_source_.buffer();
-			return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
-		}
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer_no_fill(std::size_t position) const noexcept
-	{
-		auto const buffer = input_source_.buffer();
-		return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE bool compare(std::size_t sr, std::size_t sn, std::string_view str) const noexcept
-	{
-		return input_source_.buffer().compare(sr, sn, str) == 0;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) noexcept
-	{
-		std::string& subject = casefolded_subjects_[sr];
-		if (subject.size() < sn)
-			subject = utf8::tocasefold(input_source_.buffer().substr(sr, sn));
-		return subject.compare(0, sn, str) == 0;
-	}
-
-	template <class MatchOneFn, class... ExtraArgs>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchOneFn const& match_one, ExtraArgs const&... extra_args)
-	{
-		std::size_t const i = sr;
-		std::size_t n = 0;
-		for ( ; n <= nmax; ++n)
-			if (match_one(*this, sr, extra_args...) != 0)
-				break;
-		if (n >= nmin)
-			return 0;
-		sr = i;
-		return 1;
-	}
-
-	template <class MatchFn>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
-	{
-		std::size_t const i = sr;
-		std::size_t n = 0;
-		auto const [first, last] = input_buffer_no_fill(i);
-		auto curr = first;
-		for ( ; n <= nmax; ++n) {
-			auto const next = match(curr, last);
-			if (!next)
-				break;
-			curr = *next;
-		}
-		if (n >= nmin) {
-			sr = i + static_cast<std::size_t>(curr - first);
-			return 0;
-		}
-		return 1;
-	}
-
-	template <class MatchFn>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
-	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
-		if (auto const next = match(curr, last); next) {
-			sr = i + static_cast<std::size_t>(*next - curr);
-			return 0;
-		}
-		return 1;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr)
-	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
-		if LUG_LIKELY(curr != last) {
-			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
-			sr = i + static_cast<std::size_t>(next - curr);
-			return 0;
-		}
-		return 1;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
-		} else {
-			if ((nmin == 0) && (nmax == forever)) {
-				sr = input_source_.buffer().size();
-				return 0;
-			}
-			return repeat_match_buffered(sr, nmin, nmax, [](auto curr, auto last) -> std::optional<std::decay_t<decltype(curr)>> {
-				if LUG_LIKELY(curr != last) {
-					auto const next = std::find_if(curr + 1, last, utf8::is_lead_or_ascii);
-					if (next != curr)
-						return next;
-				}
-				return std::nullopt;
-			});
-		}
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr)
-	{
-		return match_with(sr, ascii::match_blank);
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
-		else
-			return repeat_match_buffered(sr, nmin, nmax, ascii::match_blank);
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr)
-	{
-		return match_with(sr, ascii::match_space);
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
-		else
-			return repeat_match_buffered(sr, nmin, nmax, ascii::match_space);
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
-	{
-		std::size_t i = sr;
-		if (mode != 0)
-			(void)repeat_blank(i, 0, forever);
-		if (std::ptrdiff_t const eol_fail_count = match_with(i, ascii::match_eol); eol_fail_count != 0)
-			return eol_fail_count;
-		sr = i;
-		return 0;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
-	{
-		std::size_t i = sr;
-		if constexpr (detail::input_source_has_options<InputSource>::value) {
-			if ((input_source_.options() & source_options::interactive) != source_options::none) {
-				if (mode != 0)
-					(void)repeat_match_buffered(i, 0, forever, ascii::match_space);
-				if (i >= input_source_.buffer().size()) {
-					sr = i;
-					return 0;
-				}
-				return 1;
-			}
-		}
-		if (mode != 0)
-			(void)repeat_space(i, 0, forever);
-		if (!available(i)) {
-			sr = i;
-			return 0;
-		}
-		return 1;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr, std::uint_least8_t value)
-	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
-		if LUG_LIKELY(curr != last) {
-			if (static_cast<unsigned char>(*curr) == value) {
-				sr = i + 1;
-				return 0;
-			}
-		}
-		return 1;
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_unit(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t unit)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
-		} else {
-			std::size_t const i = sr;
-			auto const [first, last] = input_buffer_no_fill(i);
-			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
-			auto const next = std::find_if(first, tail, [unit](auto const c) { return static_cast<unsigned char>(c) != unit; });
-			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
-				sr = i + count;
-				return 0;
-			}
-			return 1;
-		}
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_set(std::size_t& sr, rune_set const& set)
-	{
-		return match_with(sr, set);
-	}
-
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_set(std::size_t& sr, std::size_t nmin, std::size_t nmax, rune_set const& set)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_set), set);
-		else
-			return repeat_match_buffered(sr, nmin, nmax, set);
-	}
-
-	template <class InputIt, class MatchFn>
-	[[nodiscard]] static auto decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match) -> std::optional<std::decay_t<InputIt>>
-	{
-		auto const [next, rune] = utf8::decode_rune(first, last);
-		if LUG_LIKELY(next != first) {
-			bool matched = false;
-			if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
-				matched = match(unicode::query(rune));
-			} else if constexpr(std::is_invocable_v<MatchFn const&, char32_t>) {
-				matched = match(rune);
-			} else {
-				static_assert(detail::always_false_v<MatchFn>, "unsupported match operation");
-			}
-			if (matched)
-				return next;
-		}
-		return std::nullopt;
-	}
-
-	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
-	{
-		std::size_t const i = sr;
-		auto const [curr, last] = input_buffer(i);
-		if (auto const next = decode_and_match_rune(curr, last, match); next) {
-			sr = i + static_cast<std::size_t>(*next - curr);
-			return 0;
-		}
-		return 1;
-	}
-
-	template <class MatchFn>
-	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
-	{
-		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value)
-			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
-		else
-			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last) { return decode_and_match_rune(first, last, match); });
-	}
-
-	template <class Compare>
-	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
-	{
-		if (std::size_t const i = sr, n = str.size(); !n || (available(i, n) && comp(*this, i, n, str))) {
-			sr = i + n;
-			return 0;
-		}
-		return 1;
-	}
-
-	template <class Modify, class Compare>
-	[[nodiscard]] std::ptrdiff_t match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
-	{
-		auto const& symbols = environment_->get_symbols(symbol_name);
-		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(tsr, mod(symbol), comp) == 0); })) {
-			sr = tsr;
-			return 0;
-		}
-		return 1;
-	}
-
-	template <class Modify, class Compare>
-	[[nodiscard]] std::ptrdiff_t match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
-	{
-		auto const& symbols = environment_->get_symbols(symbol_name);
-		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(sr, mod(symbol), comp) == 0); }) ? 0 : 1;
-	}
-
-	template <class Modify, class Compare>
-	[[nodiscard]] std::ptrdiff_t match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
-	{
-		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : 1;
-	}
-
-	template <class Modify, class Compare>
-	[[nodiscard]] std::ptrdiff_t match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
-	{
-		auto const& symbols = environment_->get_symbols(symbol_name);
-		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
-	}
-
-	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
-	{
-		if (std::size_t i = sr; available(i)) {
-			do {
-				auto const buffer = input_source_.buffer();
-				if (auto const n = buffer.find_first_of(" \t\n\r\f\v", i); n != std::string::npos) {
-					i = n;
-					break;
-				}
-				i = buffer.size();
-			} while (available(i));
-			if (i > sr) {
-				sr = i;
-				return 0;
-			}
-		}
-		return 1;
-	}
-
-	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
-	{
-		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
-		if (registers_.pc == frame.pc) {
-			registers_.sr = frame.sr;
-			(void)match_default_recovery(registers_.sr);
-			rec_res = error_response::halt;
-		}
-		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		auto const sr0 = frame.sr;
-		auto const sr1 = registers_.sr;
-		auto const mat = match();
-		auto const sub = subject();
-		environment_->set_match_and_subject(mat, sub);
-		return do_return_from_raise(frame, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, rec_res);
-	}
-
-	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
-	{
-		if LUG_UNLIKELY(stack_frames_.empty())
-			throw_exception<bad_stack>();
-		auto ret_result = std::visit([this](auto& frame) -> std::pair<error_response, std::ptrdiff_t> {
-			using frame_type = std::decay_t<decltype(frame)>;
-			if constexpr (std::is_same_v<frame_type, call_frame>) {
-				--registers_.cd;
-				registers_.pc = frame.pc;
-				return std::pair{error_response::accept, std::ptrdiff_t{0}};
-			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
-				if (!return_from_lrmemo_call(frame))
-					return std::pair{error_response::rethrow, std::ptrdiff_t{0}};
-				accept_or_drain_if_deferred();
-				return std::pair{error_response::accept, std::ptrdiff_t{0}};
-			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
-				error_response const err_res = return_from_raise(frame);
-				if (err_res >= error_response::backtrack)
-					return std::pair{err_res, std::ptrdiff_t{1}};
-				accept_or_drain_if_deferred();
-				return std::pair{err_res, std::ptrdiff_t{0}};
-			} else {
-				throw_exception<bad_stack>();
-			}
-		}, stack_frames_.back());
-		if (ret_result.first != error_response::rethrow)
-			stack_frames_.pop_back();
-		return ret_result;
-	}
-
-	[[nodiscard]] error_response fail_one()
-	{
-		if LUG_UNLIKELY(stack_frames_.empty())
-			return error_response::halt;
-		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
-			using frame_type = std::decay_t<decltype(frame)>;
-			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
-				if (frame.sr == (std::numeric_limits<std::size_t>::max)())
-					return error_response::backtrack;
-				registers_.sr = frame.sr;
-				registers_.rc = frame.rc;
-				registers_.ri = frame.ri;
-				registers_.pc = frame.pc;
-				return error_response::accept;
-			} else if constexpr (std::is_same_v<frame_type, call_frame>) {
-				--registers_.cd;
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, capture_frame>) {
-				--registers_.ci;
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, condition_frame>) {
-				environment_->set_condition(frame.name, frame.value);
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
-				--registers_.cd;
-				--registers_.ci;
-				if (frame.sra == parser_base::lrfailcode)
-					return error_response::backtrack;
-				registers_.sr = frame.sra;
-				registers_.rc = restore_responses_after(frame.rcr, frame.responses);
-				registers_.pc = frame.pcr;
-				return error_response::accept;
-			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
-				registers_.sr = frame.sr;
-				registers_.rc = frame.rc;
-				registers_.pc = frame.pc;
-				return return_from_raise(frame);
-			} else if constexpr (std::is_same_v<frame_type, recover_frame>) {
-				registers_.rh = frame.rh;
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, report_frame>) {
-				registers_.eh = frame.eh;
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, symbol_frame>) {
-				return error_response::backtrack;
-			} else if constexpr (std::is_same_v<frame_type, symbol_table_frame>) {
-				environment_->symbols_.swap(frame);
-				return error_response::backtrack;
-			} else {
-				static_assert(detail::always_false_v<frame_type>, "non-exhaustive visitor!");
-			}
-		}, stack_frames_.back());
-		stack_frames_.pop_back();
-		return fail_result;
-	}
-
-	[[nodiscard]] bool fail(std::ptrdiff_t fail_count)
-	{
-		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		do {
-			error_response const fail_result = fail_one();
-			if LUG_UNLIKELY(fail_result == error_response::halt)
-				return false;
-			if (fail_result >= error_response::backtrack)
-				continue;
-			if (fail_result < error_response::accept)
-				success_ = false;
-			--fail_count;
-		} while (fail_count > 0);
-		pop_responses_after(registers_.rc);
-		return true;
-	}
-
-	[[nodiscard]] bool unwind(std::size_t unwind_count)
-	{
-		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		for (std::size_t i = 0; i < unwind_count; ++i) {
-			error_response const fail_result = fail_one();
-			if LUG_UNLIKELY(fail_result == error_response::halt)
-				return false;
-			if (fail_result < error_response::accept)
-				success_ = false;
-		}
-		return true;
-	}
-
-	void accept()
-	{
-		registers_.mr = (std::max)(registers_.mr, registers_.sr);
-		auto const mat = match();
-		auto const sub = subject();
-		environment_->set_match_and_subject(mat, sub);
-		do_accept(mat);
-	}
-
-	void drain()
-	{
-		if (registers_.sr > 0) {
-			input_source_.drain_buffer(registers_.sr);
-			do_drain(input_source_.buffer());
-		}
-	}
-
-	void accept_or_drain_if_deferred()
-	{
-		if ((registers_.ci & lug::registers::count_mask) == 0) {
-			bool const should_cut = (registers_.ci & lug::registers::inhibited_flag) != 0;
-			bool const should_accept = (registers_.ci & lug::registers::ignore_errors_flag) != 0;
-			if (should_cut || should_accept) {
-				registers_.ci = 0;
-				registers_.mr = (std::max)(registers_.mr, registers_.sr);
-				auto const mat = match();
-				auto const sub = subject();
-				environment_->set_match_and_subject(mat, sub);
-				if ((should_cut && success_) || should_accept)
-					do_accept(mat);
-				if (should_cut)
-					drain();
-			}
-		}
-	}
-
-	void reset()
-	{
-		if (registers_.sr > 0)
-			input_source_.drain_buffer(registers_.sr);
-		do_reset(input_source_.buffer());
-	}
-
 public:
 	basic_parser(lug::grammar const& g, lug::environment& e) : parser_base{g, e} {}
 	[[nodiscard]] std::string_view match() const noexcept { return input_source_.buffer().substr(0, registers_.sr); }
@@ -4358,6 +3894,528 @@ public:
 		accept();
 		return true;
 	}
+
+private:
+	[[nodiscard]] bool available(std::size_t position, std::size_t min_size = 1)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			for (;;) {
+				std::size_t const buffer_size = input_source_.buffer().size();
+				std::size_t const buffer_remaining = buffer_size - position;
+				if LUG_LIKELY(position < buffer_size) {
+					if LUG_LIKELY(min_size <= buffer_remaining)
+						return true;
+					if constexpr (detail::input_source_has_options<InputSource>::value) {
+						if ((input_source_.options() & source_options::interactive) != source_options::none)
+							return false;
+					}
+				}
+				if LUG_UNLIKELY(!input_source_.fill_buffer(min_size - buffer_remaining))
+					return false;
+			}
+		} else {
+			std::size_t const buffer_size = input_source_.buffer().size();
+			return (position < buffer_size) && (min_size <= (buffer_size - position));
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer(std::size_t position, [[maybe_unused]] std::size_t min_size = 1)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			bool const result = available(position, min_size);
+			auto const buffer = input_source_.buffer();
+			if LUG_LIKELY(result)
+				return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+			return std::pair{buffer.cend(), buffer.cend()};
+		} else {
+			auto const buffer = input_source_.buffer();
+			return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE auto input_buffer_no_fill(std::size_t position) const noexcept
+	{
+		auto const buffer = input_source_.buffer();
+		return std::pair{std::next(buffer.cbegin(), static_cast<std::ptrdiff_t>(position)), buffer.cend()};
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE bool compare(std::size_t sr, std::size_t sn, std::string_view str) const noexcept
+	{
+		return input_source_.buffer().compare(sr, sn, str) == 0;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE bool casefold_compare(std::size_t sr, std::size_t sn, std::string_view str) noexcept
+	{
+		std::string& subject = casefolded_subjects_[sr];
+		if (subject.size() < sn)
+			subject = utf8::tocasefold(input_source_.buffer().substr(sr, sn));
+		return subject.compare(0, sn, str) == 0;
+	}
+
+	template <class MatchOneFn, class... ExtraArgs>
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_incrementally(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchOneFn const& match_one, ExtraArgs const&... extra_args)
+	{
+		std::size_t const i = sr;
+		std::size_t n = 0;
+		for ( ; n <= nmax; ++n) {
+			if (match_one(*this, sr, extra_args...) != 0)
+				break;
+		}
+		if (n >= nmin)
+			return 0;
+		sr = i;
+		return 1;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_match_buffered(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	{
+		std::size_t const i = sr;
+		std::size_t n = 0;
+		auto const [first, last] = input_buffer_no_fill(i);
+		auto curr = first;
+		for ( ; n <= nmax; ++n) {
+			auto const next = match(curr, last);
+			if (!next)
+				break;
+			curr = *next;
+		}
+		if (n >= nmin) {
+			sr = i + static_cast<std::size_t>(curr - first);
+			return 0;
+		}
+		return 1;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_with(std::size_t& sr, MatchFn const& match)
+	{
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if (auto const next = match(curr, last); next) {
+			sr = i + static_cast<std::size_t>(*next - curr);
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_any(std::size_t& sr)
+	{
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if LUG_LIKELY(curr != last) {
+			auto const next = std::find_if(std::next(curr), last, utf8::is_lead_or_ascii);
+			sr = i + static_cast<std::size_t>(next - curr);
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_any(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_any));
+		} else {
+			if ((nmin == 0) && (nmax == forever)) {
+				sr = input_source_.buffer().size();
+				return 0;
+			}
+			return repeat_match_buffered(sr, nmin, nmax, [](auto curr, auto last) -> std::optional<std::decay_t<decltype(curr)>> {
+				if LUG_LIKELY(curr != last) {
+					auto const next = std::find_if(curr + 1, last, utf8::is_lead_or_ascii);
+					if (next != curr)
+						return next;
+				}
+				return std::nullopt;
+			});
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_blank(std::size_t& sr)
+	{
+		return match_with(sr, ascii::match_blank);
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_blank(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_blank));
+		} else {
+			return repeat_match_buffered(sr, nmin, nmax, ascii::match_blank);
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_space(std::size_t& sr)
+	{
+		return match_with(sr, ascii::match_space);
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_space(std::size_t& sr, std::size_t nmin, std::size_t nmax)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_space));
+		} else {
+			return repeat_match_buffered(sr, nmin, nmax, ascii::match_space);
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eol(std::size_t& sr, std::uint_least8_t mode)
+	{
+		std::size_t i = sr;
+		if (mode != 0)
+			(void)repeat_blank(i, 0, forever);
+		if (std::ptrdiff_t const eol_fail_count = match_with(i, ascii::match_eol); eol_fail_count != 0)
+			return eol_fail_count;
+		sr = i;
+		return 0;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t& sr, std::uint_least8_t mode)
+	{
+		std::size_t i = sr;
+		if constexpr (detail::input_source_has_options<InputSource>::value) {
+			if ((input_source_.options() & source_options::interactive) != source_options::none) {
+				if (mode != 0)
+					(void)repeat_match_buffered(i, 0, forever, ascii::match_space);
+				if (i >= input_source_.buffer().size()) {
+					sr = i;
+					return 0;
+				}
+				return 1;
+			}
+		}
+		if (mode != 0)
+			(void)repeat_space(i, 0, forever);
+		if (!available(i)) {
+			sr = i;
+			return 0;
+		}
+		return 1;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr, std::uint_least8_t value)
+	{
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if LUG_LIKELY(curr != last) {
+			if (static_cast<unsigned char>(*curr) == value) {
+				sr = i + 1;
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_unit(std::size_t& sr, std::size_t nmin, std::size_t nmax, std::uint_least8_t unit)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_unit), unit);
+		} else {
+			std::size_t const i = sr;
+			auto const [first, last] = input_buffer_no_fill(i);
+			auto const tail = (static_cast<std::size_t>(last - first) <= nmax) ? last : (first + static_cast<std::ptrdiff_t>(nmax));
+			auto const next = std::find_if(first, tail, [unit](auto const c) { return static_cast<unsigned char>(c) != unit; });
+			if (auto const count = static_cast<std::size_t>(next - first); count >= nmin) {
+				sr = i + count;
+				return 0;
+			}
+			return 1;
+		}
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_set(std::size_t& sr, rune_set const& set)
+	{
+		return match_with(sr, set);
+	}
+
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t repeat_set(std::size_t& sr, std::size_t nmin, std::size_t nmax, rune_set const& set)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_set), set);
+		} else {
+			return repeat_match_buffered(sr, nmin, nmax, set);
+		}
+	}
+
+	template <class InputIt, class MatchFn>
+	[[nodiscard]] static auto decode_and_match_rune(InputIt first, InputIt last, MatchFn const& match) -> std::optional<std::decay_t<InputIt>>
+	{
+		auto const [next, rune] = utf8::decode_rune(first, last);
+		if LUG_LIKELY(next != first) {
+			bool matched = false;
+			if constexpr(std::is_invocable_v<MatchFn const&, unicode::record const&>) {
+				matched = match(unicode::query(rune));
+			} else if constexpr(std::is_invocable_v<MatchFn const&, char32_t>) {
+				matched = match(rune);
+			} else {
+				static_assert(detail::always_false_v<MatchFn>, "unsupported match operation");
+			}
+			if (matched)
+				return next;
+		}
+		return std::nullopt;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t match_rune(std::size_t& sr, MatchFn const& match)
+	{
+		std::size_t const i = sr;
+		auto const [curr, last] = input_buffer(i);
+		if (auto const next = decode_and_match_rune(curr, last, match); next) {
+			sr = i + static_cast<std::size_t>(*next - curr);
+			return 0;
+		}
+		return 1;
+	}
+
+	template <class MatchFn>
+	[[nodiscard]] std::ptrdiff_t repeat_rune(std::size_t& sr, std::size_t nmin, std::size_t nmax, MatchFn const& match)
+	{
+		if constexpr (detail::input_source_has_fill_buffer<InputSource>::value) {
+			return repeat_match_incrementally(sr, nmin, nmax, std::mem_fn(&basic_parser::match_rune<MatchFn>), match);
+		} else {
+			return repeat_match_buffered(sr, nmin, nmax, [&match](auto first, auto last) { return decode_and_match_rune(first, last, match); });
+		}
+	}
+
+	template <class Compare>
+	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_sequence(std::size_t& sr, std::string_view str, Compare const& comp)
+	{
+		if (std::size_t const i = sr, n = str.size(); !n || (available(i, n) && comp(*this, i, n, str))) {
+			sr = i + n;
+			return 0;
+		}
+		return 1;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] std::ptrdiff_t match_symbol_all(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
+	{
+		auto const& symbols = environment_->get_symbols(symbol_name);
+		if (std::size_t tsr = sr; std::all_of(symbols.begin(), symbols.end(), [&tsr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(tsr, mod(symbol), comp) == 0); })) {
+			sr = tsr;
+			return 0;
+		}
+		return 1;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] std::ptrdiff_t match_symbol_any(std::size_t& sr, std::string_view symbol_name, Modify const& mod, Compare const& comp)
+	{
+		auto const& symbols = environment_->get_symbols(symbol_name);
+		return std::any_of(symbols.begin(), symbols.end(), [&sr, &mod, &comp, this](auto const& symbol) { return (this->match_sequence(sr, mod(symbol), comp) == 0); }) ? 0 : 1;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] std::ptrdiff_t match_symbol_head(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_->get_symbols(symbol_name);
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbol_index]), std::forward<Compare>(comp)) : 1;
+	}
+
+	template <class Modify, class Compare>
+	[[nodiscard]] std::ptrdiff_t match_symbol_tail(std::size_t& sr, std::string_view symbol_name, std::size_t symbol_index, Modify&& mod, Compare&& comp)
+	{
+		auto const& symbols = environment_->get_symbols(symbol_name);
+		return (symbol_index < symbols.size()) ? match_sequence(sr, mod(symbols[symbols.size() - symbol_index - 1]), std::forward<Compare>(comp)) : 1;
+	}
+
+	[[nodiscard]] std::ptrdiff_t match_default_recovery(std::size_t& sr)
+	{
+		if (std::size_t i = sr; available(i)) {
+			do {
+				auto const buffer = input_source_.buffer();
+				if (auto const n = buffer.find_first_of(" \t\n\r\f\v", i); n != std::string::npos) {
+					i = n;
+					break;
+				}
+				i = buffer.size();
+			} while (available(i));
+			if (i > sr) {
+				sr = i;
+				return 0;
+			}
+		}
+		return 1;
+	}
+
+	[[nodiscard]] error_response return_from_raise(raise_frame const& frame)
+	{
+		error_response rec_res{std::exchange(registers_.rr, error_response::resume)};
+		if (registers_.pc == frame.pc) {
+			registers_.sr = frame.sr;
+			(void)match_default_recovery(registers_.sr);
+			rec_res = error_response::halt;
+		}
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		auto const sr0 = frame.sr;
+		auto const sr1 = registers_.sr;
+		auto const mat = match();
+		auto const sub = subject();
+		environment_->set_match_and_subject(mat, sub);
+		return do_return_from_raise(frame, syntax{((sr0 < sr1) ? mat.substr(sr0, sr1 - sr0) : sub), sr0}, rec_res);
+	}
+
+	[[nodiscard]] std::pair<error_response, std::ptrdiff_t> return_from_call()
+	{
+		if LUG_UNLIKELY(stack_frames_.empty())
+			throw_exception<bad_stack>();
+		auto ret_result = std::visit([this](auto& frame) -> std::pair<error_response, std::ptrdiff_t> {
+			using frame_type = std::decay_t<decltype(frame)>;
+			if constexpr (std::is_same_v<frame_type, call_frame>) {
+				--registers_.cd;
+				registers_.pc = frame.pc;
+				return std::pair{error_response::accept, std::ptrdiff_t{0}};
+			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
+				if (!return_from_lrmemo_call(frame))
+					return std::pair{error_response::rethrow, std::ptrdiff_t{0}};
+				accept_or_drain_if_deferred();
+				return std::pair{error_response::accept, std::ptrdiff_t{0}};
+			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
+				error_response const err_res = return_from_raise(frame);
+				if (err_res >= error_response::backtrack)
+					return std::pair{err_res, std::ptrdiff_t{1}};
+				accept_or_drain_if_deferred();
+				return std::pair{err_res, std::ptrdiff_t{0}};
+			} else {
+				throw_exception<bad_stack>();
+			}
+		}, stack_frames_.back());
+		if (ret_result.first != error_response::rethrow)
+			stack_frames_.pop_back();
+		return ret_result;
+	}
+
+	[[nodiscard]] error_response fail_one()
+	{
+		if LUG_UNLIKELY(stack_frames_.empty())
+			return error_response::halt;
+		error_response const fail_result = std::visit([this](auto& frame) -> error_response {
+			using frame_type = std::decay_t<decltype(frame)>;
+			if constexpr (std::is_same_v<frame_type, backtrack_frame>) {
+				if (frame.sr == (std::numeric_limits<std::size_t>::max)())
+					return error_response::backtrack;
+				registers_.sr = frame.sr;
+				registers_.rc = frame.rc;
+				registers_.ri = frame.ri;
+				registers_.pc = frame.pc;
+				return error_response::accept;
+			} else if constexpr (std::is_same_v<frame_type, call_frame>) {
+				--registers_.cd;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, capture_frame>) {
+				--registers_.ci;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, condition_frame>) {
+				environment_->set_condition(frame.name, frame.value);
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, lrmemo_frame>) {
+				--registers_.cd;
+				--registers_.ci;
+				if (frame.sra == parser_base::lrfailcode)
+					return error_response::backtrack;
+				registers_.sr = frame.sra;
+				registers_.rc = restore_responses_after(frame.rcr, frame.responses);
+				registers_.pc = frame.pcr;
+				return error_response::accept;
+			} else if constexpr (std::is_same_v<frame_type, raise_frame>) {
+				registers_.sr = frame.sr;
+				registers_.rc = frame.rc;
+				registers_.pc = frame.pc;
+				return return_from_raise(frame);
+			} else if constexpr (std::is_same_v<frame_type, recover_frame>) {
+				registers_.rh = frame.rh;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, report_frame>) {
+				registers_.eh = frame.eh;
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, symbol_frame>) {
+				return error_response::backtrack;
+			} else if constexpr (std::is_same_v<frame_type, symbol_table_frame>) {
+				environment_->symbols_.swap(frame);
+				return error_response::backtrack;
+			} else {
+				static_assert(detail::always_false_v<frame_type>, "non-exhaustive visitor!");
+			}
+		}, stack_frames_.back());
+		stack_frames_.pop_back();
+		return fail_result;
+	}
+
+	[[nodiscard]] bool fail(std::ptrdiff_t fail_count)
+	{
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		do {
+			error_response const fail_result = fail_one();
+			if LUG_UNLIKELY(fail_result == error_response::halt)
+				return false;
+			if (fail_result >= error_response::backtrack)
+				continue;
+			if (fail_result < error_response::accept)
+				success_ = false;
+			--fail_count;
+		} while (fail_count > 0);
+		pop_responses_after(registers_.rc);
+		return true;
+	}
+
+	[[nodiscard]] bool unwind(std::size_t unwind_count)
+	{
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		for (std::size_t i = 0; i < unwind_count; ++i) {
+			error_response const fail_result = fail_one();
+			if LUG_UNLIKELY(fail_result == error_response::halt)
+				return false;
+			if (fail_result < error_response::accept)
+				success_ = false;
+		}
+		return true;
+	}
+
+	void accept()
+	{
+		registers_.mr = (std::max)(registers_.mr, registers_.sr);
+		auto const mat = match();
+		auto const sub = subject();
+		environment_->set_match_and_subject(mat, sub);
+		do_accept(mat);
+	}
+
+	void drain()
+	{
+		if (registers_.sr > 0) {
+			input_source_.drain_buffer(registers_.sr);
+			do_drain(input_source_.buffer());
+		}
+	}
+
+	void accept_or_drain_if_deferred()
+	{
+		if ((registers_.ci & lug::registers::count_mask) == 0) {
+			bool const should_cut = (registers_.ci & lug::registers::inhibited_flag) != 0;
+			bool const should_accept = (registers_.ci & lug::registers::ignore_errors_flag) != 0;
+			if (should_cut || should_accept) {
+				registers_.ci = 0;
+				registers_.mr = (std::max)(registers_.mr, registers_.sr);
+				auto const mat = match();
+				auto const sub = subject();
+				environment_->set_match_and_subject(mat, sub);
+				if ((should_cut && success_) || should_accept)
+					do_accept(mat);
+				if (should_cut)
+					drain();
+			}
+		}
+	}
+
+	void reset()
+	{
+		if (registers_.sr > 0)
+			input_source_.drain_buffer(registers_.sr);
+		do_reset(input_source_.buffer());
+	}
+
+	InputSource input_source_;
 };
 
 using parser = basic_parser<multi_input_source>;
@@ -4365,10 +4423,11 @@ using parser = basic_parser<multi_input_source>;
 template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
 inline bool parse(InputIt first, InputIt last, grammar const& grmr, environment& envr)
 {
-	if constexpr (detail::is_char_contiguous_iterator_v<InputIt>)
+	if constexpr (detail::is_char_contiguous_iterator_v<InputIt>) {
 		return basic_parser<string_view_input_source>{grmr, envr}.enqueue(first, last).parse();
-	else
+	} else {
 		return basic_parser<string_input_source>{grmr, envr}.enqueue(first, last).parse();
+	}
 }
 
 template <class InputIt, class = detail::enable_if_char_input_iterator_t<InputIt>>
