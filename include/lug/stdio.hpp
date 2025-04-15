@@ -227,7 +227,7 @@ inline std::FILE* skipws(std::FILE* input) noexcept
 			int const ch{lug::fgetc_locked(lock)};
 			if (ch == EOF)
 				break;
-			if (not lug::ascii::isspace(ch)) {
+			if (!lug::ascii::isspace(ch)) {
 				(void)lug::fungetc_and_unlock(ch, lock);
 				break;
 			}

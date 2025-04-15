@@ -176,7 +176,7 @@ public:
 						auto pos = static_cast<std::size_t>(ptr - line.data());
 						while ((pos < line.size()) && lug::ascii::isspace(line[pos]))
 							++pos;
-						update_line(lineno, line.substr(pos) + "\n");
+						update_line(lineno, line.substr(pos));
 					} else if (ec ==  std::errc::result_out_of_range) {
 						print_error("ILLEGAL LINE NUMBER");
 					}
@@ -254,13 +254,16 @@ private:
 			print_error("UNABLE TO SAVE TO FILE");
 	}
 
-	void update_line(int n, std::string_view s)
+	void update_line(int n, std::string s)
 	{
 		haltline_ = lines_.end();
-		if (s.empty() || s.front() < ' ')
+		if (s.empty() || s.front() < ' ') {
 			lines_.erase(n);
-		else
-			lines_[n] = s;
+		} else {
+			if (s.back() != '\n')
+				s.push_back('\n');
+			lines_[n] = std::move(s);
+		}
 	}
 
 	bool goto_line(int n)

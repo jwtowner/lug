@@ -136,9 +136,9 @@ void test_directives_stack_no_skip_operations()
 	for (int i = 0; i < 256; ++i) {
 		auto const dinitial = static_cast<lug::directive_traits>(static_cast<std::uint_least8_t>(i));
 		lug::encoder enc{prog, prog_callees, dinitial};
-		auto const dprior = enc.dpush(lug::directive_traits::none, lug::directive_traits::none);
+		auto const old_dir = enc.directives_push(lug::directive_traits::none, lug::directive_traits::none);
 		assert(enc.directives() == dinitial); // No change
-		enc.dpop(dprior);
+		enc.directives(old_dir);
 		assert(enc.directives() == dinitial); // No change
 		assert(prog.instructions.empty()); // No instructions added
 	}
