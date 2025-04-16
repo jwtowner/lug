@@ -84,7 +84,7 @@ enum class opcode : std::uint_least8_t
 	symbol_tail_cf,         symbol_start,   symbol_push,    raise
 };
 
-enum class control_operation : std::uint_least8_t { accept, cut, feed, nofeed };
+enum class control_operation : std::uint_least8_t { accept, cut, feed, hold };
 
 [[nodiscard]] LUG_ALWAYS_INLINE constexpr bool is_test_opcode(opcode op) noexcept
 {
@@ -164,7 +164,7 @@ using semantic_action = std::function<void(environment&)>;
 using semantic_capture_action = std::function<void(environment&, syntax const&)>;
 using syntactic_predicate = std::function<bool(environment&)>;
 
-enum class directive_traits : std::uint_least8_t { none = 0U, caseless = 1U, lexeme = 2U, noeol = 4U, nofeed = 8U, noopt = 16U, noskip = 32U, preskip = 64U, postskip = 128U, all = 255U };
+enum class directive_traits : std::uint_least8_t { none = 0U, caseless = 1U, lexeme = 2U, noeol = 4U, nofeed = 8U, noskip = 16U, preskip = 32U, postskip = 64U, unopt = 128U, all = 255U };
 template <> inline constexpr bool is_flag_enum_v<directive_traits> = true;
 enum class effect_traits : std::uint_least8_t { none = 0U, action = 1U, binding = 2U, captures = 4U, control = 8U, dynamic = 16U, raises = 32U, all = 63U };
 template <> inline constexpr bool is_flag_enum_v<effect_traits> = true;
@@ -1003,6 +1003,7 @@ public:
 	[[nodiscard]] std::uint_least16_t get_frame_handle_index() { return add_item(program_->frames, frame_info_->handle()); }
 	template <class Target, class = std::enable_if_t<is_attribute_frame_persistable_v<Target>>> LUG_NONNULL(2) void add_to_frame(Target* target) { frame_info_->add(target); }
 	[[nodiscard]] bool caseless() const noexcept { return (directives_ & directive_traits::caseless) != directive_traits::none; }
+	[[nodiscard]] bool optimized() const noexcept { return (directives_ & directive_traits::unopt) == directive_traits::none; }
 	[[nodiscard]] directive_traits directives() const noexcept { return directives_; }
 	void directives(directive_traits value) noexcept { directives_ = value; }
 	[[nodiscard]] bool nullable() const noexcept { return nullable_; }
@@ -1178,11 +1179,11 @@ public:
 
 	void encode_skip(directive_traits successor)
 	{
-		bool const nofeed = ((successor & directive_traits::nofeed) != directive_traits::none);
-		if (nofeed)
-			encode(opcode::control, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(control_operation::nofeed));
+		bool const hold = ((successor & directive_traits::nofeed) != directive_traits::none);
+		if (hold)
+			encode(opcode::control, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(control_operation::hold));
 		encode(((successor & directive_traits::noeol) != directive_traits::none) ? opcode::skip_blank : opcode::skip_space);
-		if (nofeed)
+		if (hold)
 			encode(opcode::control, std::uint_least16_t{0}, static_cast<std::uint_least8_t>(control_operation::feed));
 	}
 
@@ -2217,7 +2218,7 @@ template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 [[nodiscard]] bool repetition_encode_optimized(encoder& d, [[maybe_unused]] E const& e, std::size_t nmin, std::size_t nmax)
 {
 	if constexpr (is_expression_always_repeat_optimizable_v<std::decay_t<E>>) {
-		if (d.inside_skip_context())
+		if (d.inside_skip_context() || !d.optimized())
 			return false;
 		if constexpr (std::is_same_v<std::decay_t<E>, match_any_expression>) {
 			d.encode_min_max(opcode::repeat_any, nmin, nmax);
@@ -2236,7 +2237,7 @@ template <class E, class = std::enable_if_t<is_expression_node_v<E>>>
 		d.nullable_join(false);
 		return true;
 	} else if constexpr (std::is_same_v<std::decay_t<E>, string_expression>) {
-		if (d.inside_skip_context())
+		if (d.inside_skip_context() || !d.optimized())
 			return false;
 		auto const [rest, rune] = utf8::decode_rune(e.text.begin(), e.text.end());
 		if (rest != e.text.end())
@@ -3043,11 +3044,13 @@ using lug::error_context; using lug::error_response; using lug::recover_with; us
 using lug::syntax; using lug::syntax_position; using lug::syntax_range; using lug::rune_set; using lug::rune_set_builder;
 inline constexpr directive_modifier<directive_traits::none, directive_traits::caseless> cased{};
 inline constexpr directive_modifier<directive_traits::caseless, directive_traits::none> caseless{};
-inline constexpr directive_modifier<directive_traits::lexeme, directive_traits::noskip> lexeme{};
-inline constexpr directive_modifier<directive_traits::lexeme | directive_traits::noskip, directive_traits::none> noskip{};
 inline constexpr directive_modifier<directive_traits::none, directive_traits::lexeme | directive_traits::noskip> skip{};
+inline constexpr directive_modifier<directive_traits::lexeme | directive_traits::noskip, directive_traits::none> noskip{};
+inline constexpr directive_modifier<directive_traits::lexeme, directive_traits::noskip> lexeme{};
+inline constexpr directive_modifier<directive_traits::none, directive_traits::unopt> optimize{};
+inline constexpr directive_modifier<directive_traits::unopt, directive_traits::none> unoptimize{};
 inline constexpr control_expression accept{control_operation::accept}; inline constexpr control_expression cut{control_operation::cut};
-inline constexpr control_expression feed{control_operation::feed}; inline constexpr control_expression nofeed{control_operation::nofeed};
+inline constexpr control_expression feed{control_operation::feed}; inline constexpr control_expression hold{control_operation::hold};
 inline constexpr eoi_expression eoi{}; inline constexpr eol_expression eol{}; inline constexpr eps_expression eps{};
 inline constexpr match_any_expression any{}; inline constexpr match_class_combinator all{opcode::match_all_of}; inline constexpr match_class_combinator none{opcode::match_none_of};
 inline constexpr condition_test_combinator when{true}; inline constexpr condition_test_combinator unless{false};
@@ -3180,8 +3183,6 @@ template <class T, class E, class = std::enable_if_t<is_attribute_frame_persista
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator^(E const& e, error_response r) { return e > recover_response_expression{r}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator+(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 1, forever>{make_expression(e)}; }
 template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator~(E const& e) { return repetition_expression<std::decay_t<decltype(make_expression(e))>, 0, 1>{make_expression(e)}; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e) { return cut > e; }
-template <class E, class = std::enable_if_t<is_expression_v<E>>> [[nodiscard]] constexpr auto operator--(E const& e, int) { return e > cut; }
 
 template <class E, class A, class = std::enable_if_t<is_expression_v<E>>>
 [[nodiscard]] constexpr auto operator<(E const& e, A&& a)
@@ -3805,7 +3806,7 @@ public:
 						case control_operation::feed: {
 							feed_ = true;
 						} break;
-						case control_operation::nofeed: {
+						case control_operation::hold: {
 							feed_ = false;
 						} break;
 					}
@@ -4213,11 +4214,10 @@ private:
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_eoi(std::size_t sr)
 	{
 		if constexpr (detail::input_source_has_options<InputSource>::value) {
-			if ((input_source_.options() & source_options::interactive) != source_options::none) {
-				return (sr >= input_source_.buffer().size()) ? 0 : 1;
-			}
+			if ((input_source_.options() & source_options::interactive) != source_options::none)
+				return (sr < input_source_.buffer().size()) ? 1 : 0;
 		}
-		return !available(sr) ? 0 : 1;
+		return available(sr) ? 1 : 0;
 	}
 
 	[[nodiscard]] LUG_ALWAYS_INLINE std::ptrdiff_t match_unit(std::size_t& sr_out, std::size_t sr, std::uint_least8_t value)

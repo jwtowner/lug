@@ -143,8 +143,6 @@ Quick Reference
 | Optional | `~e` | Matches expression *e* zero or one times. |
 | Positive Lookahead | `&e` | Matches without consuming input if expression *e* succeeds to match the input. |
 | Negative Lookahead | `!e` | Matches without consuming input if expression *e* fails to match the input. |
-| Cut Before | `--e` | Issues a cut instruction before the expression *e*. |
-| Cut After | `e--` | Issues a cut instruction after the expression *e*. |
 | Action Scheduling | `e < a` | Schedules a semantic action *a* to be evaluated if expression *e* successfully matches the input. |
 | Attribute Binding | `v % e` | Assigns the return value of the last evaluated semantic action within the expression *e* to the variable *v*. |
 | Error Handler | `e ^= [⁠]⁠(⁠error_context&⁠)⁠{⁠}` | Associates the error handler callable with expression *e*. |
@@ -161,6 +159,8 @@ Quick Reference
 | `skip⁠[e]` | Turns on all whitespace skipping for subexpression *e* (the default). |
 | `noskip⁠[e]` | Turns off all whitespace skipping for subexpression *e*, including preceeding whitespace. |
 | `lexeme⁠[e]` | Treats subexpression *e* as a lexical token with no internal whitespace skipping. |
+| `optimize[e]` | Optimizes code generation for subexpression *e* (the default). |
+| `unoptimize[e]` | Turns off optimization of code generation on subexpression *e*. |
 | `repeat<N,M>⁠[e]` | Matches at least *N* and at most *M* occurences of expression *e*. |
 | `at_least<N>⁠[e]` | Matches at least *N* occurences of expression *e*. |
 | `at_most<N>⁠[e]` | Matches at most *N* occurences of expression *e*. |
@@ -197,6 +197,8 @@ Quick Reference
 | `eps` | Matches the empty string. Equivalent to no-operation. |
 | `cut` | Emits a cut operation, accepting semantic actions up to current match prefix unless there were syntax errors, and draining the input source. |
 | `accept` | Accepts all semantic actions up to current match prefix, even after recovering from syntax errors. Does not drain the input source. |
+| `feed` | Turns on feeding of input buffer from underlying input source streams (the default). |
+| `hold` | Turns off feeding of input buffer from underlying input source streams, holding additional input until a `feed` instruction is issued. |
 | `raise⁠(f)` | Raises the labeled failure *f* to be handled by the top level error handler and recovery rule. |
 | `raise⁠(f,r)` | Raises the labeled failure *f* with recovery rule *r* to be handled by the top level error handler. |
 | `chr(c)` | Matches the UTF-8, UTF-16, or UTF-32 character *c*. |
