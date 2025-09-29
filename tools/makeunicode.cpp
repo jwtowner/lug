@@ -216,7 +216,9 @@ static std::vector<std::string> const script_names =
 	// Unicode 15.0.0
 	"Kawi", "Nag_Mundari",
 	// Unicode 16.0.0
-	"Garay", "Gurung_Khema", "Kirat_Rai", "Ol_Onal", "Sunuwar", "Todhri", "Tulu_Tigalari"
+	"Garay", "Gurung_Khema", "Kirat_Rai", "Ol_Onal", "Sunuwar", "Todhri", "Tulu_Tigalari",
+	// Unicode 17.0.0
+	"Beria_Erfe", "Sidetic", "Tai_Yo", "Tolong_Siki"
 };
 
 static auto const scripts = build_namemap<enum_type::index, std::uint_least8_t>(script_names);
@@ -289,9 +291,12 @@ static std::vector<std::string> const block_names =
 	"CJK Unified Ideographs Extension H",
 	// Unicode 15.1.0
 	"CJK Unified Ideographs Extension I",
-	// Unicode 16.0.0,
+	// Unicode 16.0.0
 	"Todhri", "Garay", "Tulu-Tigalari", "Myanmar Extended-C", "Sunuwar", "Egyptian Hieroglyphs Extended-A", "Gurung Khema",
-	"Kirat Rai", "Symbols for Legacy Computing Supplement", "Ol Onal"
+	"Kirat Rai", "Symbols for Legacy Computing Supplement", "Ol Onal",
+	// Unicode 17.0.0
+	"Beria Erfe", "CJK Unified Ideographs Extension J", "Miscellaneous Symbols Supplement", "Sharada Supplement", "Sidetic",
+	"Tai Yo", "Tangut Components Supplement", "Tolong Siki"
 };
 
 static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(block_names);
@@ -299,7 +304,7 @@ static auto const blocks = build_namemap<enum_type::index, std::uint_least16_t>(
 static std::vector<std::string> const age_names =
 {
 	"Unassigned", "1.1", "2.0", "2.1", "3.0", "3.1", "3.2", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0", "6.1", "6.2", "6.3",
-	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1", "16.0"
+	"7.0", "8.0", "9.0", "10.0", "11.0", "12.0", "12.1", "13.0", "14.0", "15.0", "15.1", "16.0", "17.0"
 };
 
 static auto const ages = build_namemap<enum_type::index, std::uint_least8_t>(age_names);
